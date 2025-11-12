@@ -1,0 +1,23 @@
+# Python-related
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+
+# Logs
+*.log
+
+# Virtual environments
+venv/
+env/
+
+# IDE-specific
+.vscode/
+.idea/
+
+# Test coverage
+.coverage
+htmlcov/

@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: solana-trading-bot
+Version: 0.1.0
+Summary: A Solana-based trading bot for meme coins and small-cap tokens
+Author: Your Name
+Classifier: Programming Language :: Python :: 3
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.10
+Requires-Dist: scikit-learn
+Requires-Dist: numpy
+Requires-Dist: aiohttp
+Requires-Dist: python-dotenv
+Requires-Dist: pydantic
+Requires-Dist: pydantic-settings
+Requires-Dist: websockets
+Requires-Dist: requests
+Requires-Dist: pandas
+Requires-Dist: python-telegram-bot
+Requires-Dist: tweepy
+Dynamic: author
+Dynamic: classifier
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

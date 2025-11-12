@@ -1,0 +1,11 @@
+scikit-learn
+numpy
+aiohttp
+python-dotenv
+pydantic
+pydantic-settings
+websockets
+requests
+pandas
+python-telegram-bot
+tweepy
