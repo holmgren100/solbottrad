@@ -1,0 +1,14 @@
+# Core dependencies
+python-dotenv==1.0.0
+aiohttp==3.9.1
+asyncio==3.4.3
+
+# Telegram
+python-telegram-bot==20.7
+
+# Data processing
+pandas==2.1.4
+numpy==1.26.2
+
+# Utilities
+python-dateutil==2.8.2
