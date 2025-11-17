@@ -202,13 +202,21 @@ class SolanaTradingBot:
         price_prediction = analysis['price_prediction']
         profile = analysis['profile']
 
+        # Debug output
+        print(f"    📊 Market Signal: {market_signal.signal_type} (confidence: {market_signal.confidence:.2f})")
+        print(f"    😊 Sentiment: {sentiment_score.recommendation} (score: {sentiment_score.overall_score:.2f})")
+        print(f"    ⚠️  Risk: {risk_assessment.overall_risk} (score: {risk_assessment.risk_score:.2f})")
+        print(f"    ✅ Should Trade: {risk_assessment.should_trade}")
+
         # Check if we should trade
         if not risk_assessment.should_trade:
+            print(f"    ❌ Risk assessment says NO: {', '.join(risk_assessment.warnings)}")
             logger.info("Risk assessment advises against trading")
             return None
 
         # Check confidence thresholds
         if sentiment_score.confidence < self.settings.trading.min_confidence_score:
+            print(f"    ❌ Confidence too low: {sentiment_score.confidence:.2f} < {self.settings.trading.min_confidence_score}")
             logger.info(f"Sentiment confidence too low: {sentiment_score.confidence:.2f}")
             return None
 
@@ -220,6 +228,7 @@ class SolanaTradingBot:
             action = 'sell'
 
         if not action:
+            print(f"    ❌ No action: market={market_signal.signal_type}, sentiment={sentiment_score.recommendation}")
             logger.info("No clear trading signal")
             return None
 
