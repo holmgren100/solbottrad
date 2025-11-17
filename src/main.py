@@ -311,32 +311,51 @@ class SolanaTradingBot:
     async def scan_tokens(self):
         """Scan for new tokens and trading opportunities."""
         logger.info("Scanning for tokens...")
+        print("🔍 Starting token scan...")
 
         try:
-            # Get new tokens from SolSniffer
-            new_tokens = await self.solsniffer.get_new_tokens(limit=20)
+            # Since SolSniffer is down, use popular Solana tokens
+            test_tokens = [
+                {'address': 'So11111111111111111111111111111111111111112'},  # SOL
+                {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},  # USDC
+                {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
+                {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
+            ]
 
-            for token_data in new_tokens[:5]:  # Analyze top 5
+            print(f"Analyzing {len(test_tokens)} tokens...")
+
+            for token_data in test_tokens:
                 token_address = token_data.get('address')
                 if not token_address:
                     continue
 
+                print(f"  → Analyzing {token_address[:8]}...")
+
                 # Analyze token
                 analysis = await self.analyze_token(token_address)
                 if not analysis:
+                    print(f"  ❌ No analysis data")
                     continue
+
+                print(f"  ✅ Analysis complete")
 
                 # Make trading decision
                 decision = await self.make_trading_decision(analysis)
                 if decision:
+                    print(f"  🎯 TRADING OPPORTUNITY: {decision['symbol']}")
                     logger.info(f"Trading opportunity found: {decision['symbol']}")
                     await self.execute_trade(decision)
+                else:
+                    print(f"  ⏸️  No trade signal")
 
                 # Delay between analyses
                 await asyncio.sleep(2)
 
+            print("✅ Scan cycle complete\n")
+
         except Exception as e:
             logger.error(f"Error scanning tokens: {e}")
+            print(f"❌ Error: {e}")
 
     async def monitor_positions(self):
         """Monitor open positions for stop loss/take profit."""
