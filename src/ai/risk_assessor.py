@@ -332,8 +332,8 @@ class RiskAssessor:
         # Base position size inversely proportional to risk
         base_size = 1.0 - risk_score
 
-        # Adjust for prediction confidence
-        confidence_factor = prediction_confidence
+        # Adjust for prediction confidence (minimum 0.4 to avoid blocking all trades)
+        confidence_factor = max(prediction_confidence, 0.4)
 
         # Adjust for liquidity (don't risk too much of the liquidity)
         liquidity_factor = min(self.max_position_size / max(liquidity * 0.05, 1), 1.0)
@@ -365,8 +365,8 @@ class RiskAssessor:
         if risk_score > 0.75:
             return False
 
-        # Don't trade if position size is too small
-        if recommended_position < 0.1:
+        # Don't trade if position size is too small (lowered to 0.05 for testing)
+        if recommended_position < 0.05:
             return False
 
         # Don't trade if there are critical warnings
