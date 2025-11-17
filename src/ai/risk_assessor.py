@@ -146,6 +146,9 @@ class RiskAssessor:
             prediction_confidence
         )
 
+        # Debug: print position size calculation
+        print(f"      💰 Position size: {recommended_position:.3f} (pred_conf: {prediction_confidence:.2f})")
+
         # Determine if Should Trade
         should_trade = self._should_trade_decision(
             overall_risk_score,
@@ -336,7 +339,11 @@ class RiskAssessor:
         confidence_factor = max(prediction_confidence, 0.4)
 
         # Adjust for liquidity (don't risk too much of the liquidity)
-        liquidity_factor = min(self.max_position_size / max(liquidity * 0.05, 1), 1.0)
+        # For testing with small positions, if liquidity > $10k just use full position
+        if liquidity > 10000:
+            liquidity_factor = 1.0
+        else:
+            liquidity_factor = min(self.max_position_size / max(liquidity * 0.05, 1), 1.0)
 
         # Combine factors
         position_size = base_size * confidence_factor * liquidity_factor
