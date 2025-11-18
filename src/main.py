@@ -348,11 +348,22 @@ class SolanaTradingBot:
                 {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
             ]
 
-            print(f"Analyzing {len(test_tokens)} tokens...")
+            # Get currently open positions
+            if settings.is_paper_trading():
+                open_positions = self.trading_engine.position_manager.open_positions
+            else:
+                open_positions = self.position_manager.open_positions
+
+            print(f"Analyzing {len(test_tokens)} tokens ({len(open_positions)} positions already open)...")
 
             for token_data in test_tokens:
                 token_address = token_data.get('address')
                 if not token_address:
+                    continue
+
+                # Skip tokens we already have positions in
+                if token_address in open_positions:
+                    print(f"  ⏭️  Skipping {token_address[:8]}... (position already open)")
                     continue
 
                 print(f"  → Analyzing {token_address[:8]}...")
