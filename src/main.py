@@ -284,8 +284,12 @@ class SolanaTradingBot:
         Returns:
             True if executed successfully
         """
+        print(f"      🔧 EXECUTING TRADE: {decision['action'].upper()} {decision['symbol']}")
+        print(f"      💵 Amount: ${decision['position_size']:.2f} @ ${decision['entry_price']:.8f}")
+
         try:
             # Send trade signal notification
+            print(f"      📱 Sending Telegram notification...")
             await self.notifier.send_trade_signal(
                 token_address=decision['token_address'],
                 action=decision['action'].upper(),
@@ -294,6 +298,7 @@ class SolanaTradingBot:
                 reasons=decision['reasons']
             )
 
+            print(f"      💰 Calling trading engine...")
             if decision['action'] == 'buy':
                 result = await self.trading_engine.execute_buy(
                     token_address=decision['token_address'],
@@ -302,6 +307,7 @@ class SolanaTradingBot:
                     stop_loss=decision['stop_loss'],
                     take_profit=decision['take_profit']
                 )
+                print(f"      ✅ Trade result: {result}")
             else:
                 result = await self.trading_engine.execute_sell(
                     token_address=decision['token_address'],
