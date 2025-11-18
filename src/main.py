@@ -221,11 +221,22 @@ class SolanaTradingBot:
             return None
 
         # Determine action
+        # If sentiment is 'avoid' due to no data (confidence=0), rely on market signal alone
         action = None
-        if market_signal.signal_type == 'buy' and sentiment_score.recommendation in ['buy', 'strong_buy']:
-            action = 'buy'
-        elif market_signal.signal_type == 'sell':
-            action = 'sell'
+        if sentiment_score.confidence == 0.0:
+            # No sentiment data available, use market signal only
+            if market_signal.signal_type == 'buy':
+                action = 'buy'
+                print(f"    ℹ️  Using market signal only (no sentiment data)")
+            elif market_signal.signal_type == 'sell':
+                action = 'sell'
+                print(f"    ℹ️  Using market signal only (no sentiment data)")
+        else:
+            # Normal logic with sentiment
+            if market_signal.signal_type == 'buy' and sentiment_score.recommendation in ['buy', 'strong_buy']:
+                action = 'buy'
+            elif market_signal.signal_type == 'sell':
+                action = 'sell'
 
         if not action:
             print(f"    ❌ No action: market={market_signal.signal_type}, sentiment={sentiment_score.recommendation}")
