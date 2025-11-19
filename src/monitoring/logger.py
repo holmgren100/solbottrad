@@ -9,6 +9,13 @@ from pathlib import Path
 from typing import Optional
 
 
+class FlushFileHandler(logging.FileHandler):
+    """File handler that flushes after every log write."""
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+
 def setup_logger(
     name: str = 'trading_bot',
     log_file: Optional[str] = None,
@@ -48,11 +55,11 @@ def setup_logger(
     console_handler.setFormatter(simple_formatter)
     logger.addHandler(console_handler)
 
-    # File handler
+    # File handler with auto-flush for real-time logging
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file)
+        file_handler = FlushFileHandler(log_file, mode='a', encoding='utf-8')
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(detailed_formatter)
         logger.addHandler(file_handler)

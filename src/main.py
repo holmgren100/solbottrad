@@ -400,17 +400,43 @@ class SolanaTradingBot:
             # Get current prices for all open positions
             positions = self.trading_engine.position_manager.get_all_positions()
 
+            if not positions:
+                return  # No positions to monitor
+
+            print(f"📊 Monitoring {len(positions)} open position(s)...")
+            logger.info(f"Monitoring {len(positions)} positions")
+
             price_updates = {}
             for position in positions:
                 try:
                     profile = await self.dexscreener.get_token_profile(position.token_address)
                     if profile:
-                        price_updates[position.token_address] = profile['price_usd']
+                        current_price = profile['price_usd']
+                        price_updates[position.token_address] = current_price
+
+                        # Calculate current P&L
+                        pnl_percent = ((current_price - position.entry_price) / position.entry_price) * 100
+
+                        # Show price update
+                        symbol = profile.get('symbol', position.token_address[:8])
+                        print(f"  💹 {symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%)")
+
+                        # Check if close to stop loss or take profit
+                        sl_distance = ((current_price - position.stop_loss) / position.stop_loss) * 100
+                        tp_distance = ((position.take_profit - current_price) / current_price) * 100
+
+                        if sl_distance < 5:  # Within 5% of stop loss
+                            print(f"  ⚠️  Warning: Close to stop loss (${position.stop_loss:.8f})")
+                        elif tp_distance < 10:  # Within 10% of take profit
+                            print(f"  🎯 Near take profit target (${position.take_profit:.8f})")
+
                 except Exception as e:
                     logger.error(f"Error getting price for {position.token_address}: {e}")
+                    print(f"  ❌ Error updating price for {position.token_address[:8]}...")
 
-            # Update positions
+            # Update positions (this triggers stop loss/take profit checks)
             await self.trading_engine.update_prices(price_updates)
+            print()
 
     async def main_loop(self):
         """Main trading loop."""
