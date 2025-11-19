@@ -11,6 +11,7 @@ from typing import Optional
 
 from .config import settings
 from .monitoring import setup_logger, get_logger, TelegramNotifier, HealthChecker
+from .monitoring.telegram_commands import TelegramCommandHandler
 from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker
 from .market import DexScreenerClient, MarketAnalyzer
 from .social import TwitterClient, SentimentAnalyzer
@@ -36,6 +37,7 @@ class SolanaTradingBot:
         # Configuration
         self.settings = settings
         self.running = False
+        self.trading_paused = False  # Can pause trading via Telegram
 
         # Monitoring
         self.notifier = TelegramNotifier(
@@ -43,6 +45,11 @@ class SolanaTradingBot:
             chat_id=settings.api.telegram_chat_id
         )
         self.health_checker = HealthChecker()
+        self.command_handler = TelegramCommandHandler(
+            bot_token=settings.api.telegram_bot_token,
+            chat_id=settings.api.telegram_chat_id,
+            bot_instance=self
+        )
 
         # Blockchain
         self.alchemy = AlchemyClient(settings.api.alchemy_api_key)
@@ -336,6 +343,12 @@ class SolanaTradingBot:
 
     async def scan_tokens(self):
         """Scan for new tokens and trading opportunities."""
+        # Check if trading is paused
+        if self.trading_paused:
+            print("⏸️  Trading paused - skipping token scan")
+            logger.info("Token scan skipped - trading paused")
+            return
+
         logger.info("Scanning for tokens...")
         print("🔍 Starting token scan...")
 
@@ -477,6 +490,9 @@ class SolanaTradingBot:
         # Send startup notification
         await self.notifier.send_startup_message()
 
+        # Start Telegram command handler
+        asyncio.create_task(self.command_handler.start())
+
         # Start health monitoring in background
         asyncio.create_task(self.health_checker.monitor())
 
@@ -487,6 +503,9 @@ class SolanaTradingBot:
         """Stop the trading bot."""
         logger.info("Stopping Solana Trading Bot...")
         self.running = False
+
+        # Stop Telegram command handler
+        await self.command_handler.stop()
 
         # Stop health monitoring
         self.health_checker.stop()
