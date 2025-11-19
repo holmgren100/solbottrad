@@ -6,7 +6,10 @@ asyncio==3.4.3
 # Telegram
 python-telegram-bot==20.7
 
-# Dashboard
+# Web Dashboard
+flask==3.0.0
+
+# Dashboard (optional - for future use)
 streamlit==1.29.0
 plotly==5.18.0
 
