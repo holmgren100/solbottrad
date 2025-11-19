@@ -24,20 +24,23 @@ def setup_logger(
     """
     Set up a logger with file and console handlers.
 
+    This configures the ROOT logger so all child loggers inherit the handlers.
+
     Args:
-        name: Logger name
+        name: Logger name (ignored, kept for compatibility)
         log_file: Path to log file (optional)
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 
     Returns:
         Configured logger instance
     """
-    logger = logging.getLogger(name)
-    logger.setLevel(getattr(logging, log_level.upper()))
+    # Get the root logger so ALL loggers inherit these handlers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level.upper()))
 
     # Prevent duplicate handlers
-    if logger.handlers:
-        return logger
+    if root_logger.handlers:
+        return root_logger
 
     # Create formatters
     detailed_formatter = logging.Formatter(
@@ -53,7 +56,7 @@ def setup_logger(
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(simple_formatter)
-    logger.addHandler(console_handler)
+    root_logger.addHandler(console_handler)
 
     # File handler with auto-flush for real-time logging
     if log_file:
@@ -62,9 +65,14 @@ def setup_logger(
         file_handler = FlushFileHandler(log_file, mode='a', encoding='utf-8')
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(detailed_formatter)
-        logger.addHandler(file_handler)
+        root_logger.addHandler(file_handler)
 
-    return logger
+        # Write initial log entry to verify file is working
+        root_logger.info("=" * 60)
+        root_logger.info("Trading Bot Log File Initialized")
+        root_logger.info("=" * 60)
+
+    return root_logger
 
 
 def get_logger(name: str) -> logging.Logger:
