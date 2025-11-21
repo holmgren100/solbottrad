@@ -55,13 +55,21 @@ class SolSnifferClient:
             params = {'limit': limit}
 
             async with self.session.get(url, params=params) as response:
+                response_text = await response.text()
+                logger.info(f"SolSniffer /tokens/new response: status={response.status}, body={response_text[:200]}")
+
                 if response.status == 200:
-                    data = await response.json()
-                    tokens = data.get('tokens', [])
-                    logger.debug(f"Retrieved {len(tokens)} new tokens")
-                    return tokens
+                    try:
+                        import json
+                        data = json.loads(response_text)
+                        tokens = data.get('tokens', [])
+                        logger.info(f"Retrieved {len(tokens)} new tokens from SolSniffer")
+                        return tokens
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse JSON response: {e}")
+                        return []
                 else:
-                    logger.error(f"SolSniffer API error: {response.status}")
+                    logger.error(f"SolSniffer API error: {response.status} - {response_text[:500]}")
                     return []
 
         except Exception as e:
@@ -84,12 +92,22 @@ class SolSnifferClient:
             url = f"{self.base_url}/token/{token_address}/security"
 
             async with self.session.get(url) as response:
+                response_text = await response.text()
+
                 if response.status == 200:
-                    data = await response.json()
-                    logger.debug(f"Retrieved security info for {token_address}")
-                    return data
+                    try:
+                        import json
+                        data = json.loads(response_text)
+                        logger.debug(f"Retrieved security info for {token_address}")
+                        return data
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse security JSON: {e}")
+                        return None
                 else:
-                    logger.warning(f"Security info not available for {token_address}")
+                    logger.warning(
+                        f"Security info not available for {token_address[:8]}... "
+                        f"(status={response.status}, response={response_text[:200]})"
+                    )
                     return None
 
         except Exception as e:
