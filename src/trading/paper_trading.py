@@ -88,7 +88,8 @@ class PaperTradingEngine:
 
         logger.info(
             f"[PAPER] BUY {token_address[:8]}... "
-            f"@ ${price:.8f}, size: ${amount_usd:.2f}"
+            f"@ ${price:.8f}, size: ${amount_usd:.2f}, "
+            f"capital: ${self.current_capital:.2f}"
         )
 
         return {
@@ -145,12 +146,14 @@ class PaperTradingEngine:
 
         # Add proceeds to capital
         proceeds = trade.amount_usd
+        capital_before = self.current_capital
         self.current_capital += proceeds
         self.total_invested -= position.amount_usd
 
         logger.info(
             f"[PAPER] SELL {token_address[:8]}... "
-            f"@ ${price:.8f}, "
+            f"@ ${price:.8f}, proceeds: ${proceeds:.2f}, "
+            f"capital: ${capital_before:.2f} → ${self.current_capital:.2f}, "
             f"PnL: ${trade.pnl:.2f} ({trade.pnl_percent:+.1f}%)"
         )
 
