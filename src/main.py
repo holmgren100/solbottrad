@@ -386,6 +386,7 @@ class SolanaTradingBot:
             for token_data in new_tokens:
                 token_address = token_data.get('address')
                 if not token_address:
+                    logger.warning(f"Skipping token with no address: {token_data}")
                     continue
 
                 # Skip tokens we already have positions in

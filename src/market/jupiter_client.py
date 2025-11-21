@@ -50,12 +50,21 @@ class JupiterClient:
                 if response.status == 200:
                     data = await response.json()
 
+                    # DEBUG: Log first token to see structure
+                    if data and len(data) > 0:
+                        logger.info(f"Sample Jupiter token data: {data[0]}")
+
                     # Jupiter returns array of token objects
                     # Convert to our standard format
                     tokens = []
                     for token in data:
+                        token_address = token.get('address')
+                        if not token_address:
+                            logger.warning(f"Token missing address: {token}")
+                            continue
+
                         tokens.append({
-                            'address': token.get('address'),
+                            'address': token_address,
                             'symbol': token.get('symbol'),
                             'name': token.get('name'),
                             'decimals': token.get('decimals'),
