@@ -21,7 +21,7 @@ class SolSnifferClient:
             api_key: SolSniffer API key (optional)
         """
         self.api_key = api_key
-        self.base_url = "https://api.solsniffer.com/v1"
+        self.base_url = "https://solsniffer.com/api/v2"
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def _ensure_session(self):
@@ -29,7 +29,8 @@ class SolSnifferClient:
         if self.session is None or self.session.closed:
             headers = {}
             if self.api_key:
-                headers['Authorization'] = f'Bearer {self.api_key}'
+                # Use X-API-KEY header (common pattern for API authentication)
+                headers['X-API-KEY'] = self.api_key
             self.session = aiohttp.ClientSession(headers=headers)
 
     async def close(self):
