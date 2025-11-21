@@ -425,6 +425,24 @@ class SolanaTradingBot:
                     profile = await self.dexscreener.get_token_profile(position.token_address)
                     if profile:
                         current_price = profile['price_usd']
+
+                        # 🛡️ PRICE VALIDATION - Reject bad data that would cause 100% loss
+                        if current_price <= 0:
+                            print(f"  ⚠️  Bad price data: ${current_price} - SKIPPING UPDATE")
+                            logger.warning(f"Invalid price ${current_price} for {position.token_address[:8]}")
+                            continue
+
+                        # Check for suspicious price drops (>80% loss in one update)
+                        price_change_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+                        if price_change_pct < -80:
+                            print(f"  🚨 SUSPICIOUS: Price dropped {price_change_pct:.1f}% - SKIPPING (likely bad data)")
+                            logger.error(
+                                f"Rejected suspicious price for {position.token_address[:8]}: "
+                                f"${position.entry_price:.8f} → ${current_price:.8f} ({price_change_pct:.1f}%)"
+                            )
+                            continue
+
+                        # Price validated - safe to use
                         price_updates[position.token_address] = current_price
 
                         # Calculate current P&L
