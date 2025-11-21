@@ -55,12 +55,14 @@ class JupiterClient:
                         logger.info(f"Sample Jupiter token data: {data[0]}")
 
                     # Jupiter returns array of token objects
+                    # NOTE: Jupiter uses 'id' for the mint address, not 'address'!
                     # Convert to our standard format
                     tokens = []
                     for token in data:
-                        token_address = token.get('address')
+                        # Jupiter uses 'id' for the token mint address
+                        token_address = token.get('id') or token.get('address')
                         if not token_address:
-                            logger.warning(f"Token missing address: {token}")
+                            logger.warning(f"Token missing id/address: {token}")
                             continue
 
                         tokens.append({
@@ -68,14 +70,16 @@ class JupiterClient:
                             'symbol': token.get('symbol'),
                             'name': token.get('name'),
                             'decimals': token.get('decimals'),
-                            'logoURI': token.get('logoURI'),
+                            'logoURI': token.get('icon') or token.get('logoURI'),  # Jupiter uses 'icon'
                             'tags': token.get('tags', []),
-                            'daily_volume': token.get('daily_volume'),
-                            'freeze_authority': token.get('freeze_authority'),
-                            'mint_authority': token.get('mint_authority'),
-                            'permanent_delegate': token.get('permanent_delegate'),
-                            'minted_at': token.get('minted_at'),
-                            'extensions': token.get('extensions', {})
+                            'liquidity': token.get('liquidity'),
+                            'fdv': token.get('fdv'),
+                            'mcap': token.get('mcap'),
+                            'usdPrice': token.get('usdPrice'),
+                            'holderCount': token.get('holderCount'),
+                            'audit': token.get('audit', {}),
+                            'launchpad': token.get('launchpad'),
+                            'createdAt': token.get('createdAt')
                         })
 
                     logger.info(f"Retrieved {len(tokens)} recent tokens from Jupiter")
