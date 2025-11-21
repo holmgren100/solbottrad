@@ -353,13 +353,23 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Since SolSniffer is down, use popular Solana tokens
-            test_tokens = [
-                {'address': 'So11111111111111111111111111111111111111112'},  # SOL
-                {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},  # USDC
-                {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
-                {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
-            ]
+            # Get new tokens from SolSniffer
+            print("  📡 Fetching new tokens from SolSniffer...")
+            new_tokens = await self.solsniffer.get_new_tokens(limit=20)
+
+            if not new_tokens:
+                print("  ⚠️  No tokens returned from SolSniffer, using fallback tokens")
+                logger.warning("SolSniffer returned no tokens, using fallback")
+                # Fallback to popular tokens if SolSniffer fails
+                new_tokens = [
+                    {'address': 'So11111111111111111111111111111111111111112'},  # SOL
+                    {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},  # USDC
+                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
+                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
+                ]
+            else:
+                print(f"  ✅ Found {len(new_tokens)} new tokens from SolSniffer")
+                logger.info(f"Retrieved {len(new_tokens)} tokens from SolSniffer")
 
             # Get currently open positions
             if settings.is_paper_trading():
@@ -367,9 +377,9 @@ class SolanaTradingBot:
             else:
                 open_positions = self.position_manager.open_positions
 
-            print(f"Analyzing {len(test_tokens)} tokens ({len(open_positions)} positions already open)...")
+            print(f"Analyzing {len(new_tokens)} tokens ({len(open_positions)} positions already open)...")
 
-            for token_data in test_tokens:
+            for token_data in new_tokens:
                 token_address = token_data.get('address')
                 if not token_address:
                     continue
