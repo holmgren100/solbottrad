@@ -13,7 +13,7 @@ from .config import settings
 from .monitoring import setup_logger, get_logger, TelegramNotifier, HealthChecker
 from .monitoring.telegram_commands import TelegramCommandHandler
 from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker
-from .market import DexScreenerClient, MarketAnalyzer
+from .market import DexScreenerClient, MarketAnalyzer, JupiterClient
 from .social import TwitterClient, SentimentAnalyzer
 from .ai import SentimentModel, PricePredictor, RiskAssessor
 from .trading import TelegramExecutor, PositionManager, PaperTradingEngine
@@ -62,6 +62,9 @@ class SolanaTradingBot:
             min_liquidity_usd=settings.trading.min_liquidity_usd
         )
 
+        # Token Discovery
+        self.jupiter = JupiterClient()
+
         # Social
         self.twitter = TwitterClient(settings.api.twitter_bearer_token)
         self.sentiment_analyzer = SentimentAnalyzer()
@@ -93,6 +96,7 @@ class SolanaTradingBot:
     def _register_health_checks(self):
         """Register component health checks."""
         self.health_checker.register_component('alchemy', self.alchemy.health_check)
+        self.health_checker.register_component('jupiter', self.jupiter.health_check)
         self.health_checker.register_component('solsniffer', self.solsniffer.health_check)
         self.health_checker.register_component('dexscreener', self.dexscreener.health_check)
         self.health_checker.register_component('twitter', self.twitter.health_check)
@@ -353,14 +357,14 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Get new tokens from SolSniffer
-            print("  📡 Fetching new tokens from SolSniffer...")
-            new_tokens = await self.solsniffer.get_new_tokens(limit=20)
+            # Get new tokens from Jupiter
+            print("  📡 Fetching new tokens from Jupiter...")
+            new_tokens = await self.jupiter.get_recent_tokens(limit=20)
 
             if not new_tokens:
-                print("  ⚠️  No tokens returned from SolSniffer, using fallback tokens")
-                logger.warning("SolSniffer returned no tokens, using fallback")
-                # Fallback to popular tokens if SolSniffer fails
+                print("  ⚠️  No tokens returned from Jupiter, using fallback tokens")
+                logger.warning("Jupiter returned no tokens, using fallback")
+                # Fallback to popular tokens if Jupiter fails
                 new_tokens = [
                     {'address': 'So11111111111111111111111111111111111111112'},  # SOL
                     {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},  # USDC
@@ -368,8 +372,8 @@ class SolanaTradingBot:
                     {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
                 ]
             else:
-                print(f"  ✅ Found {len(new_tokens)} new tokens from SolSniffer")
-                logger.info(f"Retrieved {len(new_tokens)} tokens from SolSniffer")
+                print(f"  ✅ Found {len(new_tokens)} new tokens from Jupiter!")
+                logger.info(f"Retrieved {len(new_tokens)} tokens from Jupiter")
 
             # Get currently open positions
             if settings.is_paper_trading():
@@ -543,6 +547,7 @@ class SolanaTradingBot:
 
         # Close connections
         await self.alchemy.close()
+        await self.jupiter.close()
         await self.solsniffer.close()
         await self.dexscreener.close()
         await self.twitter.close()
