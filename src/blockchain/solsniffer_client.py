@@ -42,39 +42,18 @@ class SolSnifferClient:
         """
         Get recently created tokens.
 
+        NOTE: SolSniffer API v2 does not have a "new tokens" endpoint.
+        SolSniffer is for security analysis of known tokens, not token discovery.
+        This method returns an empty list - use other sources for token discovery.
+
         Args:
-            limit: Maximum number of tokens to retrieve
+            limit: Maximum number of tokens to retrieve (unused)
 
         Returns:
-            List of token dictionaries
+            Empty list (SolSniffer doesn't support token discovery)
         """
-        await self._ensure_session()
-
-        try:
-            url = f"{self.base_url}/tokens/new"
-            params = {'limit': limit}
-
-            async with self.session.get(url, params=params) as response:
-                response_text = await response.text()
-                logger.info(f"SolSniffer /tokens/new response: status={response.status}, body={response_text[:200]}")
-
-                if response.status == 200:
-                    try:
-                        import json
-                        data = json.loads(response_text)
-                        tokens = data.get('tokens', [])
-                        logger.info(f"Retrieved {len(tokens)} new tokens from SolSniffer")
-                        return tokens
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Failed to parse JSON response: {e}")
-                        return []
-                else:
-                    logger.error(f"SolSniffer API error: {response.status} - {response_text[:500]}")
-                    return []
-
-        except Exception as e:
-            logger.error(f"Error fetching new tokens: {e}")
-            return []
+        logger.info("SolSniffer does not support token discovery - use DexScreener or other sources")
+        return []
 
     async def get_token_security(self, token_address: str) -> Optional[Dict]:
         """
@@ -89,7 +68,8 @@ class SolSnifferClient:
         await self._ensure_session()
 
         try:
-            url = f"{self.base_url}/token/{token_address}/security"
+            # SolSniffer API v2 endpoint: /token/{address}
+            url = f"{self.base_url}/token/{token_address}"
 
             async with self.session.get(url) as response:
                 response_text = await response.text()
@@ -98,25 +78,28 @@ class SolSnifferClient:
                     try:
                         import json
                         data = json.loads(response_text)
-                        logger.debug(f"Retrieved security info for {token_address}")
+                        logger.debug(f"Retrieved token data for {token_address[:8]}...")
                         return data
                     except json.JSONDecodeError as e:
-                        logger.error(f"Failed to parse security JSON: {e}")
+                        logger.error(f"Failed to parse token JSON: {e}")
                         return None
                 else:
                     logger.warning(
-                        f"Security info not available for {token_address[:8]}... "
-                        f"(status={response.status}, response={response_text[:200]})"
+                        f"Token data not available for {token_address[:8]}... "
+                        f"(status={response.status})"
                     )
                     return None
 
         except Exception as e:
-            logger.error(f"Error fetching token security: {e}")
+            logger.error(f"Error fetching token data: {e}")
             return None
 
     async def get_token_metrics(self, token_address: str) -> Optional[Dict]:
         """
         Get metrics for a token.
+
+        NOTE: In API v2, metrics are included in the main /token/{address} endpoint.
+        This method calls get_token_security() which gets all token data.
 
         Args:
             token_address: Token contract address
@@ -124,23 +107,9 @@ class SolSnifferClient:
         Returns:
             Metrics dictionary or None
         """
-        await self._ensure_session()
-
-        try:
-            url = f"{self.base_url}/token/{token_address}/metrics"
-
-            async with self.session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    logger.debug(f"Retrieved metrics for {token_address}")
-                    return data
-                else:
-                    logger.warning(f"Metrics not available for {token_address}")
-                    return None
-
-        except Exception as e:
-            logger.error(f"Error fetching token metrics: {e}")
-            return None
+        # In v2, all token data (security + metrics) comes from /token/{address}
+        # Just call get_token_security which now uses the correct endpoint
+        return await self.get_token_security(token_address)
 
     async def analyze_token(self, token_address: str) -> Dict:
         """
