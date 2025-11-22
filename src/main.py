@@ -424,6 +424,19 @@ class SolanaTradingBot:
 
     async def monitor_positions(self):
         """Monitor open positions for stop loss/take profit."""
+        try:
+            # Wrap entire method with timeout to prevent hangs
+            async with asyncio.timeout(60):  # 60 second timeout for entire monitoring cycle
+                await self._monitor_positions_impl()
+        except asyncio.TimeoutError:
+            logger.error("Position monitoring timed out after 60 seconds")
+            print("  ⚠️  Position monitoring timed out - will retry next cycle")
+        except Exception as e:
+            logger.error(f"Error in position monitoring: {e}")
+            print(f"  ❌ Position monitoring error: {e}")
+
+    async def _monitor_positions_impl(self):
+        """Internal implementation of position monitoring."""
         if settings.is_paper_trading():
             # Get current prices for all open positions
             positions = self.trading_engine.position_manager.get_all_positions()
@@ -441,14 +454,54 @@ class SolanaTradingBot:
                     if profile:
                         current_price = profile['price_usd']
 
-                        # 🛡️ PRICE VALIDATION - Reject bad data that would cause 100% loss
+                        # 🛡️ ENHANCED PRICE VALIDATION - Reject bad data that would cause 100% loss
+                        # Check 1: None or not a number
+                        if current_price is None:
+                            print(f"  ⚠️  Price is None - SKIPPING UPDATE")
+                            logger.warning(f"Price is None for {position.token_address[:8]}")
+                            continue
+
+                        # Check 2: NaN (not a number)
+                        try:
+                            if not isinstance(current_price, (int, float)) or (isinstance(current_price, float) and (current_price != current_price)):  # NaN check
+                                print(f"  ⚠️  Price is NaN - SKIPPING UPDATE")
+                                logger.warning(f"Price is NaN for {position.token_address[:8]}")
+                                continue
+                        except (TypeError, ValueError):
+                            print(f"  ⚠️  Invalid price type - SKIPPING UPDATE")
+                            logger.warning(f"Invalid price type for {position.token_address[:8]}: {type(current_price)}")
+                            continue
+
+                        # Check 3: Infinity
+                        try:
+                            import math
+                            if math.isinf(current_price):
+                                print(f"  ⚠️  Price is Infinity - SKIPPING UPDATE")
+                                logger.warning(f"Price is Infinity for {position.token_address[:8]}")
+                                continue
+                        except:
+                            pass
+
+                        # Check 4: Zero or negative
                         if current_price <= 0:
                             print(f"  ⚠️  Bad price data: ${current_price} - SKIPPING UPDATE")
                             logger.warning(f"Invalid price ${current_price} for {position.token_address[:8]}")
                             continue
 
-                        # Check for suspicious price drops (>80% loss in one update)
-                        price_change_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+                        # Check 5: Extremely small (effectively zero, < $0.000000001)
+                        if current_price < 1e-9:
+                            print(f"  ⚠️  Price too small: ${current_price} - SKIPPING UPDATE")
+                            logger.warning(f"Price too small ${current_price} for {position.token_address[:8]}")
+                            continue
+
+                        # Check 6: Suspicious price drops (>80% loss in one update)
+                        try:
+                            price_change_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+                        except (ZeroDivisionError, TypeError):
+                            print(f"  ⚠️  Error calculating price change - SKIPPING UPDATE")
+                            logger.error(f"Error calculating price change for {position.token_address[:8]}")
+                            continue
+
                         if price_change_pct < -80:
                             print(f"  🚨 SUSPICIOUS: Price dropped {price_change_pct:.1f}% - SKIPPING (likely bad data)")
                             logger.error(

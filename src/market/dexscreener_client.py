@@ -52,7 +52,7 @@ class DexScreenerClient:
         try:
             url = f"{self.base_url}/dex/tokens/{token_address}"
 
-            async with self.session.get(url) as response:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     data = await response.json()
                     pairs = data.get('pairs', [])
@@ -82,7 +82,7 @@ class DexScreenerClient:
         try:
             url = f"{self.base_url}/dex/pairs/{chain}/{pair_address}"
 
-            async with self.session.get(url) as response:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     data = await response.json()
                     pair = data.get('pair')
