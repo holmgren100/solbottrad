@@ -295,6 +295,21 @@ class SolanaTradingBot:
         Returns:
             True if executed successfully
         """
+        try:
+            # Wrap trade execution with timeout
+            async with asyncio.timeout(30):  # 30 second timeout for single trade
+                return await self._execute_trade_impl(decision)
+        except asyncio.TimeoutError:
+            logger.error(f"Trade execution timed out for {decision['symbol']}")
+            print(f"      ⚠️  Trade execution timed out - skipping")
+            return False
+        except Exception as e:
+            logger.error(f"Error executing trade for {decision['symbol']}: {e}")
+            print(f"      ❌ Trade execution error: {e}")
+            return False
+
+    async def _execute_trade_impl(self, decision: dict) -> bool:
+        """Internal implementation of trade execution."""
         print(f"      🔧 EXECUTING TRADE: {decision['action'].upper()} {decision['symbol']}")
         print(f"      💵 Amount: ${decision['position_size']:.2f} @ ${decision['entry_price']:.8f}")
 
@@ -353,6 +368,19 @@ class SolanaTradingBot:
             logger.info("Token scan skipped - trading paused")
             return
 
+        try:
+            # Wrap entire scan with timeout to prevent hangs
+            async with asyncio.timeout(300):  # 5 minute timeout for entire scan cycle
+                await self._scan_tokens_impl()
+        except asyncio.TimeoutError:
+            logger.error("Token scan timed out after 5 minutes")
+            print("  ⚠️  Token scan timed out - will retry next cycle")
+        except Exception as e:
+            logger.error(f"Error in token scan: {e}")
+            print(f"  ❌ Token scan error: {e}")
+
+    async def _scan_tokens_impl(self):
+        """Internal implementation of token scanning."""
         logger.info("Scanning for tokens...")
         print("🔍 Starting token scan...")
 
