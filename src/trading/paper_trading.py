@@ -3,6 +3,7 @@ from typing import Dict, Optional, List
 from datetime import datetime
 from dataclasses import dataclass, asdict
 import json
+import os
 
 @dataclass
 class Position:
@@ -42,7 +43,7 @@ class Trade:
 class PaperTradingEngine:
     """Simulated trading engine for paper trading"""
 
-    def __init__(self, initial_capital: float = 1000.0, stop_loss_percent: float = 5.0, take_profit_percent: float = 10.0):
+    def __init__(self, initial_capital: float = 1000.0, stop_loss_percent: float = 5.0, take_profit_percent: float = 10.0, state_file: str = 'paper_trading_state.json'):
         self.initial_capital = initial_capital
         self.cash = initial_capital
         self.positions: Dict[str, Position] = {}
@@ -50,8 +51,12 @@ class PaperTradingEngine:
         self.stop_loss_percent = stop_loss_percent
         self.take_profit_percent = take_profit_percent
         self.logger = logging.getLogger('trading_bot.paper_trading')
+        self.state_file = state_file
 
-        self.logger.info(f"Paper trading initialized with ${initial_capital:.2f}")
+        # Load previous state if exists
+        self.load_state()
+
+        self.logger.info(f"Paper trading initialized with ${self.cash:.2f} cash, {len(self.positions)} positions")
 
     async def execute_buy(self, token_address: str, symbol: str, price: float, amount_usd: float) -> Dict:
         """Execute a paper buy order"""
@@ -109,6 +114,9 @@ class PaperTradingEngine:
             self.logger.info(f"  Stop Loss: ${stop_loss:.8f} | Take Profit: ${take_profit:.8f}")
             self.logger.info(f"  Remaining Cash: ${self.cash:.2f}")
 
+            # Save state
+            self.save_state()
+
             return {
                 'success': True,
                 'position': position.to_dict(),
@@ -160,6 +168,9 @@ class PaperTradingEngine:
             self.logger.info(f"  P&L: ${pnl:.2f} ({pnl_percent:+.2f}%)")
             self.logger.info(f"  New Cash Balance: ${self.cash:.2f}")
 
+            # Save state
+            self.save_state()
+
             return {
                 'success': True,
                 'trade': trade.to_dict(),
@@ -187,6 +198,83 @@ class PaperTradingEngine:
         """Get total portfolio value (cash + positions)"""
         positions_value = sum(p.quantity * p.current_price for p in self.positions.values())
         return self.cash + positions_value
+
+    def save_state(self):
+        """Save current state to file"""
+        try:
+            state = {
+                'cash': self.cash,
+                'initial_capital': self.initial_capital,
+                'positions': {},
+                'trade_history': []
+            }
+
+            # Serialize positions
+            for token_address, position in self.positions.items():
+                state['positions'][token_address] = position.to_dict()
+
+            # Serialize trade history (last 100 trades only)
+            for trade in self.trade_history[-100:]:
+                state['trade_history'].append(trade.to_dict())
+
+            # Write to file
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f, indent=2)
+
+            self.logger.debug(f"State saved to {self.state_file}")
+
+        except Exception as e:
+            self.logger.error(f"Error saving state: {e}")
+
+    def load_state(self):
+        """Load state from file"""
+        try:
+            if not os.path.exists(self.state_file):
+                self.logger.info("No previous state found, starting fresh")
+                return
+
+            with open(self.state_file, 'r') as f:
+                state = json.load(f)
+
+            # Restore cash and capital
+            self.cash = state.get('cash', self.initial_capital)
+            self.initial_capital = state.get('initial_capital', self.initial_capital)
+
+            # Restore positions
+            for token_address, pos_data in state.get('positions', {}).items():
+                position = Position(
+                    token_address=pos_data['token_address'],
+                    symbol=pos_data['symbol'],
+                    entry_price=pos_data['entry_price'],
+                    current_price=pos_data['current_price'],
+                    quantity=pos_data['quantity'],
+                    position_size_usd=pos_data['position_size_usd'],
+                    stop_loss=pos_data['stop_loss'],
+                    take_profit=pos_data['take_profit'],
+                    entry_time=datetime.fromisoformat(pos_data['entry_time']),
+                    pnl=pos_data.get('pnl', 0.0),
+                    pnl_percent=pos_data.get('pnl_percent', 0.0)
+                )
+                self.positions[token_address] = position
+
+            # Restore trade history
+            for trade_data in state.get('trade_history', []):
+                trade = Trade(
+                    timestamp=datetime.fromisoformat(trade_data['timestamp']),
+                    action=trade_data['action'],
+                    token_address=trade_data['token_address'],
+                    symbol=trade_data['symbol'],
+                    price=trade_data['price'],
+                    quantity=trade_data['quantity'],
+                    total_usd=trade_data['total_usd'],
+                    fees=trade_data.get('fees', 0.0)
+                )
+                self.trade_history.append(trade)
+
+            self.logger.info(f"State loaded: ${self.cash:.2f} cash, {len(self.positions)} positions, {len(self.trade_history)} trades")
+
+        except Exception as e:
+            self.logger.error(f"Error loading state: {e}")
 
     def get_statistics(self) -> Dict:
         """Get trading statistics"""

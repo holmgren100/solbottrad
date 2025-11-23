@@ -238,6 +238,11 @@ class SolanaTradingBot:
                 self.logger.info(f"    ⏭️  Position already exists for {token_symbol}")
                 return
 
+            # Check max positions limit (prevent accumulating too many positions)
+            if hasattr(self.trading_engine, 'positions') and len(self.trading_engine.positions) >= TradingConfig.MAX_OPEN_POSITIONS:
+                self.logger.info(f"    ⏭️  Max positions ({TradingConfig.MAX_OPEN_POSITIONS}) reached, skipping new trades")
+                return
+
             # 1. Get market data from DexScreener
             self.logger.info(f"    📊 Fetching market data...")
             market_data = await self.dexscreener_client.get_token_data(token_address)
@@ -446,9 +451,18 @@ class SolanaTradingBot:
         # Get current prices
         price_data = {}
         for position in positions:
+            self.logger.debug(f"    Fetching price for {position['symbol']} ({position['token_address'][:12]}...)")
             market_data = await self.dexscreener_client.get_token_data(position['token_address'])
             if market_data:
-                price_data[position['token_address']] = float(market_data.get('priceUsd', 0))
+                current_price = float(market_data.get('priceUsd', 0))
+                price_data[position['token_address']] = current_price
+
+                # Log position status
+                pnl_pct = ((current_price - position['entry_price']) / position['entry_price']) * 100
+                self.logger.info(f"    {position['symbol']}: ${current_price:.8f} (entry: ${position['entry_price']:.8f}, P&L: {pnl_pct:+.2f}%)")
+                self.logger.info(f"       SL: ${position['stop_loss']:.8f} | TP: ${position['take_profit']:.8f}")
+            else:
+                self.logger.warning(f"    ⚠️ Could not fetch price for {position['symbol']}")
 
         # Check for stop loss / take profit triggers
         actions = await self.position_manager.check_positions(price_data)

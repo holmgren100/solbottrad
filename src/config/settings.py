@@ -9,6 +9,7 @@ class TradingConfig:
     PAPER_TRADING_MODE: bool = os.getenv('PAPER_TRADING_MODE', 'true').lower() == 'true'
     INITIAL_CAPITAL: float = float(os.getenv('INITIAL_CAPITAL', '1000'))
     MAX_POSITION_SIZE: float = float(os.getenv('MAX_POSITION_SIZE', '100'))
+    MAX_OPEN_POSITIONS: int = int(os.getenv('MAX_OPEN_POSITIONS', '3'))
     MIN_CONFIDENCE_SCORE: float = float(os.getenv('MIN_CONFIDENCE_SCORE', '0.0'))
     STOP_LOSS_PERCENT: float = float(os.getenv('STOP_LOSS_PERCENT', '5'))
     TAKE_PROFIT_PERCENT: float = float(os.getenv('TAKE_PROFIT_PERCENT', '10'))

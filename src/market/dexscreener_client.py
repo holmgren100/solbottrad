@@ -9,6 +9,28 @@ class DexScreenerClient:
         self.api_key = api_key
         self.base_url = "https://api.dexscreener.com/latest"
         self.logger = logging.getLogger('trading_bot.dexscreener')
+        self.price_cache = {}  # Cache last known good prices
+
+    def _validate_price(self, price: float, token_address: str) -> bool:
+        """Validate that price is reasonable and not corrupted data"""
+        MIN_PRICE = 1e-12  # Minimum realistic price
+        MAX_PRICE = 1e10   # Maximum realistic price
+
+        # Check if price is in reasonable range
+        if price <= MIN_PRICE or price >= MAX_PRICE:
+            self.logger.warning(f"Price ${price:.2e} outside valid range for {token_address[:12]}...")
+            return False
+
+        # Check against cached price if available (reject >90% changes)
+        if token_address in self.price_cache:
+            last_price = self.price_cache[token_address]
+            change_pct = abs((price - last_price) / last_price) * 100
+
+            if change_pct > 90:
+                self.logger.warning(f"Suspicious price change {change_pct:.1f}% for {token_address[:12]}... (${last_price:.8f} → ${price:.8f})")
+                return False
+
+        return True
 
     async def get_token_data(self, token_address: str) -> Optional[Dict]:
         """Get token market data from DexScreener"""
@@ -23,7 +45,23 @@ class DexScreenerClient:
                         if data.get('pairs') and len(data['pairs']) > 0:
                             # Get the most liquid pair
                             pairs = sorted(data['pairs'], key=lambda x: float(x.get('liquidity', {}).get('usd', 0)), reverse=True)
-                            return pairs[0]  # Return most liquid pair
+                            pair_data = pairs[0]
+
+                            # Validate price before returning
+                            price = float(pair_data.get('priceUsd', 0))
+                            if not self._validate_price(price, token_address):
+                                # Return cached data if validation fails
+                                self.logger.warning(f"Using last known price for {token_address[:12]}...")
+                                if token_address in self.price_cache:
+                                    pair_data['priceUsd'] = str(self.price_cache[token_address])
+                                else:
+                                    return None
+
+                            # Cache valid price
+                            else:
+                                self.price_cache[token_address] = price
+
+                            return pair_data
 
                         self.logger.warning(f"No pairs found for token {token_address}")
                         return None
