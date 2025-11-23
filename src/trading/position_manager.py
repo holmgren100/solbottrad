@@ -28,10 +28,18 @@ class Position:
     trailing_stop_percent: float = 15.0  # Trail by 15% from peak
     highest_price: float = 0.0  # Track highest price reached
     trailing_stop_price: float = 0.0  # Dynamic trailing stop price
+    # Rug detection fields
+    last_price_update: datetime = field(default_factory=datetime.now)  # Track when price was last updated
+    current_liquidity: float = 0.0  # Track current liquidity
+    price_update_failures: int = 0  # Count consecutive failed price updates
 
-    def update_price(self, new_price: float):
+    def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
         self.current_price = new_price
+        self.last_price_update = datetime.now()
+        self.price_update_failures = 0  # Reset failure count on successful update
+        self.current_liquidity = liquidity
+
         self.unrealized_pnl = (new_price - self.entry_price) * self.quantity
         if self.entry_price > 0:
             self.unrealized_pnl_percent = ((new_price - self.entry_price) / self.entry_price) * 100
@@ -47,6 +55,20 @@ class Position:
                     f"Trailing stop updated for {self.token_address[:8]}...: "
                     f"Peak ${self.highest_price:.8f} → Stop ${self.trailing_stop_price:.8f}"
                 )
+
+    def mark_price_update_failed(self):
+        """Mark that a price update failed."""
+        self.price_update_failures += 1
+
+    def is_price_stale(self, stale_minutes: int = 10) -> bool:
+        """Check if price hasn't been updated recently (possible rug/dead token)."""
+        from datetime import timedelta
+        time_since_update = datetime.now() - self.last_price_update
+        return time_since_update > timedelta(minutes=stale_minutes)
+
+    def is_liquidity_dead(self, min_liquidity: float = 1000.0) -> bool:
+        """Check if liquidity has dried up (possible rug)."""
+        return self.current_liquidity > 0 and self.current_liquidity < min_liquidity
 
 
 @dataclass
@@ -213,16 +235,27 @@ class PositionManager:
 
         return sell_trade
 
-    def update_position_price(self, token_address: str, current_price: float):
+    def update_position_price(self, token_address: str, current_price: float, liquidity: float = 0.0):
         """
-        Update position with current price.
+        Update position with current price and liquidity.
 
         Args:
             token_address: Token contract address
             current_price: Current market price
+            liquidity: Current liquidity in USD
         """
         if token_address in self.open_positions:
-            self.open_positions[token_address].update_price(current_price)
+            self.open_positions[token_address].update_price(current_price, liquidity)
+
+    def mark_position_price_failed(self, token_address: str):
+        """
+        Mark that a price update failed for a position.
+
+        Args:
+            token_address: Token contract address
+        """
+        if token_address in self.open_positions:
+            self.open_positions[token_address].mark_price_update_failed()
 
     def check_stop_loss(self, token_address: str) -> bool:
         """
@@ -291,6 +324,49 @@ class PositionManager:
             return True
 
         return False
+
+    def get_dead_positions(self, stale_minutes: int = 10, min_liquidity: float = 1000.0) -> List[str]:
+        """
+        Get positions that are likely rugged or dead (stale price or no liquidity).
+
+        Args:
+            stale_minutes: Minutes without price update to consider stale
+            min_liquidity: Minimum liquidity threshold in USD
+
+        Returns:
+            List of token addresses for dead positions
+        """
+        dead_positions = []
+
+        for token_address, position in self.open_positions.items():
+            # Check if price is stale (no updates in X minutes)
+            if position.is_price_stale(stale_minutes):
+                minutes_since = (datetime.now() - position.last_price_update).total_seconds() / 60
+                logger.warning(
+                    f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
+                    f"No price update for {minutes_since:.1f} minutes (likely rugged)"
+                )
+                dead_positions.append(token_address)
+                continue
+
+            # Check if liquidity has dried up
+            if position.is_liquidity_dead(min_liquidity):
+                logger.warning(
+                    f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
+                    f"Liquidity dried up (${position.current_liquidity:.2f} < ${min_liquidity:.2f})"
+                )
+                dead_positions.append(token_address)
+                continue
+
+            # Check for multiple consecutive price update failures
+            if position.price_update_failures >= 5:
+                logger.warning(
+                    f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
+                    f"{position.price_update_failures} consecutive price update failures"
+                )
+                dead_positions.append(token_address)
+
+        return dead_positions
 
     def get_position(self, token_address: str) -> Optional[Position]:
         """

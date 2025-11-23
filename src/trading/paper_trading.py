@@ -203,19 +203,44 @@ class PaperTradingEngine:
             'timestamp': datetime.now().isoformat()
         }
 
-    async def update_prices(self, price_updates: Dict[str, float]):
+    async def update_prices(self, price_updates: Dict[str, float], liquidity_data: Dict[str, float] = None):
         """
         Update positions with current prices and check stop loss/take profit/trailing stop.
 
         Args:
             price_updates: Dictionary of token_address -> current_price
+            liquidity_data: Dictionary of token_address -> liquidity_usd (optional)
         """
+        if liquidity_data is None:
+            liquidity_data = {}
+
+        # First, check for and close dead/rugged positions
+        dead_positions = self.position_manager.get_dead_positions(
+            stale_minutes=10,  # No price update in 10 minutes = likely dead
+            min_liquidity=1000.0  # Less than $1000 liquidity = likely rugged
+        )
+
+        for token_address in dead_positions:
+            position = self.position_manager.get_position(token_address)
+            if position:
+                # Close at effectively $0 (rugged/dead token has no value)
+                logger.error(
+                    f"💀 AUTO-CLOSING DEAD TOKEN: {token_address[:8]}... "
+                    f"Entry: ${position.entry_price:.8f}, "
+                    f"Last known: ${position.current_price:.8f}, "
+                    f"Loss: ${position.amount_usd:.2f}"
+                )
+                await self.execute_sell(token_address, 0.00000001, reason='rugged/dead')
+
+        # Now update prices for active positions
         for token_address, current_price in price_updates.items():
             if token_address not in self.position_manager.open_positions:
                 continue
 
+            liquidity = liquidity_data.get(token_address, 0.0)
+
             # Update position price (this also updates trailing stop)
-            self.position_manager.update_position_price(token_address, current_price)
+            self.position_manager.update_position_price(token_address, current_price, liquidity)
 
             # Check stop loss (regular stop loss, for downside protection)
             if self.position_manager.check_stop_loss(token_address):
@@ -308,7 +333,10 @@ class PaperTradingEngine:
                     'use_trailing_stop': pos.use_trailing_stop,
                     'trailing_stop_percent': pos.trailing_stop_percent,
                     'highest_price': pos.highest_price,
-                    'trailing_stop_price': pos.trailing_stop_price
+                    'trailing_stop_price': pos.trailing_stop_price,
+                    'last_price_update': pos.last_price_update.isoformat(),
+                    'current_liquidity': pos.current_liquidity,
+                    'price_update_failures': pos.price_update_failures
                 }
 
             # Save recent trades (last 100)
@@ -367,7 +395,10 @@ class PaperTradingEngine:
                     use_trailing_stop=pos_data.get('use_trailing_stop', True),
                     trailing_stop_percent=pos_data.get('trailing_stop_percent', 15.0),
                     highest_price=pos_data.get('highest_price', pos_data['entry_price']),
-                    trailing_stop_price=pos_data.get('trailing_stop_price', pos_data['stop_loss'])
+                    trailing_stop_price=pos_data.get('trailing_stop_price', pos_data['stop_loss']),
+                    last_price_update=datetime.fromisoformat(pos_data.get('last_price_update', pos_data['entry_time'])),
+                    current_liquidity=pos_data.get('current_liquidity', 0.0),
+                    price_update_failures=pos_data.get('price_update_failures', 0)
                 )
                 self.position_manager.open_positions[token_addr] = position
                 pnl_pct = position.unrealized_pnl_percent
