@@ -476,6 +476,7 @@ class SolanaTradingBot:
             logger.info(f"Monitoring {len(positions)} positions")
 
             price_updates = {}
+            liquidity_updates = {}  # Track liquidity for rug detection
             for position in positions:
                 try:
                     profile = await self.dexscreener.get_token_profile(position.token_address)
@@ -541,6 +542,10 @@ class SolanaTradingBot:
                         # Price validated - safe to use
                         price_updates[position.token_address] = current_price
 
+                        # Extract liquidity for rug detection
+                        liquidity_usd = profile.get('liquidity_usd', 0.0)
+                        liquidity_updates[position.token_address] = liquidity_usd
+
                         # Calculate current P&L
                         pnl_percent = ((current_price - position.entry_price) / position.entry_price) * 100
 
@@ -560,9 +565,11 @@ class SolanaTradingBot:
                 except Exception as e:
                     logger.error(f"Error getting price for {position.token_address}: {e}")
                     print(f"  ❌ Error updating price for {position.token_address[:8]}...")
+                    # Mark position as having failed price update
+                    self.trading_engine.position_manager.mark_position_price_failed(position.token_address)
 
-            # Update positions (this triggers stop loss/take profit checks)
-            await self.trading_engine.update_prices(price_updates)
+            # Update positions (this triggers stop loss/take profit checks AND rug detection)
+            await self.trading_engine.update_prices(price_updates, liquidity_updates)
             print()
 
     async def main_loop(self):

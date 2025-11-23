@@ -67,8 +67,18 @@ class Position:
         return time_since_update > timedelta(minutes=stale_minutes)
 
     def is_liquidity_dead(self, min_liquidity: float = 1000.0) -> bool:
-        """Check if liquidity has dried up (possible rug)."""
-        return self.current_liquidity > 0 and self.current_liquidity < min_liquidity
+        """
+        Check if liquidity has dried up (possible rug).
+
+        Returns True if liquidity is below threshold AND we've received at least
+        one price update (so we know the liquidity data is real, not just uninitialized).
+        """
+        # Only check liquidity if we've had at least one price update
+        # (last_price_update != entry_time means we got market data)
+        has_received_update = self.last_price_update != self.entry_time
+
+        # If we've received updates and liquidity is below threshold, it's dead
+        return has_received_update and self.current_liquidity < min_liquidity
 
 
 @dataclass
