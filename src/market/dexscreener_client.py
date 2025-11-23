@@ -23,6 +23,40 @@ class DexScreenerClient:
         self.api_key = api_key
         self.base_url = "https://api.dexscreener.com/latest"
         self.session: Optional[aiohttp.ClientSession] = None
+        self.price_cache: Dict[str, float] = {}  # Cache last known good prices
+
+    def _validate_price(self, price: float, token_address: str) -> bool:
+        """
+        Validate that price is reasonable and not corrupted data.
+
+        Args:
+            price: Price to validate
+            token_address: Token address for logging
+
+        Returns:
+            True if price is valid
+        """
+        MIN_PRICE = 1e-12  # Minimum realistic price
+        MAX_PRICE = 1e10   # Maximum realistic price
+
+        # Check if price is in reasonable range
+        if price <= MIN_PRICE or price >= MAX_PRICE:
+            logger.warning(f"Price ${price:.2e} outside valid range for {token_address[:12]}...")
+            return False
+
+        # Check against cached price if available (reject >90% changes)
+        if token_address in self.price_cache:
+            last_price = self.price_cache[token_address]
+            change_pct = abs((price - last_price) / last_price) * 100
+
+            if change_pct > 90:
+                logger.warning(
+                    f"Suspicious price change {change_pct:.1f}% for {token_address[:12]}... "
+                    f"(${last_price:.8f} → ${price:.8f})"
+                )
+                return False
+
+        return True
 
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
@@ -146,11 +180,25 @@ class DexScreenerClient:
         # Find the pair with highest liquidity
         main_pair = max(pairs, key=lambda p: float(p.get('liquidity', {}).get('usd', 0)))
 
+        # Validate price before using it
+        price_usd = float(main_pair.get('priceUsd', 0))
+        if not self._validate_price(price_usd, token_address):
+            # Use cached price if validation fails
+            if token_address in self.price_cache:
+                logger.warning(f"Using cached price for {token_address[:12]}...")
+                price_usd = self.price_cache[token_address]
+            else:
+                logger.error(f"No valid price for {token_address[:12]}...")
+                return None
+        else:
+            # Cache valid price
+            self.price_cache[token_address] = price_usd
+
         profile = {
             'address': token_address,
             'symbol': main_pair.get('baseToken', {}).get('symbol', 'UNKNOWN'),
             'name': main_pair.get('baseToken', {}).get('name', 'Unknown'),
-            'price_usd': float(main_pair.get('priceUsd', 0)),
+            'price_usd': price_usd,
             'price_change_24h': float(main_pair.get('priceChange', {}).get('h24', 0)),
             'volume_24h': float(main_pair.get('volume', {}).get('h24', 0)),
             'liquidity_usd': float(main_pair.get('liquidity', {}).get('usd', 0)),

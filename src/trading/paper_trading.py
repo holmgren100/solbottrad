@@ -4,7 +4,9 @@ Paper trading engine for testing strategies without real funds.
 
 from typing import Dict, Optional
 from datetime import datetime
-from .position_manager import PositionManager, Trade
+import json
+import os
+from .position_manager import PositionManager, Trade, Position
 from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
@@ -13,19 +15,34 @@ logger = get_logger(__name__)
 class PaperTradingEngine:
     """Simulated trading engine for testing."""
 
-    def __init__(self, initial_capital: float = 1000.0):
+    def __init__(self, initial_capital: float = 1000.0, state_file: str = 'paper_trading_state.json'):
         """
         Initialize paper trading engine.
 
         Args:
             initial_capital: Starting capital in USD
+            state_file: Path to state file for persistence
         """
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
         self.position_manager = PositionManager(max_open_positions=5)
         self.total_invested = 0.0
 
-        logger.info(f"Paper trading engine initialized with ${initial_capital:.2f}")
+        # Use absolute path for state file
+        if not os.path.isabs(state_file):
+            self.state_file = os.path.join(os.getcwd(), state_file)
+        else:
+            self.state_file = state_file
+
+        logger.info(f"State file location: {self.state_file}")
+
+        # Load previous state if exists
+        self.load_state()
+
+        logger.info(
+            f"Paper trading engine initialized: ${self.current_capital:.2f} capital, "
+            f"{len(self.position_manager.open_positions)} positions"
+        )
 
     async def execute_buy(
         self,
@@ -92,6 +109,9 @@ class PaperTradingEngine:
             f"capital: ${self.current_capital:.2f}"
         )
 
+        # Save state after trade
+        self.save_state()
+
         return {
             'status': 'success',
             'action': 'buy',
@@ -156,6 +176,9 @@ class PaperTradingEngine:
             f"capital: ${capital_before:.2f} → ${self.current_capital:.2f}, "
             f"PnL: ${trade.pnl:.2f} ({trade.pnl_percent:+.1f}%)"
         )
+
+        # Save state after trade
+        self.save_state()
 
         return {
             'status': 'success',
@@ -246,6 +269,112 @@ class PaperTradingEngine:
         self.total_invested = 0.0
         self.position_manager = PositionManager(max_open_positions=5)
         logger.info("Paper trading engine reset")
+
+    def save_state(self):
+        """Save current state to file for persistence."""
+        try:
+            state = {
+                'initial_capital': self.initial_capital,
+                'current_capital': self.current_capital,
+                'total_invested': self.total_invested,
+                'positions': {},
+                'trades': []
+            }
+
+            # Save positions
+            for token_addr, pos in self.position_manager.open_positions.items():
+                state['positions'][token_addr] = {
+                    'token_address': pos.token_address,
+                    'entry_price': pos.entry_price,
+                    'current_price': pos.current_price,
+                    'amount_usd': pos.amount_usd,
+                    'quantity': pos.quantity,
+                    'stop_loss': pos.stop_loss,
+                    'take_profit': pos.take_profit,
+                    'entry_time': pos.entry_time.isoformat()
+                }
+
+            # Save recent trades (last 100)
+            for trade in self.position_manager.closed_trades[-100:]:
+                state['trades'].append({
+                    'token_address': trade.token_address,
+                    'action': trade.action,
+                    'price': trade.price,
+                    'amount_usd': trade.amount_usd,
+                    'quantity': trade.quantity,
+                    'pnl': trade.pnl,
+                    'pnl_percent': trade.pnl_percent,
+                    'timestamp': trade.timestamp.isoformat()
+                })
+
+            # Write to file
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f, indent=2)
+
+            logger.info(
+                f"💾 State saved: ${self.current_capital:.2f} capital, "
+                f"{len(self.position_manager.open_positions)} positions → {self.state_file}"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error saving state to {self.state_file}: {e}", exc_info=True)
+
+    def load_state(self):
+        """Load state from file."""
+        try:
+            if not os.path.exists(self.state_file):
+                logger.info(f"📝 No previous state file found at {self.state_file}, starting fresh")
+                return
+
+            logger.info(f"📂 Loading state from {self.state_file}...")
+
+            with open(self.state_file, 'r') as f:
+                state = json.load(f)
+
+            # Restore capital
+            self.initial_capital = state.get('initial_capital', self.initial_capital)
+            self.current_capital = state.get('current_capital', self.current_capital)
+            self.total_invested = state.get('total_invested', 0.0)
+
+            # Restore positions
+            for token_addr, pos_data in state.get('positions', {}).items():
+                position = Position(
+                    token_address=pos_data['token_address'],
+                    entry_price=pos_data['entry_price'],
+                    current_price=pos_data['current_price'],
+                    amount_usd=pos_data['amount_usd'],
+                    quantity=pos_data['quantity'],
+                    entry_time=datetime.fromisoformat(pos_data['entry_time']),
+                    stop_loss=pos_data['stop_loss'],
+                    take_profit=pos_data['take_profit']
+                )
+                self.position_manager.open_positions[token_addr] = position
+                pnl_pct = position.unrealized_pnl_percent
+                logger.info(f"   ✓ Restored position: {token_addr[:8]}... ({pnl_pct:+.2f}%)")
+
+            # Restore trades
+            for trade_data in state.get('trades', []):
+                trade = Trade(
+                    token_address=trade_data['token_address'],
+                    action=trade_data['action'],
+                    price=trade_data['price'],
+                    amount_usd=trade_data['amount_usd'],
+                    quantity=trade_data['quantity'],
+                    timestamp=datetime.fromisoformat(trade_data['timestamp']),
+                    pnl=trade_data.get('pnl', 0.0),
+                    pnl_percent=trade_data.get('pnl_percent', 0.0)
+                )
+                self.position_manager.closed_trades.append(trade)
+
+            logger.info(
+                f"✅ State loaded: ${self.current_capital:.2f} capital, "
+                f"{len(self.position_manager.open_positions)} positions, "
+                f"{len(self.position_manager.closed_trades)} trades"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error loading state from {self.state_file}: {e}", exc_info=True)
+            logger.warning("⚠️  Starting with fresh state due to load error")
 
     async def health_check(self) -> bool:
         """
