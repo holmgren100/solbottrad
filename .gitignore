@@ -52,3 +52,4 @@ trading_bot.log
 *.db
 *.sqlite
 data/
+paper_trading_state.json
