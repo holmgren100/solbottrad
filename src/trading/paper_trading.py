@@ -51,7 +51,14 @@ class PaperTradingEngine:
         self.stop_loss_percent = stop_loss_percent
         self.take_profit_percent = take_profit_percent
         self.logger = logging.getLogger('trading_bot.paper_trading')
-        self.state_file = state_file
+
+        # Use absolute path for state file (in current working directory)
+        if not os.path.isabs(state_file):
+            self.state_file = os.path.join(os.getcwd(), state_file)
+        else:
+            self.state_file = state_file
+
+        self.logger.info(f"State file location: {self.state_file}")
 
         # Load previous state if exists
         self.load_state()
@@ -221,22 +228,25 @@ class PaperTradingEngine:
             with open(self.state_file, 'w') as f:
                 json.dump(state, f, indent=2)
 
-            self.logger.debug(f"State saved to {self.state_file}")
+            self.logger.info(f"💾 State saved: ${self.cash:.2f} cash, {len(self.positions)} positions → {self.state_file}")
 
         except Exception as e:
-            self.logger.error(f"Error saving state: {e}")
+            self.logger.error(f"❌ Error saving state to {self.state_file}: {e}", exc_info=True)
 
     def load_state(self):
         """Load state from file"""
         try:
             if not os.path.exists(self.state_file):
-                self.logger.info("No previous state found, starting fresh")
+                self.logger.info(f"📝 No previous state file found at {self.state_file}, starting fresh")
                 return
+
+            self.logger.info(f"📂 Loading state from {self.state_file}...")
 
             with open(self.state_file, 'r') as f:
                 state = json.load(f)
 
             # Restore cash and capital
+            old_cash = self.cash
             self.cash = state.get('cash', self.initial_capital)
             self.initial_capital = state.get('initial_capital', self.initial_capital)
 
@@ -256,6 +266,7 @@ class PaperTradingEngine:
                     pnl_percent=pos_data.get('pnl_percent', 0.0)
                 )
                 self.positions[token_address] = position
+                self.logger.info(f"   ✓ Restored position: {position.symbol} ({position.pnl_percent:+.2f}%)")
 
             # Restore trade history
             for trade_data in state.get('trade_history', []):
@@ -271,10 +282,11 @@ class PaperTradingEngine:
                 )
                 self.trade_history.append(trade)
 
-            self.logger.info(f"State loaded: ${self.cash:.2f} cash, {len(self.positions)} positions, {len(self.trade_history)} trades")
+            self.logger.info(f"✅ State loaded successfully: ${self.cash:.2f} cash, {len(self.positions)} positions, {len(self.trade_history)} trades")
 
         except Exception as e:
-            self.logger.error(f"Error loading state: {e}")
+            self.logger.error(f"❌ Error loading state from {self.state_file}: {e}", exc_info=True)
+            self.logger.warning("⚠️  Starting with fresh state due to load error")
 
     def get_statistics(self) -> Dict:
         """Get trading statistics"""

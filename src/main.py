@@ -172,15 +172,39 @@ class SolanaTradingBot:
                 tokens = await self.scan_tokens()
                 self.logger.info(f"📊 Found {len(tokens)} tokens to analyze")
 
-                # 2. Analyze each token
-                for token in tokens:
-                    await self.analyze_token(token)
+                # 2. Analyze each token (with timeout protection)
+                for i, token in enumerate(tokens, 1):
+                    try:
+                        # Add timeout to prevent hanging on a single token
+                        await asyncio.wait_for(
+                            self.analyze_token(token),
+                            timeout=30.0  # 30 second timeout per token
+                        )
+                    except asyncio.TimeoutError:
+                        token_symbol = token.get('symbol', token.get('address', 'unknown')[:8])
+                        self.logger.warning(f"⏰ Timeout analyzing token {token_symbol} (took >30s), skipping")
+                    except Exception as e:
+                        token_symbol = token.get('symbol', token.get('address', 'unknown')[:8])
+                        self.logger.error(f"❌ Error analyzing token {token_symbol}: {e}")
 
                 # 3. Check existing positions for stop loss / take profit
                 if hasattr(self.trading_engine, 'positions'):
-                    await self.check_positions()
+                    try:
+                        await asyncio.wait_for(
+                            self.check_positions(),
+                            timeout=60.0  # 60 second timeout for position checks
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.warning(f"⏰ Timeout checking positions (took >60s)")
+                    except Exception as e:
+                        self.logger.error(f"❌ Error checking positions: {e}")
 
-                # 4. Display status
+                # 4. Save state periodically (every 10 scans)
+                if self.scan_count % 10 == 0 and hasattr(self.trading_engine, 'save_state'):
+                    self.logger.info("💾 Periodic state save...")
+                    self.trading_engine.save_state()
+
+                # 5. Display status
                 self.display_status()
 
                 # Wait before next scan
