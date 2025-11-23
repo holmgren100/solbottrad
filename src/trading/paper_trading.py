@@ -229,7 +229,19 @@ class PaperTradingEngine:
         if liquidity_data is None:
             liquidity_data = {}
 
-        # First, check for and close dead/rugged positions (if enabled)
+        # First, update all prices so we have fresh timestamps
+        # (prevents false positives when bot restarts after being offline)
+        for token_address, current_price in price_updates.items():
+            if token_address not in self.position_manager.open_positions:
+                continue
+
+            liquidity = liquidity_data.get(token_address, 0.0)
+
+            # Update position price and liquidity (updates last_price_update timestamp)
+            self.position_manager.update_position_price(token_address, current_price, liquidity)
+
+        # NOW check for dead/rugged positions (after applying fresh data)
+        # This prevents false positives when restarting after being offline
         if self.rug_detection_enabled:
             dead_positions = self.position_manager.get_dead_positions(
                 stale_minutes=self.stale_price_minutes,
@@ -250,15 +262,8 @@ class PaperTradingEngine:
                 )
                 await self.execute_sell(token_address, 0.00000001, reason='rugged/dead')
 
-        # Now update prices for active positions
-        for token_address, current_price in price_updates.items():
-            if token_address not in self.position_manager.open_positions:
-                continue
-
-            liquidity = liquidity_data.get(token_address, 0.0)
-
-            # Update position price (this also updates trailing stop)
-            self.position_manager.update_position_price(token_address, current_price, liquidity)
+        # Now check stop loss/take profit/trailing stop for remaining positions
+        for token_address in list(self.position_manager.open_positions.keys()):
 
             # Check stop loss (regular stop loss, for downside protection)
             if self.position_manager.check_stop_loss(token_address):
