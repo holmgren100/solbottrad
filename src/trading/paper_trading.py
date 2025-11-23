@@ -50,7 +50,9 @@ class PaperTradingEngine:
         amount_usd: float,
         price: float,
         stop_loss: float,
-        take_profit: float
+        take_profit: float,
+        use_trailing_stop: bool = True,
+        trailing_stop_percent: float = 15.0
     ) -> Dict:
         """
         Execute a simulated buy order.
@@ -60,7 +62,9 @@ class PaperTradingEngine:
             amount_usd: Amount to invest in USD
             price: Current token price
             stop_loss: Stop loss price
-            take_profit: Take profit price
+            take_profit: Take profit price (ignored if using trailing stop)
+            use_trailing_stop: Whether to use trailing stop (default: True)
+            trailing_stop_percent: Percent to trail below peak (default: 15%)
 
         Returns:
             Execution result dictionary
@@ -90,7 +94,9 @@ class PaperTradingEngine:
             entry_price=price,
             amount_usd=amount_usd,
             stop_loss=stop_loss,
-            take_profit=take_profit
+            take_profit=take_profit,
+            use_trailing_stop=use_trailing_stop,
+            trailing_stop_percent=trailing_stop_percent
         )
 
         if not position:
@@ -103,10 +109,11 @@ class PaperTradingEngine:
         self.current_capital -= amount_usd
         self.total_invested += amount_usd
 
+        mode_str = f"trailing {trailing_stop_percent}%" if use_trailing_stop else f"TP ${take_profit:.8f}"
         logger.info(
             f"[PAPER] BUY {token_address[:8]}... "
             f"@ ${price:.8f}, size: ${amount_usd:.2f}, "
-            f"capital: ${self.current_capital:.2f}"
+            f"{mode_str}, capital: ${self.current_capital:.2f}"
         )
 
         # Save state after trade
@@ -121,6 +128,8 @@ class PaperTradingEngine:
             'quantity': position.quantity,
             'stop_loss': stop_loss,
             'take_profit': take_profit,
+            'use_trailing_stop': use_trailing_stop,
+            'trailing_stop_percent': trailing_stop_percent,
             'remaining_capital': self.current_capital,
             'timestamp': datetime.now().isoformat()
         }
@@ -196,7 +205,7 @@ class PaperTradingEngine:
 
     async def update_prices(self, price_updates: Dict[str, float]):
         """
-        Update positions with current prices and check stop loss/take profit.
+        Update positions with current prices and check stop loss/take profit/trailing stop.
 
         Args:
             price_updates: Dictionary of token_address -> current_price
@@ -205,15 +214,19 @@ class PaperTradingEngine:
             if token_address not in self.position_manager.open_positions:
                 continue
 
-            # Update position price
+            # Update position price (this also updates trailing stop)
             self.position_manager.update_position_price(token_address, current_price)
 
-            # Check stop loss
+            # Check stop loss (regular stop loss, for downside protection)
             if self.position_manager.check_stop_loss(token_address):
                 logger.info(f"Stop loss triggered for {token_address[:8]}...")
                 await self.execute_sell(token_address, current_price, reason='stop_loss')
 
-            # Check take profit
+            # Check trailing stop (locks in profits)
+            elif self.position_manager.check_trailing_stop(token_address):
+                await self.execute_sell(token_address, current_price, reason='trailing_stop')
+
+            # Check take profit (only if not using trailing stop)
             elif self.position_manager.check_take_profit(token_address):
                 logger.info(f"Take profit triggered for {token_address[:8]}...")
                 await self.execute_sell(token_address, current_price, reason='take_profit')
@@ -291,7 +304,11 @@ class PaperTradingEngine:
                     'quantity': pos.quantity,
                     'stop_loss': pos.stop_loss,
                     'take_profit': pos.take_profit,
-                    'entry_time': pos.entry_time.isoformat()
+                    'entry_time': pos.entry_time.isoformat(),
+                    'use_trailing_stop': pos.use_trailing_stop,
+                    'trailing_stop_percent': pos.trailing_stop_percent,
+                    'highest_price': pos.highest_price,
+                    'trailing_stop_price': pos.trailing_stop_price
                 }
 
             # Save recent trades (last 100)
@@ -346,11 +363,16 @@ class PaperTradingEngine:
                     quantity=pos_data['quantity'],
                     entry_time=datetime.fromisoformat(pos_data['entry_time']),
                     stop_loss=pos_data['stop_loss'],
-                    take_profit=pos_data['take_profit']
+                    take_profit=pos_data['take_profit'],
+                    use_trailing_stop=pos_data.get('use_trailing_stop', True),
+                    trailing_stop_percent=pos_data.get('trailing_stop_percent', 15.0),
+                    highest_price=pos_data.get('highest_price', pos_data['entry_price']),
+                    trailing_stop_price=pos_data.get('trailing_stop_price', pos_data['stop_loss'])
                 )
                 self.position_manager.open_positions[token_addr] = position
                 pnl_pct = position.unrealized_pnl_percent
-                logger.info(f"   ✓ Restored position: {token_addr[:8]}... ({pnl_pct:+.2f}%)")
+                mode = "🔄 trailing" if position.use_trailing_stop else "🎯 fixed TP"
+                logger.info(f"   ✓ Restored position: {token_addr[:8]}... ({pnl_pct:+.2f}%, {mode})")
 
             # Restore trades
             for trade_data in state.get('trades', []):

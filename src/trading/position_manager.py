@@ -23,6 +23,11 @@ class Position:
     take_profit: float
     unrealized_pnl: float = 0.0
     unrealized_pnl_percent: float = 0.0
+    # Trailing stop loss fields
+    use_trailing_stop: bool = True
+    trailing_stop_percent: float = 15.0  # Trail by 15% from peak
+    highest_price: float = 0.0  # Track highest price reached
+    trailing_stop_price: float = 0.0  # Dynamic trailing stop price
 
     def update_price(self, new_price: float):
         """Update current price and PnL."""
@@ -30,6 +35,18 @@ class Position:
         self.unrealized_pnl = (new_price - self.entry_price) * self.quantity
         if self.entry_price > 0:
             self.unrealized_pnl_percent = ((new_price - self.entry_price) / self.entry_price) * 100
+
+        # Update trailing stop if enabled
+        if self.use_trailing_stop:
+            # Update highest price if current price is higher
+            if new_price > self.highest_price:
+                self.highest_price = new_price
+                # Calculate new trailing stop (X% below highest price)
+                self.trailing_stop_price = self.highest_price * (1 - self.trailing_stop_percent / 100)
+                logger.debug(
+                    f"Trailing stop updated for {self.token_address[:8]}...: "
+                    f"Peak ${self.highest_price:.8f} → Stop ${self.trailing_stop_price:.8f}"
+                )
 
 
 @dataclass
@@ -76,7 +93,9 @@ class PositionManager:
         entry_price: float,
         amount_usd: float,
         stop_loss: float,
-        take_profit: float
+        take_profit: float,
+        use_trailing_stop: bool = True,
+        trailing_stop_percent: float = 15.0
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -86,7 +105,9 @@ class PositionManager:
             entry_price: Entry price
             amount_usd: Position size in USD
             stop_loss: Stop loss price
-            take_profit: Take profit price
+            take_profit: Take profit price (ignored if using trailing stop)
+            use_trailing_stop: Whether to use trailing stop instead of fixed take profit
+            trailing_stop_percent: Percent to trail below peak (default 15%)
 
         Returns:
             Position object if successful, None otherwise
@@ -109,7 +130,11 @@ class PositionManager:
             quantity=quantity,
             entry_time=datetime.now(),
             stop_loss=stop_loss,
-            take_profit=take_profit
+            take_profit=take_profit,
+            use_trailing_stop=use_trailing_stop,
+            trailing_stop_percent=trailing_stop_percent,
+            highest_price=entry_price,  # Initialize with entry price
+            trailing_stop_price=stop_loss  # Start with regular stop loss
         )
 
         self.open_positions[token_address] = position
@@ -125,9 +150,10 @@ class PositionManager:
         )
         self.daily_trades.append(buy_trade)
 
+        mode = "trailing stop" if use_trailing_stop else "fixed TP"
         logger.info(
             f"Opened position: {token_address[:8]}... "
-            f"@ ${entry_price:.8f}, size: ${amount_usd:.2f}"
+            f"@ ${entry_price:.8f}, size: ${amount_usd:.2f}, mode: {mode}"
         )
 
         return position
@@ -228,7 +254,43 @@ class PositionManager:
             return False
 
         position = self.open_positions[token_address]
+
+        # If using trailing stop, don't check fixed take profit
+        if position.use_trailing_stop:
+            return False
+
         return position.current_price >= position.take_profit
+
+    def check_trailing_stop(self, token_address: str) -> bool:
+        """
+        Check if trailing stop is hit.
+
+        Args:
+            token_address: Token contract address
+
+        Returns:
+            True if trailing stop triggered
+        """
+        if token_address not in self.open_positions:
+            return False
+
+        position = self.open_positions[token_address]
+
+        # Only check if trailing stop is enabled
+        if not position.use_trailing_stop:
+            return False
+
+        # Trigger if current price drops below trailing stop price
+        if position.current_price <= position.trailing_stop_price:
+            gain_pct = ((position.highest_price - position.entry_price) / position.entry_price) * 100
+            logger.info(
+                f"Trailing stop triggered for {token_address[:8]}...: "
+                f"Peak ${position.highest_price:.8f} (+{gain_pct:.1f}%), "
+                f"Exit ${position.current_price:.8f}"
+            )
+            return True
+
+        return False
 
     def get_position(self, token_address: str) -> Optional[Position]:
         """
