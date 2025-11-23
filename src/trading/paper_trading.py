@@ -23,6 +23,11 @@ class PaperTradingEngine:
             initial_capital: Starting capital in USD
             state_file: Path to state file for persistence
         """
+        # Read rug detection settings from environment
+        self.rug_detection_enabled = os.getenv('RUG_DETECTION_ENABLED', 'true').lower() == 'true'
+        self.stale_price_minutes = float(os.getenv('STALE_PRICE_MINUTES', '5'))
+        self.min_position_liquidity = float(os.getenv('MIN_POSITION_LIQUIDITY', '5000.0'))
+
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
         self.position_manager = PositionManager(max_open_positions=5)
@@ -43,6 +48,16 @@ class PaperTradingEngine:
             f"Paper trading engine initialized: ${self.current_capital:.2f} capital, "
             f"{len(self.position_manager.open_positions)} positions"
         )
+
+        # Log rug detection settings
+        if self.rug_detection_enabled:
+            logger.info(
+                f"🛡️  Rug protection ENABLED: "
+                f"Liquidity threshold ${self.min_position_liquidity:.0f}, "
+                f"Stale price timeout {self.stale_price_minutes:.0f} min"
+            )
+        else:
+            logger.warning("⚠️  Rug protection DISABLED")
 
     async def execute_buy(
         self,
@@ -214,11 +229,14 @@ class PaperTradingEngine:
         if liquidity_data is None:
             liquidity_data = {}
 
-        # First, check for and close dead/rugged positions
-        dead_positions = self.position_manager.get_dead_positions(
-            stale_minutes=10,  # No price update in 10 minutes = likely dead
-            min_liquidity=1000.0  # Less than $1000 liquidity = likely rugged
-        )
+        # First, check for and close dead/rugged positions (if enabled)
+        if self.rug_detection_enabled:
+            dead_positions = self.position_manager.get_dead_positions(
+                stale_minutes=self.stale_price_minutes,
+                min_liquidity=self.min_position_liquidity
+            )
+        else:
+            dead_positions = []
 
         for token_address in dead_positions:
             position = self.position_manager.get_position(token_address)
