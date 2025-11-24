@@ -4,6 +4,85 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 18:00 - Fix Partial Profit Persistence (CRITICAL!)
+
+### Commit: `d7af60e`
+**Status: 🚨 CRITICAL BUG FIX - Partial profits not working after restart!**
+
+### What User Showed Me:
+Portfolio with massive gains:
+```
+wsERZDS2: +176.31% (should have sold 25% at +100%)
+B3VbhsVQ: +187.80% (should have sold 25% at +100%, 15% at +200%)
+```
+
+But position sizes unchanged - **no partial profits were taken!**
+
+### Root Cause:
+**State persistence bug** - `initial_quantity` and `milestones_hit` not being saved/loaded!
+
+**How partial profits work:**
+1. Open position: `initial_quantity = 100` tokens
+2. Hit +100%: Sell 25% of initial_quantity, mark milestone
+3. Continue with 75 tokens, trailing stop protects rest
+
+**What was broken:**
+```python
+# save_state() - line 441
+state['positions'][token] = {
+    'quantity': pos.quantity,
+    # Missing: 'initial_quantity'
+    # Missing: 'milestones_hit'
+}
+
+# load_state() - line 505
+position = Position(
+    quantity=pos_data['quantity'],
+    # Missing: initial_quantity (defaults to 0!)
+    # Missing: milestones_hit (defaults to empty set!)
+)
+
+# update_prices() - line 309
+if position.initial_quantity == 0:
+    continue  # SKIPS ALL PARTIAL PROFIT CHECKS!
+```
+
+**After bot restart:**
+- `initial_quantity` = 0 (default)
+- `milestones_hit` = {} (empty set)
+- Partial profit check: "if initial_quantity == 0: continue"
+- **Result:** Never takes partial profits! 😱
+
+### The Fix:
+**save_state (lines 457-458):**
+```python
+'initial_quantity': pos.initial_quantity,  # Needed for partial profit %
+'milestones_hit': list(pos.milestones_hit)  # Track which milestones taken
+```
+
+**load_state (lines 521-522):**
+```python
+initial_quantity=pos_data.get('initial_quantity', pos_data['quantity']),
+milestones_hit=set(pos_data.get('milestones_hit', []))  # JSON list -> Python set
+```
+
+### Result After Fix:
+- Bot will save initial_quantity when opening positions
+- After restart, positions remember their starting size
+- Partial profits will trigger at +100%, +200%, +300%, +500%
+- Milestones won't retrigger (tracked in milestones_hit)
+
+### IMPORTANT:
+User needs to **restart bot** for fix to apply. Current positions in memory have `initial_quantity=0`, so they won't trigger partial profits until new positions are opened OR bot restarts and properly loads the state.
+
+### How to Revert:
+```bash
+git revert d7af60e
+# This will break partial profit-taking after restart again
+```
+
+---
+
 ## 2025-11-24 16:00 - Lower Thresholds to Restore Trading (THE FINAL FIX!)
 
 ### Commit: `4e6a012`
