@@ -4,6 +4,68 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 - Add Fallback Tokens (CRITICAL!)
+
+### Commit: `b1fcef8`
+**Status: ✅ CRITICAL FIX - BOT NOW HAS FALLBACKS**
+
+### What Changed:
+Added 3-tier fallback system like the working branches had
+
+### Why:
+User showed Jupiter returning 400 errors. Checked working branches:
+- `claude/taskmaster-prd-setup-011CV3D7XiSteYbfppTpHSCN` ✅
+- `claude/investigate-chat-access-01HwqgxWV1tUotiuii4GPpzr` ✅
+
+Both had FALLBACK LOGIC that my current code was missing!
+
+### The Problem:
+**My broken code:**
+```
+1. Try get_trending_tokens()
+2. Jupiter returns 400 → STOP ❌
+3. No tokens → No trades
+```
+
+**Working branches:**
+```
+1. Try primary source
+2. If fails → Fallback to 4 popular tokens ✅
+3. Always have something to analyze
+```
+
+### The Fix:
+3-tier fallback system:
+```python
+# Try trending first
+new_tokens = await jupiter.get_trending_tokens('toptraded', limit=50)
+
+if not new_tokens:
+    # Fallback to recent
+    new_tokens = await jupiter.get_recent_tokens(limit=50)
+
+if not new_tokens:
+    # Fallback to 4 popular tokens
+    new_tokens = [SOL, USDC, BONK, JUP]
+```
+
+### Result:
+- ✅ Bot ALWAYS has tokens to analyze
+- ✅ Works even if Jupiter is down/broken
+- ✅ No more "Jupiter returned no tokens" stops
+- ✅ At minimum, analyzes 4 popular tokens
+
+### Files Modified:
+- `src/main.py` - Added fallback logic
+
+### How to Revert:
+```bash
+git revert b1fcef8
+# This will break bot when Jupiter returns errors
+```
+
+---
+
 ## 2025-11-24 - Back to Trending Tokens (THE ACTUAL FIX!)
 
 ### Commit: `e737246`
