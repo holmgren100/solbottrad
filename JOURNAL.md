@@ -4,6 +4,77 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 - Back to Trending Tokens (THE ACTUAL FIX!)
+
+### Commit: `e737246`
+**Status: ✅ CRITICAL FIX - BACK TO WORKING STATE**
+
+### What Changed:
+Reverted from `get_recent_tokens()` back to `get_trending_tokens()`
+
+### Why:
+User showed bot WAS WORKING at 02:40 Swedish time:
+```
+solana-trading-bot, [2025-11-24 02:40]
+🎯 Trade Signal: BUY
+✅ Trade BUY: SUCCESS
+Amount: $42.76
+```
+
+Then it BROKE after my "fixes". I asked: what was different at 02:40?
+
+### Root Cause Analysis:
+
+**At 02:40 (WORKING):**
+- Used `get_trending_tokens('toptraded')`
+- Returns only `address`, `symbol`, `name` (no price/liquidity data)
+- Forces bot to call DexScreener for EACH token
+- **Trending tokens = established tokens DexScreener tracks** ✅
+- DexScreener HAS data → Trades happen ✅
+
+**After my "fix" (BROKEN):**
+- Used `get_recent_tokens()`
+- Returns full data (`usdPrice`, `liquidity`, `mcap`, etc.)
+- **Recent tokens = brand new launches DexScreener doesn't know yet** ❌
+- My code tried to use Jupiter data, then fell back to DexScreener
+- DexScreener returns nothing for brand new tokens
+- "No market data from either source" → No trades ❌
+
+### The Key Insight:
+
+**Trending vs Recent:**
+- **Trending** = Popular tokens with trading activity → DexScreener tracks them ✅
+- **Recent** = Brand new launches minutes old → DexScreener doesn't have data yet ❌
+
+### Solution:
+- Use `get_trending_tokens('toptraded', limit=50)` like at 02:40
+- These tokens have reliable DexScreener data
+- More established = less rugs, better data quality
+- Back to working state!
+
+### Files Modified:
+- `src/main.py` - Back to get_trending_tokens()
+
+### Result:
+- ✅ Bot uses tokens DexScreener actually has data for
+- ✅ No more "No market data from either source" errors
+- ✅ Trades should flow like at 02:40
+
+### Lesson Learned:
+**Don't fix what ain't broke!**
+- Bot was working at 02:40
+- I made "fixes" that broke it
+- Should have checked: what was different at 02:40?
+- User was right to point to the working timestamp
+
+### How to Revert:
+```bash
+git revert e737246
+# This will break trading again
+```
+
+---
+
 ## 2025-11-24 - New Token Bonus (CRITICAL!)
 
 ### Commit: `e02f851`
