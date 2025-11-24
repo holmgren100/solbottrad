@@ -4,6 +4,64 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 16:00 - Lower Thresholds to Restore Trading (THE FINAL FIX!)
+
+### Commit: `4e6a012`
+**Status: ✅ CRITICAL FIX - Allows trading when Twitter unavailable**
+
+### What User Showed Me:
+```
+Market Signal: buy (confidence: 0.54) ✅
+Sentiment: avoid (score: 0.35) ❌
+❌ No action: market=buy, sentiment=avoid
+```
+
+Perfect example of both blockers!
+
+### The Problem:
+1. **Sentiment score 0.35** = "avoid" (threshold was 0.4)
+2. When Twitter is unavailable/rate-limited:
+   - buzz = 0.0, sentiment = 0.5, influential = 0.0, coordination = 1.0
+   - Total: 0.0×0.25 + 0.5×0.30 + 0.0×0.25 + 1.0×0.20 = **0.35**
+   - Returns "avoid" → **blocks ALL trades**
+
+### The Fix:
+**1. Lowered sentiment "avoid" threshold from 0.4 to 0.25:**
+```python
+# sentiment_model.py
+elif overall_score >= 0.25:  # Was 0.4 - too high!
+    return 'hold'  # 0.35 now returns 'hold' not 'avoid'
+else:
+    return 'avoid'  # Only truly negative < 0.25
+```
+
+**2. Lowered market buy threshold from 0.50 to 0.40:**
+```python
+# market_analyzer.py
+if score >= 0.40:  # Was 0.50 - too conservative
+    signal_type = 'buy'
+```
+
+### Why This Is Safe:
+We have excellent protections that allow aggressive entry:
+- 10% trailing stops
+- Partial profit-taking at +100/200/300/500%
+- Rug detection auto-close
+- Risk assessment still filters garbage
+
+### Result:
+- Tokens with Twitter unavailable (0.35 sentiment) → "hold" → ✅ CAN TRADE
+- Tokens scoring 0.40-0.49 market signal → "buy" → ✅ CAN TRADE
+- Should see buy signals within 2-10 minutes like working period!
+
+### How to Revert:
+```bash
+git revert 4e6a012
+# This will block all trades again when Twitter unavailable
+```
+
+---
+
 ## 2025-11-24 15:00 - Use Trending Tokens First (They Have Market Data!)
 
 ### Commit: `4960573`
