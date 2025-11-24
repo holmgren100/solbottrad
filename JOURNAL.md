@@ -4,6 +4,48 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 14:00 - Revert to Simple /recent Endpoint (USER WAS RIGHT AGAIN!)
+
+### Commit: `b0b1b0d`
+**Status: ✅ CRITICAL FIX - Categories endpoint was BREAKING things!**
+
+### What Changed:
+Removed category rotation and went back to simple `get_recent_tokens()` using `/recent` endpoint
+
+### Why:
+User: "when put in categories it start too fail and start too broke"
+Jupiter categories endpoint returning **400 errors** constantly!
+
+### The Real Problem:
+- Categories endpoint (`/categories/toptraded`, etc) = **400 errors** ❌
+- Simple `/recent` endpoint = **Works perfectly** ✅
+
+### What Was Removed:
+```python
+# REMOVED (was causing 400 errors):
+categories = ['toptraded', 'toptrending', 'toporganicscore', 'recent']
+current_category = categories[self.scan_cycle % len(categories)]
+new_tokens = await self.jupiter.get_trending_tokens(category=current_category, limit=50)
+
+# RESTORED (simple and working):
+new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+```
+
+### Lesson Learned:
+**LISTEN TO THE USER!** They said categories broke things. I tried to "fix" it by adjusting the endpoint path. But the user was right - categories endpoint itself doesn't work reliably. Simple `/recent` is the way.
+
+### Result:
+- No more Jupiter 400 errors
+- Back to getting 50 fresh tokens per scan
+- With 2-minute interval = 150 tokens per 10 minutes
+
+### How to Revert:
+```bash
+git revert b0b1b0d
+```
+
+---
+
 ## 2025-11-24 - Restore 2-Minute Scan Interval (THE MISSING PIECE!)
 
 ### Commit: `c872fd6`
