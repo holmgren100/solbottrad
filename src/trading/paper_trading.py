@@ -32,6 +32,13 @@ class PaperTradingEngine:
         self.use_trailing_stop = os.getenv('USE_TRAILING_STOP', 'true').lower() == 'true'
         self.trailing_stop_percent = float(os.getenv('TRAILING_STOP_PERCENT', '15.0'))
 
+        # Read partial profit taking settings from environment
+        self.partial_profit_enabled = os.getenv('PARTIAL_PROFIT_ENABLED', 'false').lower() == 'true'
+        self.profit_milestone_100 = float(os.getenv('PROFIT_MILESTONE_100', '25'))
+        self.profit_milestone_200 = float(os.getenv('PROFIT_MILESTONE_200', '15'))
+        self.profit_milestone_300 = float(os.getenv('PROFIT_MILESTONE_300', '10'))
+        self.profit_milestone_500 = float(os.getenv('PROFIT_MILESTONE_500', '10'))
+
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
         self.position_manager = PositionManager(max_open_positions=5)
@@ -71,6 +78,19 @@ class PaperTradingEngine:
             )
         else:
             logger.warning("⚠️  Rug protection DISABLED")
+
+        # Log partial profit taking settings
+        if self.partial_profit_enabled:
+            logger.info(
+                f"💰 Partial profit taking ENABLED: "
+                f"+100%={self.profit_milestone_100:.0f}%, "
+                f"+200%={self.profit_milestone_200:.0f}%, "
+                f"+300%={self.profit_milestone_300:.0f}%, "
+                f"+500%={self.profit_milestone_500:.0f}% "
+                f"(locks profits before crashes!)"
+            )
+        else:
+            logger.info("💰 Partial profit taking DISABLED")
 
     async def execute_buy(
         self,
@@ -279,6 +299,58 @@ class PaperTradingEngine:
                     f"Loss: ${position.amount_usd:.2f}"
                 )
                 await self.execute_sell(token_address, 0.00000001, reason='rugged/dead')
+
+        # Check for partial profit milestones (before stop loss/take profit checks)
+        if self.partial_profit_enabled:
+            for token_address in list(self.position_manager.open_positions.keys()):
+                position = self.position_manager.get_position(token_address)
+                if not position or position.initial_quantity == 0:
+                    continue
+
+                milestone = position.check_profit_milestone()
+                if milestone:
+                    # Determine sell percentage based on milestone
+                    sell_pct = 0
+                    if milestone == 100:
+                        sell_pct = self.profit_milestone_100
+                    elif milestone == 200:
+                        sell_pct = self.profit_milestone_200
+                    elif milestone == 300:
+                        sell_pct = self.profit_milestone_300
+                    elif milestone == 500:
+                        sell_pct = self.profit_milestone_500
+
+                    if sell_pct > 0:
+                        # Calculate quantity to sell (percentage of INITIAL quantity, not current)
+                        sell_quantity = (sell_pct / 100) * position.initial_quantity
+                        sell_quantity = min(sell_quantity, position.quantity)  # Don't sell more than we have
+
+                        if sell_quantity > 0:
+                            # Execute partial sell
+                            sell_value = sell_quantity * position.current_price
+                            logger.info(
+                                f"💰 PARTIAL PROFIT at +{milestone}%: {token_address[:8]}... "
+                                f"Selling {sell_pct}% ({sell_quantity:.2f} tokens) = ${sell_value:.2f}"
+                            )
+
+                            # Reduce position quantity
+                            position.quantity -= sell_quantity
+                            position.milestones_hit.add(milestone)
+
+                            # Add proceeds to capital
+                            self.current_capital += sell_value
+
+                            # Calculate profit on this partial sell
+                            cost_basis = (position.entry_price * sell_quantity)
+                            partial_profit = sell_value - cost_basis
+
+                            logger.info(
+                                f"💵 Locked in ${partial_profit:.2f} profit, "
+                                f"Remaining: {position.quantity:.2f} tokens (continues with trailing stop)"
+                            )
+
+                            # Save state after partial sell
+                            self.save_state()
 
         # Now check stop loss/take profit/trailing stop for remaining positions
         for token_address in list(self.position_manager.open_positions.keys()):

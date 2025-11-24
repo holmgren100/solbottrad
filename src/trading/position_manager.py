@@ -32,6 +32,9 @@ class Position:
     last_price_update: datetime = field(default_factory=datetime.now)  # Track when price was last updated
     current_liquidity: float = 0.0  # Track current liquidity
     price_update_failures: int = 0  # Count consecutive failed price updates
+    # Partial profit taking fields
+    initial_quantity: float = 0.0  # Track original quantity for partial sells
+    milestones_hit: set = field(default_factory=set)  # Track which profit milestones have been taken (100, 200, 300, 500)
 
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
@@ -55,6 +58,22 @@ class Position:
                     f"Trailing stop updated for {self.token_address[:8]}...: "
                     f"Peak ${self.highest_price:.8f} → Stop ${self.trailing_stop_price:.8f}"
                 )
+
+    def check_profit_milestone(self) -> Optional[int]:
+        """
+        Check if position has hit a new profit milestone.
+
+        Returns:
+            Milestone level (100, 200, 300, 500) if new milestone hit, None otherwise
+        """
+        # Check milestones in order from highest to lowest
+        milestones = [500, 300, 200, 100]
+
+        for milestone in milestones:
+            if self.unrealized_pnl_percent >= milestone and milestone not in self.milestones_hit:
+                return milestone
+
+        return None
 
     def mark_price_update_failed(self):
         """Mark that a price update failed."""
@@ -166,7 +185,8 @@ class PositionManager:
             use_trailing_stop=use_trailing_stop,
             trailing_stop_percent=trailing_stop_percent,
             highest_price=entry_price,  # Initialize with entry price
-            trailing_stop_price=stop_loss  # Start with regular stop loss
+            trailing_stop_price=stop_loss,  # Start with regular stop loss
+            initial_quantity=quantity  # Track original quantity for partial profit taking
         )
 
         self.open_positions[token_address] = position
