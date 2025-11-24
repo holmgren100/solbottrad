@@ -4,6 +4,66 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-25 00:05 - Faster Dead Token Detection (Lower Failure Threshold)
+
+### Commit: TBD
+### Status: ✅ BUG FIX - Speed up auto-close of stuck 0% positions
+
+### What User Reported:
+- Multiple positions stuck at 0% for hours in state file
+- Positions not getting auto-closed even though they're dead/honeypots
+- "still got in state when not sell off position it is like it in hold stadium"
+
+### The Problem:
+**Dead tokens require too many failures before auto-close:**
+```python
+# Old threshold: position_manager.py line 392
+if position.price_update_failures >= 5:  # Requires 5 failures!
+```
+
+**What happens:**
+1. Position at 0% (honeypot/dead token)
+2. Monitoring tries to fetch price → fails (no data from DexScreener/Jupiter)
+3. `mark_position_price_failed()` called → counter increments
+4. Position NOT added to price_updates (skipped)
+5. Must fail **5 times** before auto-close triggers
+6. At 2-5 min monitoring intervals, this = 10-25 minutes stuck!
+
+**Root cause:** Threshold too high. Dead tokens sit in state file for hours.
+
+### The Fix:
+**Lowered failure threshold from 5 → 3:**
+```python
+# position_manager.py line 393
+if position.price_update_failures >= 3:  # Was 5 → Now 3
+    logger.warning(f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}...")
+    dead_positions.append(token_address)
+```
+
+**Expected timing:**
+- 1st failure: 0 min - position opened
+- 2nd failure: ~3 min - still trying
+- 3rd failure: ~6 min - **AUTO-CLOSE** 🚨
+
+**Much faster cleanup!** Dead tokens auto-close within ~6-9 minutes instead of 15-25 minutes.
+
+### Expected Result:
+- ✅ Faster detection of honeypots with no price data
+- ✅ Stuck 0% positions cleared within 10 minutes
+- ✅ Less capital tied up in dead positions
+- ✅ State file stays clean
+
+### How to Revert:
+```python
+# position_manager.py line 393
+if position.price_update_failures >= 5:  # Back to 5 failures
+```
+
+### Files Changed:
+- `src/trading/position_manager.py` (line 393) - Lowered threshold 5 → 3
+
+---
+
 ## 2025-11-24 21:50 - Increase Liquidity Requirements to Prevent Rugs
 
 ### Status: ✅ CONFIGURATION CHANGE - Prevent low-liquidity rug pulls

@@ -389,7 +389,8 @@ class PositionManager:
                 continue
 
             # Check for multiple consecutive price update failures
-            if position.price_update_failures >= 5:
+            # Lowered from 5 to 3 - faster detection of dead tokens
+            if position.price_update_failures >= 3:
                 logger.warning(
                     f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
                     f"{position.price_update_failures} consecutive price update failures"
