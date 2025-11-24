@@ -423,32 +423,37 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Use SolSniffer for Solana token discovery (Jupiter endpoints don't work)
-            print(f"  📡 Fetching new tokens from SolSniffer (scan #{self.scan_cycle})...")
+            # Multi-source token discovery: Try DexScreener, fallback to curated active tokens
+            # APIs keep breaking, so we use whatever works + backup list of real trading tokens
+            print(f"  📡 Discovering tokens (scan #{self.scan_cycle})...")
             self.scan_cycle += 1
+            new_tokens = []
 
-            new_tokens = await self.solsniffer.get_new_tokens(limit=50)
-
-            if not new_tokens:
-                print("  ⚠️  No tokens from SolSniffer, trying DexScreener trending...")
-                # Fallback to DexScreener trending
+            # Primary: DexScreener trending (most reliable when it works)
+            try:
                 dex_tokens = await self.dexscreener.get_trending_tokens(chain='solana', limit=50)
                 if dex_tokens:
                     new_tokens = [{'address': t.get('baseToken', {}).get('address')} for t in dex_tokens if t.get('baseToken', {}).get('address')]
+                    if new_tokens:
+                        print(f"  ✅ Found {len(new_tokens)} tokens from DexScreener trending!")
+                        logger.info(f"Retrieved {len(new_tokens)} trending tokens from DexScreener")
+            except Exception as e:
+                logger.debug(f"DexScreener trending failed: {e}")
 
+            # Fallback: Curated list of active Solana memecoins/tokens with real volume
+            # These actually trade and have liquidity (not just SOL/USDC)
             if not new_tokens:
-                print("  ⚠️  No tokens returned from Jupiter, using fallback tokens")
-                logger.warning("Jupiter returned no tokens, using fallback")
-                # Fallback to popular tokens if Jupiter fails
+                print("  ⚠️  DexScreener unavailable, using curated active tokens")
+                logger.warning("Using curated token list (DexScreener failed)")
                 new_tokens = [
-                    {'address': 'So11111111111111111111111111111111111111112'},  # SOL
-                    {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},  # USDC
-                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
-                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
+                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # BONK (high volume memecoin)
+                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # JUP (Jupiter token)
+                    {'address': 'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk'},   # WEN (popular memecoin)
+                    {'address': 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3'},  # POPCAT
+                    {'address': 'MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5'},   # MEW
+                    {'address': 'ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82'},   # BOME
                 ]
-            else:
-                print(f"  ✅ Found {len(new_tokens)} tokens from Jupiter!")
-                logger.info(f"Retrieved {len(new_tokens)} tokens from Jupiter")
+                print(f"  ✅ Using {len(new_tokens)} curated high-volume tokens")
 
             # Get currently open positions
             if settings.is_paper_trading():
