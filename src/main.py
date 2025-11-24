@@ -423,12 +423,13 @@ class SolanaTradingBot:
 
         try:
             # Get new tokens from Jupiter - try trending first, fallback to recent
+            # Increased to 50 tokens to find quality opportunities among the noise
             print("  📡 Fetching trending tokens from Jupiter...")
-            new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=20)
+            new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
 
             if not new_tokens:
                 print("  ⚠️  No trending tokens, trying recent tokens...")
-                new_tokens = await self.jupiter.get_recent_tokens(limit=20)
+                new_tokens = await self.jupiter.get_recent_tokens(limit=50)
 
             if not new_tokens:
                 print("  ⚠️  No tokens returned from Jupiter, using fallback tokens")
@@ -679,7 +680,7 @@ class SolanaTradingBot:
         """Main trading loop."""
         logger.info("Starting main trading loop...")
 
-        scan_interval = 300  # 5 minutes
+        scan_interval = 180  # 3 minutes (was 5, reduced for faster opportunity discovery)
         monitor_interval = 60  # 1 minute
 
         last_scan = 0
