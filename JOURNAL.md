@@ -4,6 +4,61 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 - Use Jupiter Discovery Data Directly
+
+### Commit: `568bea6`
+**Status: ✅ CRITICAL FIX - THE REAL PROBLEM**
+
+### What Changed:
+Use Jupiter's discovery data directly instead of throwing it away
+
+### Why:
+User insight: "when used jupiter for scaning only all worked best when implanted data for double all collapsed"
+
+### The Real Problem:
+1. Jupiter `get_recent_tokens()` **ALREADY includes** price/liquidity data:
+   - `usdPrice`, `liquidity`, `mcap`, `fdv`, `createdAt`
+
+2. But we were **THROWING IT AWAY** and calling separate endpoints:
+   - DexScreener `get_token_profile()` → nothing (token too new)
+   - Jupiter `get_token_price_data()` → nothing (different endpoint)
+
+3. Result: "No market data from either source" for 90% of tokens ❌
+
+### Old Flow (Broken):
+```
+1. Jupiter discovers 30 tokens with price/liquidity data ✅
+2. Throw away all that data ❌
+3. Call DexScreener for each token → no data (too new)
+4. Call Jupiter price endpoint for each token → no data (wrong endpoint)
+5. Result: Can't analyze ANY tokens
+```
+
+### New Flow (Working):
+```
+1. Jupiter discovers 30 tokens with price/liquidity data ✅
+2. USE that data directly ✅
+3. Only call DexScreener/Jupiter as fallback if discovery data missing
+4. Result: Analyze all tokens Jupiter provides
+```
+
+### Files Modified:
+- `src/main.py` - Use jupiter_token_data directly, pass to analyze_token()
+
+### Result:
+- ✅ Brand new tokens get analyzed with Jupiter's data
+- ✅ No wasted API calls
+- ✅ Works for tokens DexScreener doesn't know about yet
+- ✅ Back to working state: "jupiter for scanning only all worked"
+
+### How to Revert:
+```bash
+git revert 568bea6
+# This will break token analysis again
+```
+
+---
+
 ## 2025-11-24 - Remove Dual-Source Price Validation
 
 ### Commit: `38be16d`
