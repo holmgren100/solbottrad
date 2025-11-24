@@ -395,6 +395,18 @@ class PositionManager:
                     f"{position.price_update_failures} consecutive price update failures"
                 )
                 dead_positions.append(token_address)
+                continue
+
+            # NEW: Check if price hasn't actually changed (fake updates)
+            # If price is exactly the same as entry after 5+ minutes, likely honeypot
+            if position.current_price == position.entry_price:
+                minutes_held = (datetime.now() - position.entry_time).total_seconds() / 60
+                if minutes_held >= 5:
+                    logger.warning(
+                        f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
+                        f"Price unchanged for {minutes_held:.1f} minutes (likely honeypot/rugged)"
+                    )
+                    dead_positions.append(token_address)
 
         return dead_positions
 
