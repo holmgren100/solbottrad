@@ -278,9 +278,10 @@ class SolanaTradingBot:
             return None
 
         # Determine action
-        # Market signal must be 'buy' AND sentiment must agree (buy/strong_buy)
+        # Market signal must be 'buy' AND sentiment must NOT be 'avoid' (allow hold/buy/strong_buy)
+        # This allows trading when Twitter unavailable (sentiment='hold') but blocks bearish tokens
         action = None
-        if market_signal.signal_type == 'buy' and sentiment_score.recommendation in ['buy', 'strong_buy']:
+        if market_signal.signal_type == 'buy' and sentiment_score.recommendation != 'avoid':
             action = 'buy'
         elif market_signal.signal_type == 'sell':
             action = 'sell'
