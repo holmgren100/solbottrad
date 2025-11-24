@@ -5,6 +5,8 @@ Position management and portfolio tracking.
 from typing import Dict, List, Optional
 from datetime import datetime
 from dataclasses import dataclass, field
+import csv
+import os
 from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,6 +30,7 @@ class Position:
     trailing_stop_percent: float = 15.0  # Trail by 15% from peak
     highest_price: float = 0.0  # Track highest price reached
     trailing_stop_price: float = 0.0  # Dynamic trailing stop price
+    symbol: str = ''  # Token symbol for display
     # Rug detection fields
     last_price_update: datetime = field(default_factory=datetime.now)  # Track when price was last updated
     current_liquidity: float = 0.0  # Track current liquidity
@@ -111,6 +114,10 @@ class Trade:
     timestamp: datetime
     pnl: float = 0.0
     pnl_percent: float = 0.0
+    reason: str = ''  # Why trade closed: 'trailing_stop', 'manual', 'rugged/dead', etc.
+    symbol: str = ''  # Token symbol for readability
+    entry_price: float = 0.0  # Entry price (for sell trades)
+    entry_time: datetime = None  # Entry time (for calculating duration)
 
 
 class PositionManager:
@@ -238,7 +245,7 @@ class PositionManager:
         pnl = position.unrealized_pnl
         pnl_percent = position.unrealized_pnl_percent
 
-        # Create sell trade
+        # Create sell trade with full details for CSV export
         sell_trade = Trade(
             token_address=token_address,
             action='sell',
@@ -247,7 +254,11 @@ class PositionManager:
             quantity=position.quantity,
             timestamp=datetime.now(),
             pnl=pnl,
-            pnl_percent=pnl_percent
+            pnl_percent=pnl_percent,
+            reason=reason,  # Store close reason
+            symbol=getattr(position, 'symbol', token_address[:8]),  # Token symbol or short address
+            entry_price=position.entry_price,  # Store entry price for reference
+            entry_time=position.entry_time  # Store entry time for duration calculation
         )
 
         self.closed_trades.append(sell_trade)
@@ -515,3 +526,87 @@ class PositionManager:
         """Reset daily statistics."""
         self.daily_trades = []
         logger.info("Daily statistics reset")
+
+    def export_to_csv(self, filepath: str = 'data/trade_history.csv') -> int:
+        """
+        Export all closed trades to a CSV file for easy analysis in Excel.
+
+        Args:
+            filepath: Path to save CSV file
+
+        Returns:
+            Number of trades exported
+        """
+        # Create data directory if it doesn't exist
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+        # Get only sell trades (actual closed positions)
+        sell_trades = [t for t in self.closed_trades if t.action == 'sell']
+
+        if not sell_trades:
+            logger.info("No trades to export")
+            return 0
+
+        # Define CSV columns
+        fieldnames = [
+            'Date',
+            'Time',
+            'Token',
+            'Symbol',
+            'Entry Price',
+            'Exit Price',
+            'Position Size ($)',
+            'PnL ($)',
+            'PnL (%)',
+            'Win/Loss',
+            'Duration',
+            'Close Reason'
+        ]
+
+        # Write to CSV
+        with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for trade in sell_trades:
+                # Calculate duration
+                if trade.entry_time:
+                    duration = trade.timestamp - trade.entry_time
+                    duration_str = f"{duration.total_seconds() / 3600:.1f}h"
+                else:
+                    duration_str = "N/A"
+
+                # Determine win/loss
+                win_loss = "WIN" if trade.pnl > 0 else "LOSS" if trade.pnl < 0 else "BREAK-EVEN"
+
+                # Format close reason nicely
+                reason_map = {
+                    'trailing_stop': 'Trailing Stop',
+                    'stop_loss': 'Stop Loss',
+                    'take_profit': 'Take Profit',
+                    'manual': 'Manual Close',
+                    'manual_telegram': 'Manual (Telegram)',
+                    'manual_closeall': 'Close All (Telegram)',
+                    'rugged/dead': 'Rugged/Dead',
+                    'partial_profit': 'Partial Profit'
+                }
+                close_reason = reason_map.get(trade.reason, trade.reason or 'Unknown')
+
+                # Write row
+                writer.writerow({
+                    'Date': trade.timestamp.strftime('%Y-%m-%d'),
+                    'Time': trade.timestamp.strftime('%H:%M:%S'),
+                    'Token': trade.token_address[:16] + '...',  # Shortened for readability
+                    'Symbol': trade.symbol or trade.token_address[:8],
+                    'Entry Price': f"${trade.entry_price:.8f}",
+                    'Exit Price': f"${trade.price:.8f}",
+                    'Position Size ($)': f"${trade.amount_usd:.2f}",
+                    'PnL ($)': f"${trade.pnl:.2f}",
+                    'PnL (%)': f"{trade.pnl_percent:+.2f}%",
+                    'Win/Loss': win_loss,
+                    'Duration': duration_str,
+                    'Close Reason': close_reason
+                })
+
+        logger.info(f"Exported {len(sell_trades)} trades to {filepath}")
+        return len(sell_trades)

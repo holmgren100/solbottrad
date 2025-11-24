@@ -4,6 +4,87 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-25 00:30 - Add CSV Trade Export for Excel Analysis
+
+### Commit: TBD
+### Status: ✅ NEW FEATURE - Export trade history to Excel-ready CSV
+
+### What User Requested:
+"can have a easy border template that can open with date coin price pnl procent win or losses rug or likvidation soo easy can open excel csv see exact all trades but in clear tables with good info soo easy can follow up how works and soo?"
+
+### What Was Added:
+
+**1. Enhanced Trade dataclass with tracking fields:**
+```python
+# position_manager.py Trade class:
+@dataclass
+class Trade:
+    # ... existing fields ...
+    reason: str = ''  # Close reason: 'trailing_stop', 'rugged/dead', etc.
+    symbol: str = ''  # Token symbol for readability
+    entry_price: float = 0.0  # Entry price reference
+    entry_time: datetime = None  # Calculate duration
+```
+
+**2. CSV Export method:**
+```python
+# position_manager.py lines 530-612:
+def export_to_csv(self, filepath='data/trade_history.csv') -> int:
+    """Export all closed trades to CSV for Excel analysis"""
+```
+
+**CSV Columns:**
+- Date & Time (separate columns)
+- Token Address (shortened)
+- Symbol (easy to read)
+- Entry Price
+- Exit Price
+- Position Size ($)
+- PnL ($)
+- PnL (%)
+- Win/Loss (WIN/LOSS/BREAK-EVEN)
+- Duration (hours held)
+- Close Reason (Trailing Stop, Rugged/Dead, Manual, etc.)
+
+**3. Telegram /export command:**
+```python
+# telegram_commands.py lines 296-340:
+async def cmd_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Export trade history and send CSV file to Telegram"""
+```
+
+### How to Use:
+```
+/export
+```
+
+Bot will:
+1. Generate CSV file with all closed trades
+2. Send file directly in Telegram
+3. Filename includes timestamp: `trade_history_20251125_003045.csv`
+4. Open in Excel/Google Sheets for analysis
+
+### CSV Example:
+```csv
+Date,Time,Token,Symbol,Entry Price,Exit Price,Position Size ($),PnL ($),PnL (%),Win/Loss,Duration,Close Reason
+2025-11-24,23:56:00,CUXgyAQj...,Lighter,$0.19050000,$1.72400000,$55.61,$40.50,+804.51%,WIN,12.3h,Manual (Telegram)
+2025-11-24,23:57:00,9aeKFZE8...,7-ELEVEN,$0.00005125,$0.00000001,$54.84,$-54.83,-100.00%,LOSS,0.5h,Rugged/Dead
+```
+
+### Expected Result:
+- ✅ Easy Excel analysis of all trades
+- ✅ Track win/loss patterns
+- ✅ See which close reasons are profitable
+- ✅ Identify best performing strategies
+- ✅ Calculate average hold times
+- ✅ Filter/sort/pivot in Excel
+
+### Files Changed:
+- `src/trading/position_manager.py` (lines 5-10, 103-117, 245-259, 530-612) - Trade tracking & CSV export
+- `src/monitoring/telegram_commands.py` (lines 296-340, 382, 417) - /export command
+
+---
+
 ## 2025-11-25 00:15 - Fix /close Command & Add /closeall
 
 ### Commit: TBD

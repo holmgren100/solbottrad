@@ -293,6 +293,52 @@ class TelegramCommandHandler:
             logger.error(f"Error in /closeall command: {e}")
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
+    async def cmd_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Export trade history to CSV file."""
+        if not self.is_authorized(update):
+            await update.message.reply_text("⛔ Unauthorized")
+            return
+
+        try:
+            from datetime import datetime
+
+            # Export trades to CSV
+            filepath = 'data/trade_history.csv'
+            trade_count = self.bot.trading_engine.position_manager.export_to_csv(filepath)
+
+            if trade_count == 0:
+                await update.message.reply_text("📭 No trades to export yet")
+                return
+
+            # Send file to user
+            await update.message.reply_text(
+                f"📊 Exporting {trade_count} trades...\n\n"
+                f"Columns:\n"
+                f"• Date & Time\n"
+                f"• Token & Symbol\n"
+                f"• Entry/Exit Prices\n"
+                f"• Position Size\n"
+                f"• PnL ($ and %)\n"
+                f"• Win/Loss\n"
+                f"• Duration\n"
+                f"• Close Reason (Trailing Stop, Rug, Manual, etc.)\n\n"
+                f"Opening in Excel..."
+            )
+
+            # Send CSV file
+            with open(filepath, 'rb') as f:
+                await update.message.reply_document(
+                    document=f,
+                    filename=f"trade_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    caption=f"✅ {trade_count} trades exported"
+                )
+
+            logger.info(f"Exported {trade_count} trades via /export command")
+
+        except Exception as e:
+            logger.error(f"Error in /export command: {e}")
+            await update.message.reply_text(f"❌ Error exporting trades: {str(e)}")
+
     async def cmd_pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Pause trading (monitoring continues)."""
         if not self.is_authorized(update):
@@ -333,6 +379,7 @@ class TelegramCommandHandler:
 *Status & Info*
 /status - View portfolio and positions
 /settings - View current settings
+/export - Export trade history to CSV (Excel)
 
 *Controls*
 /pause - Pause trading
@@ -368,6 +415,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("take_profit", self.cmd_take_profit))
         self.application.add_handler(CommandHandler("close", self.cmd_close))
         self.application.add_handler(CommandHandler("closeall", self.cmd_closeall))
+        self.application.add_handler(CommandHandler("export", self.cmd_export))
         self.application.add_handler(CommandHandler("pause", self.cmd_pause))
         self.application.add_handler(CommandHandler("resume", self.cmd_resume))
         self.application.add_handler(CommandHandler("help", self.cmd_help))
