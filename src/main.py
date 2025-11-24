@@ -423,37 +423,14 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Multi-source token discovery: Try DexScreener, fallback to curated active tokens
-            # APIs keep breaking, so we use whatever works + backup list of real trading tokens
-            print(f"  📡 Discovering tokens (scan #{self.scan_cycle})...")
-            self.scan_cycle += 1
-            new_tokens = []
+            # Get new tokens from Jupiter (simple, no fancy rotation - just what works)
+            print("  📡 Fetching tokens from Jupiter...")
+            new_tokens = await self.jupiter.get_recent_tokens(limit=50)
 
-            # Primary: DexScreener trending (most reliable when it works)
-            try:
-                dex_tokens = await self.dexscreener.get_trending_tokens(chain='solana', limit=50)
-                if dex_tokens:
-                    new_tokens = [{'address': t.get('baseToken', {}).get('address')} for t in dex_tokens if t.get('baseToken', {}).get('address')]
-                    if new_tokens:
-                        print(f"  ✅ Found {len(new_tokens)} tokens from DexScreener trending!")
-                        logger.info(f"Retrieved {len(new_tokens)} trending tokens from DexScreener")
-            except Exception as e:
-                logger.debug(f"DexScreener trending failed: {e}")
-
-            # Fallback: Curated list of active Solana memecoins/tokens with real volume
-            # These actually trade and have liquidity (not just SOL/USDC)
             if not new_tokens:
-                print("  ⚠️  DexScreener unavailable, using curated active tokens")
-                logger.warning("Using curated token list (DexScreener failed)")
-                new_tokens = [
-                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # BONK (high volume memecoin)
-                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # JUP (Jupiter token)
-                    {'address': 'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk'},   # WEN (popular memecoin)
-                    {'address': 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3'},  # POPCAT
-                    {'address': 'MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5'},   # MEW
-                    {'address': 'ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82'},   # BOME
-                ]
-                print(f"  ✅ Using {len(new_tokens)} curated high-volume tokens")
+                print("  ⚠️  No tokens from Jupiter")
+                logger.warning("Jupiter returned no tokens")
+                return
 
             # Get currently open positions
             if settings.is_paper_trading():
@@ -690,7 +667,7 @@ class SolanaTradingBot:
         """Main trading loop."""
         logger.info("Starting main trading loop...")
 
-        scan_interval = 120  # 2 minutes (was 3, faster = catch opportunities before they disappear)
+        scan_interval = 300  # 5 minutes
         monitor_interval = 60  # 1 minute
 
         last_scan = 0
