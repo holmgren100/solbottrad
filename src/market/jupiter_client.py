@@ -159,6 +159,56 @@ class JupiterClient:
             logger.error(f"Error searching tokens on Jupiter: {e}")
             return []
 
+    async def get_token_price_data(self, token_address: str) -> Optional[Dict]:
+        """
+        Get price and liquidity data for a specific token.
+
+        Args:
+            token_address: Token mint address
+
+        Returns:
+            Dictionary with price and liquidity data, or None if not found
+        """
+        await self._ensure_session()
+
+        try:
+            # Jupiter API doesn't have a direct single-token endpoint
+            # We can search for the token and extract price/liquidity
+            url = f"{self.base_url}/search"
+            params = {'q': token_address}
+
+            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Find exact match by address/id
+                    for token in data:
+                        token_id = token.get('id') or token.get('address')
+                        if token_id and token_id.lower() == token_address.lower():
+                            # Found the token, extract price and liquidity
+                            price_usd = token.get('usdPrice', 0.0)
+                            liquidity = token.get('liquidity', 0.0)
+
+                            if price_usd and isinstance(price_usd, (int, float)):
+                                return {
+                                    'price_usd': float(price_usd),
+                                    'liquidity_usd': float(liquidity) if liquidity else 0.0,
+                                    'symbol': token.get('symbol', 'UNKNOWN'),
+                                    'name': token.get('name', 'Unknown'),
+                                    'source': 'jupiter'
+                                }
+
+                    # Token not found in search results
+                    logger.debug(f"Token {token_address[:8]}... not found in Jupiter search")
+                    return None
+                else:
+                    logger.warning(f"Jupiter search API returned {response.status} for {token_address[:8]}...")
+                    return None
+
+        except Exception as e:
+            logger.error(f"Error fetching token data from Jupiter for {token_address[:8]}...: {e}")
+            return None
+
     async def health_check(self) -> bool:
         """
         Check if Jupiter API is accessible.
