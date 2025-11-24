@@ -4,6 +4,74 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 - Remove Dual-Source Price Validation
+
+### Commit: `38be16d`
+**Status: ✅ CRITICAL FIX - MORE TRADES**
+
+### What Changed:
+Removed the 20% price divergence check that was blocking most trades
+
+### Why:
+User insight: "when used jupiter for scaning only all worked best when implanted data for double all collapsed"
+
+The bot was rejecting tokens when DexScreener and Jupiter prices differed by >20%.
+For volatile moonshots, this is NORMAL:
+- Different DEXs have different prices
+- pump.fun vs Raydium price variance
+- New tokens = high volatility
+- Data refresh timing differs
+
+**Result:** Bot blocked most opportunities thinking data was "suspicious"
+
+### Old Code (Blocking Trades):
+```python
+if price_diff_pct > 20:
+    logger.warning("PRICE DIVERGENCE...")
+    return None  # ❌ BLOCKS TRADE
+```
+
+### New Code (Let Protections Handle It):
+```python
+# Use DexScreener as primary (most reliable), fallback to Jupiter
+# Removed price divergence check - it was blocking legit volatile tokens
+# With partial profit-taking + trailing stops, we can handle data variance
+profile = dex_profile if dex_profile else jupiter_data
+```
+
+### Philosophy Change:
+**OLD:** "Perfect data on entry" → Miss opportunities
+**NEW:** "Aggressive entry, protected exit" → Catch moonshots
+
+### Our Protections Handle Bad Data:
+- ✅ Partial profit-taking locks gains at +100%, +200%, +300%, +500%
+- ✅ Trailing stop limits losses to 10%
+- ✅ Rug detection auto-exits if liquidity drops
+
+### Files Modified:
+- `src/main.py` - Removed price divergence check
+- `MARKET_DATA_ANALYSIS.md` - Full API research and cost analysis
+
+### Result:
+- ✅ More trades on volatile tokens
+- ✅ Catch moonshots early
+- ✅ Protections handle exits
+- ✅ $0 cost (stay on free tier)
+
+### Market Data API Research:
+- **Keep DexScreener** (FREE) - best quality, 300 req/min
+- **Keep Jupiter** (FREE) - good token discovery
+- **No need to upgrade** - free tier handles 18,000 req/hour
+- **Save $99-$449/month** by fixing logic instead of buying premium
+
+### How to Revert:
+```bash
+git revert 38be16d
+# This will bring back the price validation that blocks trades
+```
+
+---
+
 ## 2025-11-24 - Aggressive Risk Assessment for Moonshots
 
 ### Commit: `b7ff7fc`
