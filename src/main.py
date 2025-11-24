@@ -119,11 +119,32 @@ class SolanaTradingBot:
         logger.info(f"Analyzing token: {token_address}")
 
         try:
-            # 1. Get market data
-            profile = await self.dexscreener.get_token_profile(token_address)
-            if not profile:
-                logger.warning(f"No market data found for {token_address}")
+            # 1. Get market data from BOTH sources for validation
+            dex_profile = await self.dexscreener.get_token_profile(token_address)
+            jupiter_data = await self.jupiter.get_token_price_data(token_address)
+
+            # Validate we have data from at least one source
+            if not dex_profile and not jupiter_data:
+                logger.warning(f"No market data from either source for {token_address}")
                 return None
+
+            # Cross-validate price and liquidity
+            if dex_profile and jupiter_data:
+                dex_price = dex_profile['price_usd']
+                jup_price = jupiter_data['price_usd']
+                price_diff_pct = abs((dex_price - jup_price) / dex_price) * 100
+
+                if price_diff_pct > 20:
+                    # Large divergence - suspicious data
+                    logger.warning(
+                        f"⚠️  PRICE DIVERGENCE in analysis: {token_address[:8]}... "
+                        f"DexScreener ${dex_price:.8f} vs Jupiter ${jup_price:.8f} ({price_diff_pct:.1f}%)"
+                    )
+                    # Don't trade on suspicious data
+                    return None
+
+            # Use DexScreener as primary (has more metadata), but validated
+            profile = dex_profile if dex_profile else jupiter_data
 
             # 2. Get security data
             security_data = await self.solsniffer.analyze_token(token_address)
