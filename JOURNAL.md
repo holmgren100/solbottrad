@@ -4,6 +4,64 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 20:00 - Add Honeypot/Fake Liquidity Detection
+
+### Commit: `af128a4`
+**Status: ✅ NEW FEATURE - Auto-close honeypots and fake liquidity tokens**
+
+### What User Reported:
+Multiple positions stuck at 0% for hours:
+- 95iBM5HE: 0% for 3+ hours
+- A4Pwfhwn: 0% for 2+ hours
+- 8FBUq4nR & B3VbhsVQ: Had to close manually - "high liquidity but no trades, big sell = rugged"
+
+### The Problem:
+**Honeypots and fake liquidity tokens:**
+- Can BUY the token ✅
+- DexScreener shows "high liquidity" ✅
+- Price "updates" keep coming ✅
+- But price NEVER moves from entry ❌
+- Can't actually SELL (honeypot) ❌
+
+**Why existing rug detection missed it:**
+```python
+# Old checks:
+1. Stale price (no updates) → BUT price kept "updating" to same value
+2. Low liquidity → BUT DexScreener reported high liquidity
+3. Update failures → BUT updates were "successful"
+
+# Result: Honeypots passed all checks!
+```
+
+### The Fix:
+**New detection (lines 400-409):**
+```python
+# If price hasn't changed AT ALL after 5 minutes → honeypot
+if position.current_price == position.entry_price:
+    minutes_held = (datetime.now() - position.entry_time).total_seconds() / 60
+    if minutes_held >= 5:
+        # AUTO-CLOSE as rugged/honeypot
+```
+
+### What This Catches:
+- **Honeypots** - Can buy but not sell, price never moves
+- **Fake liquidity** - High liquidity reported but no actual volume
+- **Dead tokens** - No market activity at all
+- **Rugged tokens** - Devs pulled liquidity, no trades happening
+
+### Result:
+- After 5 minutes with 0% gain/loss → auto-closes
+- Frees up capital instead of tying it up in dead positions
+- User doesn't have to manually close honeypots
+
+### How to Revert:
+```bash
+git revert af128a4
+# This will stop auto-closing honeypots (not recommended)
+```
+
+---
+
 ## 2025-11-24 19:00 - Fix Trailing Stop Using Wrong Price (CRITICAL!)
 
 ### Commit: `f7ded97`
