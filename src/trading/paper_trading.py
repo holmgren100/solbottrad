@@ -41,7 +41,9 @@ class PaperTradingEngine:
 
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
-        self.position_manager = PositionManager(max_open_positions=5)
+        # Read max positions from .env (was hardcoded to 5)
+        max_positions = int(os.getenv('MAX_OPEN_POSITIONS', '7'))
+        self.position_manager = PositionManager(max_open_positions=max_positions)
         self.total_invested = 0.0
 
         # Use absolute path for state file
@@ -418,7 +420,9 @@ class PaperTradingEngine:
         """Reset the paper trading engine to initial state."""
         self.current_capital = self.initial_capital
         self.total_invested = 0.0
-        self.position_manager = PositionManager(max_open_positions=5)
+        # Use same max_positions from .env as initialization
+        max_positions = int(os.getenv('MAX_OPEN_POSITIONS', '7'))
+        self.position_manager = PositionManager(max_open_positions=max_positions)
         logger.info("Paper trading engine reset")
 
     def save_state(self):
