@@ -128,12 +128,19 @@ class SolanaTradingBot:
             # 2. Get security data
             security_data = await self.solsniffer.analyze_token(token_address)
 
-            # 3. Get social sentiment
+            # 3. Get social sentiment (optional - skip if rate limited)
             token_symbol = profile.get('symbol', 'UNKNOWN')
-            social_data = await self.twitter.analyze_token_buzz(token_symbol, token_address)
-            tweets = await self.twitter.search_token_mentions(token_symbol, token_address)
-            sentiment_analysis = self.sentiment_analyzer.analyze_tweets(tweets)
-            coordination_analysis = self.sentiment_analyzer.detect_coordinated_activity(tweets)
+            try:
+                social_data = await self.twitter.analyze_token_buzz(token_symbol, token_address)
+                tweets = await self.twitter.search_token_mentions(token_symbol, token_address)
+                sentiment_analysis = self.sentiment_analyzer.analyze_tweets(tweets)
+                coordination_analysis = self.sentiment_analyzer.detect_coordinated_activity(tweets)
+            except Exception as e:
+                # Twitter optional - use defaults if rate limited or unavailable
+                logger.debug(f"Twitter sentiment unavailable for {token_symbol}: {e}")
+                social_data = {'mentions': 0, 'sentiment': 'neutral', 'buzz_score': 0.5}
+                sentiment_analysis = {'sentiment': 'neutral', 'score': 0.5}
+                coordination_analysis = {'coordinated': False, 'score': 0.0}
 
             # 4. Generate market signal
             market_signal = self.market_analyzer.analyze_token(profile)

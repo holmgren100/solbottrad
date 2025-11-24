@@ -84,7 +84,9 @@ class SolSnifferClient:
                         logger.error(f"Failed to parse token JSON: {e}")
                         return None
                 else:
-                    logger.warning(
+                    # Use debug for rate limits (429) to reduce log noise
+                    log_level = logger.debug if response.status == 429 else logger.warning
+                    log_level(
                         f"Token data not available for {token_address[:8]}... "
                         f"(status={response.status})"
                     )
