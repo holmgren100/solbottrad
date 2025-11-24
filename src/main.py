@@ -433,14 +433,27 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Get new tokens from Jupiter (simple, no fancy rotation - just what works)
-            print("  📡 Fetching tokens from Jupiter...")
-            new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+            # Get trending tokens (they have market data!) or fallback to recent
+            print("  📡 Fetching trending tokens from Jupiter...")
+            new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
 
             if not new_tokens:
-                print("  ⚠️  No tokens from Jupiter")
-                logger.warning("Jupiter returned no tokens")
-                return
+                print("  ⚠️  No trending tokens, trying recent...")
+                new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+
+            if not new_tokens:
+                print("  ⚠️  No tokens from Jupiter, using fallback")
+                logger.warning("Jupiter returned no tokens, using fallback")
+                # Fallback to popular tokens as last resort
+                new_tokens = [
+                    {'address': 'So11111111111111111111111111111111111111112'},  # SOL
+                    {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},  # USDC
+                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
+                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
+                ]
+            else:
+                print(f"  ✅ Found {len(new_tokens)} tokens!")
+                logger.info(f"Retrieved {len(new_tokens)} tokens from Jupiter")
 
             # Get currently open positions
             if settings.is_paper_trading():
