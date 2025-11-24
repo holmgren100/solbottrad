@@ -96,21 +96,37 @@ class MarketAnalyzer:
                 liquidity=liquidity
             )
 
-        # Check if this is a brand new token (no volume/price data yet)
-        is_new_token = (volume_24h == 0 or price_change_24h == 0)
-        if is_new_token:
-            reasons.append("Brand new token - early entry opportunity")
-            score += 0.15  # BONUS for new launches instead of penalty!
+        # Check if token has actual trading volume
+        # CRITICAL: Tokens with 0 volume are usually honeypots (can't sell)
+        if volume_24h == 0:
+            reasons.append("No trading volume - likely honeypot/dead token")
+            signal_type = 'hold'
+            confidence = 0.1
+            return MarketSignal(
+                token_address=token_address,
+                signal_type=signal_type,
+                strength=0.0,
+                confidence=confidence,
+                reasons=reasons,
+                timestamp=datetime.now(),
+                price=price,
+                volume_24h=volume_24h,
+                liquidity=liquidity
+            )
 
-        # Volume analysis (skip if brand new token)
-        if not is_new_token:
-            volume_to_liquidity_ratio = volume_24h / liquidity if liquidity > 0 else 0
-            if volume_to_liquidity_ratio > 0.5:
-                reasons.append(f"Strong volume/liquidity ratio ({volume_to_liquidity_ratio:.2f})")
-                score += 0.15
-            elif volume_to_liquidity_ratio < 0.1:
-                reasons.append(f"Low volume/liquidity ratio ({volume_to_liquidity_ratio:.2f})")
-                score -= 0.1
+        # Volume analysis - require minimum trading activity
+        volume_to_liquidity_ratio = volume_24h / liquidity if liquidity > 0 else 0
+
+        # Require at least SOME volume relative to liquidity
+        if volume_to_liquidity_ratio < 0.01:  # Less than 1% turnover = suspicious
+            reasons.append(f"Very low volume/liquidity ratio ({volume_to_liquidity_ratio:.4f}) - likely fake/honeypot")
+            score -= 0.3  # Heavy penalty
+        elif volume_to_liquidity_ratio > 0.5:
+            reasons.append(f"Strong volume/liquidity ratio ({volume_to_liquidity_ratio:.2f})")
+            score += 0.15
+        elif volume_to_liquidity_ratio < 0.1:
+            reasons.append(f"Low volume/liquidity ratio ({volume_to_liquidity_ratio:.2f})")
+            score -= 0.1
 
         # Price change analysis
         if price_change_24h > 20:
