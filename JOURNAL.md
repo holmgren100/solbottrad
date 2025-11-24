@@ -4,6 +4,106 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-25 00:15 - Fix /close Command & Add /closeall
+
+### Commit: TBD
+### Status: ✅ BUG FIX + NEW FEATURE - Accurate manual position closing
+
+### What User Reported:
+- Win rate 50% (48/48 wins/losses) despite +208% portfolio gain
+- Manually closed all positions using `/close` command
+- "when a trade hit trailing stop it goes as a losses and sometimes seems like a profit doo it too"
+- Requested: "is it possibel get a comand too close all trades"
+
+### The Problem:
+**`/close` command used STALE cached prices:**
+```python
+# OLD CODE (telegram_commands.py line 191):
+result = await self.bot.trading_engine.execute_sell(
+    matching_pos.token_address,
+    matching_pos.current_price,  # ❌ CACHED PRICE - Could be hours old!
+    reason='manual_telegram'
+)
+```
+
+**What happened:**
+1. Position at +800% (price $1.72 but cached at $0.19)
+2. User runs `/close CUXgyAQj`
+3. Closed at **cached price $0.19** instead of current $1.72
+4. Showed as **LOSS** instead of +800% win
+5. Win rate completely wrong!
+
+**Root cause:** DexScreener sometimes doesn't update prices for hours. Bot uses cached price when manually closing, showing massive winners as losses.
+
+### The Fix:
+
+**1. Fixed `/close` to fetch CURRENT price:**
+```python
+# NEW CODE (telegram_commands.py lines 190-210):
+# Fetch CURRENT price before closing
+dex_profile = await self.bot.dexscreener.get_token_profile(token_address)
+current_price = dex_profile['price_usd'] if dex_profile else None
+
+# Try Jupiter if DexScreener fails
+if not current_price:
+    jupiter_data = await self.bot.jupiter.get_token_price_data(token_address)
+    current_price = jupiter_data['price_usd'] if jupiter_data else None
+
+# Fallback to cached price only if all sources fail
+if not current_price:
+    current_price = matching_pos.current_price
+
+# Close at CURRENT price (not cached!)
+result = await self.bot.trading_engine.execute_sell(
+    matching_pos.token_address,
+    current_price,  # ✅ FRESH PRICE
+    reason='manual_telegram'
+)
+```
+
+**2. Added `/closeall` command:**
+```python
+# NEW COMMAND (telegram_commands.py lines 229-294):
+async def cmd_closeall(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Close all open positions at current market prices."""
+
+    # For each position:
+    # 1. Fetch CURRENT price from DexScreener
+    # 2. Fallback to Jupiter if needed
+    # 3. Close at accurate price
+    # 4. Report per-position PnL
+    # 5. Show total P&L summary
+```
+
+### Expected Result:
+- ✅ `/close` now closes at CURRENT market price (not cached)
+- ✅ Win/loss tracking accurate (based on actual exit price)
+- ✅ `/closeall` closes all positions with one command
+- ✅ Each position fetches fresh price before closing
+- ✅ Summary shows total P&L and per-position results
+
+### How to Use:
+```bash
+# Close single position at CURRENT price
+/close CUXgyAQj
+
+# Close ALL positions at CURRENT prices
+/closeall
+```
+
+### How to Revert:
+```python
+# telegram_commands.py line 207 - revert to cached price:
+current_price = matching_pos.current_price
+
+# Remove /closeall: Delete lines 229-294 and handler registration
+```
+
+### Files Changed:
+- `src/monitoring/telegram_commands.py` (lines 190-294, 369, 341) - Fixed /close, added /closeall, updated help
+
+---
+
 ## 2025-11-25 00:05 - Faster Dead Token Detection (Lower Failure Threshold)
 
 ### Commit: TBD

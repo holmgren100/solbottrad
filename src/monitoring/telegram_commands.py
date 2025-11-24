@@ -187,10 +187,26 @@ class TelegramCommandHandler:
                 await update.message.reply_text(f"❌ No position found for {token_address}")
                 return
 
-            # Close the position
+            # IMPORTANT: Fetch CURRENT price before closing (don't use cached price!)
+            await update.message.reply_text(f"🔄 Fetching current price for {matching_pos.token_address[:8]}...")
+
+            dex_profile = await self.bot.dexscreener.get_token_profile(matching_pos.token_address)
+            current_price = dex_profile['price_usd'] if dex_profile else matching_pos.current_price
+
+            # If DexScreener fails, try Jupiter
+            if not current_price or current_price == 0:
+                jupiter_data = await self.bot.jupiter.get_token_price_data(matching_pos.token_address)
+                current_price = jupiter_data['price_usd'] if jupiter_data else matching_pos.current_price
+
+            # Fallback to cached price if all sources fail
+            if not current_price or current_price == 0:
+                current_price = matching_pos.current_price
+                await update.message.reply_text(f"⚠️ Using cached price (sources unavailable)")
+
+            # Close the position at CURRENT price
             result = await self.bot.trading_engine.execute_sell(
                 matching_pos.token_address,
-                matching_pos.current_price,
+                current_price,
                 reason='manual_telegram'
             )
 
@@ -198,14 +214,83 @@ class TelegramCommandHandler:
                 await update.message.reply_text(
                     f"✅ Closed position\n"
                     f"Token: {matching_pos.token_address[:8]}...\n"
+                    f"Entry: ${matching_pos.entry_price:.8f}\n"
+                    f"Exit: ${current_price:.8f}\n"
                     f"P&L: ${result['pnl']:.2f} ({result['pnl_percent']:+.2f}%)"
                 )
-                logger.info(f"Position {matching_pos.token_address[:8]} closed via Telegram")
+                logger.info(f"Position {matching_pos.token_address[:8]} closed via Telegram at ${current_price:.8f}")
             else:
                 await update.message.reply_text(f"❌ Failed to close: {result.get('reason', 'unknown')}")
 
         except Exception as e:
             logger.error(f"Error in /close command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def cmd_closeall(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Close all open positions at current market prices."""
+        if not self.is_authorized(update):
+            await update.message.reply_text("⛔ Unauthorized")
+            return
+
+        try:
+            positions = self.bot.trading_engine.position_manager.get_all_positions()
+
+            if not positions:
+                await update.message.reply_text("📭 No open positions to close")
+                return
+
+            await update.message.reply_text(f"🔄 Closing {len(positions)} position(s)...\n"
+                                           f"This may take a moment...")
+
+            closed_count = 0
+            total_pnl = 0
+            results = []
+
+            for pos in positions:
+                try:
+                    # Fetch CURRENT price for each position
+                    dex_profile = await self.bot.dexscreener.get_token_profile(pos.token_address)
+                    current_price = dex_profile['price_usd'] if dex_profile else None
+
+                    # If DexScreener fails, try Jupiter
+                    if not current_price or current_price == 0:
+                        jupiter_data = await self.bot.jupiter.get_token_price_data(pos.token_address)
+                        current_price = jupiter_data['price_usd'] if jupiter_data else None
+
+                    # Fallback to cached price if all sources fail
+                    if not current_price or current_price == 0:
+                        current_price = pos.current_price
+
+                    # Close the position
+                    result = await self.bot.trading_engine.execute_sell(
+                        pos.token_address,
+                        current_price,
+                        reason='manual_closeall'
+                    )
+
+                    if result['status'] == 'success':
+                        closed_count += 1
+                        total_pnl += result['pnl']
+                        pnl_pct = result['pnl_percent']
+                        emoji = "🟢" if pnl_pct > 0 else "🔴" if pnl_pct < 0 else "⚪"
+                        results.append(f"{emoji} {pos.token_address[:8]}: {pnl_pct:+.2f}%")
+                    else:
+                        results.append(f"❌ {pos.token_address[:8]}: Failed")
+
+                except Exception as e:
+                    logger.error(f"Error closing {pos.token_address[:8]}: {e}")
+                    results.append(f"❌ {pos.token_address[:8]}: Error")
+
+            # Send summary
+            message = f"✅ Closed {closed_count}/{len(positions)} positions\n"
+            message += f"Total P&L: ${total_pnl:.2f}\n\n"
+            message += "Results:\n" + "\n".join(results)
+
+            await update.message.reply_text(message)
+            logger.info(f"Closed all positions via /closeall: {closed_count} positions, ${total_pnl:.2f} PnL")
+
+        except Exception as e:
+            logger.error(f"Error in /closeall command: {e}")
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
     async def cmd_pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -253,6 +338,7 @@ class TelegramCommandHandler:
 /pause - Pause trading
 /resume - Resume trading
 /close <token> - Close a position
+/closeall - Close ALL positions at current prices
 
 *Settings*
 /stop_loss <pct> - Set stop loss %
@@ -281,6 +367,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("stop_loss", self.cmd_stop_loss))
         self.application.add_handler(CommandHandler("take_profit", self.cmd_take_profit))
         self.application.add_handler(CommandHandler("close", self.cmd_close))
+        self.application.add_handler(CommandHandler("closeall", self.cmd_closeall))
         self.application.add_handler(CommandHandler("pause", self.cmd_pause))
         self.application.add_handler(CommandHandler("resume", self.cmd_resume))
         self.application.add_handler(CommandHandler("help", self.cmd_help))
