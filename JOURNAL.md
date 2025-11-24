@@ -4,6 +4,71 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 19:00 - Fix Trailing Stop Using Wrong Price (CRITICAL!)
+
+### Commit: `f7ded97`
+**Status: 🚨 CRITICAL BUG FIX - Trailing stops selling at RANDOM prices!**
+
+### What User's Logs Showed:
+```
+Trailing stop triggered: Peak $0.76510000 (+176.3%), Exit $0.61550000
+Closed position: @ $0.26600000, PnL: $-1.53 (-3.9%)
+```
+
+**Bot calculated exit at $0.615 (+100% profit) but SOLD at $0.266 (LOSS!)** 😱
+
+### Root Cause:
+**Undefined variable bug** in update_prices() lines 358-378:
+
+```python
+# First loop (lines 274-281)
+for token_address, current_price in price_updates.items():
+    update_position_price(token_address, current_price, liquidity)
+    # current_price gets set to each token's price
+
+# Second loop (lines 358-372) - THE BUG!
+for token_address in list(self.position_manager.open_positions.keys()):
+    if check_trailing_stop(token_address):
+        execute_sell(token_address, current_price, ...)  # WRONG PRICE!
+        # current_price is leftover from LAST iteration of FIRST loop!
+```
+
+**What happened:**
+1. First loop processes all price updates: TokenA=$1.00, TokenB=$2.00, TokenC=$0.266
+2. After loop: `current_price` = $0.266 (last token)
+3. Second loop checks trailing stops for ALL positions
+4. wsERZDS2 trailing stop triggers (should exit at $0.615)
+5. But executes with `current_price` = $0.266 (TokenC's price!)
+6. **Sells +176% winner at -3.9% loss!**
+
+### The Fix:
+```python
+# Line 358-364: NOW CORRECT
+for token_address in list(self.position_manager.open_positions.keys()):
+    position = self.position_manager.get_position(token_address)
+    if not position:
+        continue
+
+    current_price = position.current_price  # Use THIS position's price!
+
+    if check_trailing_stop(token_address):
+        execute_sell(token_address, current_price, ...)  # Correct price!
+```
+
+### Impact:
+- Stop losses now use correct price
+- Trailing stops now use correct price
+- Take profits now use correct price
+- No more selling at random prices from other tokens!
+
+### How to Revert:
+```bash
+git revert f7ded97
+# This will break stop losses/trailing stops again - they'll use wrong prices
+```
+
+---
+
 ## 2025-11-24 18:00 - Fix Partial Profit Persistence (CRITICAL!)
 
 ### Commit: `d7af60e`
