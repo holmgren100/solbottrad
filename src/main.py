@@ -701,7 +701,7 @@ class SolanaTradingBot:
         """Main trading loop."""
         logger.info("Starting main trading loop...")
 
-        scan_interval = 300  # 5 minutes
+        scan_interval = 120  # 2 minutes (was working between 20:16 and 03:40)
         monitor_interval = 60  # 1 minute
 
         last_scan = 0
