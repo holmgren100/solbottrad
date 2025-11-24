@@ -4,6 +4,64 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 21:50 - Increase Liquidity Requirements to Prevent Rugs
+
+### Status: ✅ CONFIGURATION CHANGE - Prevent low-liquidity rug pulls
+
+### What User Reported:
+After fresh restart with 0 volume honeypot fix:
+- Win rate: 1/3 (25%) - Better than 0%, but still losses
+- **3 losses all from RUGS**: TRLT & 7-ELEVEN had liquidity dry up
+- Both tokens passed 0 volume check but got rugged after entry
+- Liquidity dropped from ~$5k-8k → $0 (devs removed liquidity)
+
+### The Problem:
+**Mismatch in liquidity settings:**
+```env
+MIN_LIQUIDITY_USD=5000.0      # Can BUY with $5k liquidity
+MIN_POSITION_LIQUIDITY=8000.0 # Auto-close if <$8k
+```
+
+**What happened:**
+1. Bot bought tokens with $5k-$8k liquidity ✅
+2. Liquidity dropped to $0-$1k (rug pull) 🚨
+3. Auto-close triggered → -100% loss ❌
+
+**Root cause:** Low liquidity tokens are EASY to rug. Devs can drain $5k pools instantly.
+
+### The Fix:
+**Increased entry liquidity requirement:**
+```env
+# .env changes:
+MIN_LIQUIDITY_USD=15000.0      # Was 5000 → Now 15000 (3x higher!)
+MIN_LIQUIDITY=15000.0          # Was 5000 → Now 15000
+MIN_POSITION_LIQUIDITY=10000.0 # Was 8000 → Now 10000
+```
+
+**Logic:**
+- Require **$15k liquidity** to enter (established tokens only)
+- Auto-close if drops below **$10k** (gives buffer before total rug)
+- Harder for devs to rug $15k+ pools (more capital at risk)
+
+### Expected Result:
+- ✅ Block low-liquidity tokens that are easy to rug
+- ✅ Only trade established tokens with deeper pools
+- ✅ Reduce -100% rug losses
+- ⚠️ May reduce buy signals (stricter filter)
+- ✅ Higher quality signals → Better win rate
+
+### How to Revert:
+```env
+MIN_LIQUIDITY_USD=5000.0
+MIN_LIQUIDITY=5000.0
+MIN_POSITION_LIQUIDITY=8000.0
+```
+
+### Files Changed:
+- `.env` (lines 44-45, 96) - Configuration only, no code changes
+
+---
+
 ## 2025-11-24 20:00 - Add Honeypot/Fake Liquidity Detection
 
 ### Commit: `af128a4`
