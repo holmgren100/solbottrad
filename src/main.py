@@ -129,22 +129,9 @@ class SolanaTradingBot:
                 logger.warning(f"No market data from either source for {token_address}")
                 return None
 
-            # Cross-validate price and liquidity
-            if dex_profile and jupiter_data:
-                dex_price = dex_profile['price_usd']
-                jup_price = jupiter_data['price_usd']
-                price_diff_pct = abs((dex_price - jup_price) / dex_price) * 100
-
-                if price_diff_pct > 20:
-                    # Large divergence - suspicious data
-                    logger.warning(
-                        f"⚠️  PRICE DIVERGENCE in analysis: {token_address[:8]}... "
-                        f"DexScreener ${dex_price:.8f} vs Jupiter ${jup_price:.8f} ({price_diff_pct:.1f}%)"
-                    )
-                    # Don't trade on suspicious data
-                    return None
-
-            # Use DexScreener as primary (has more metadata), but validated
+            # Use DexScreener as primary (most reliable), fallback to Jupiter
+            # Note: Removed price divergence check - it was blocking legit volatile tokens
+            # With partial profit-taking + trailing stops, we can handle data variance
             profile = dex_profile if dex_profile else jupiter_data
 
             # 2. Get security data
