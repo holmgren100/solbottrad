@@ -89,7 +89,7 @@ class DexScreenerClient:
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     data = await response.json()
-                    pairs = data.get('pairs', [])
+                    pairs = data.get('pairs') or []  # Handle null/None from API
                     logger.debug(f"Retrieved {len(pairs)} pairs for {token_address}")
                     return pairs
                 else:
@@ -151,7 +151,7 @@ class DexScreenerClient:
             async with self.session.get(url, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
-                    pairs = data.get('pairs', [])
+                    pairs = data.get('pairs') or []  # Handle null/None from API
                     logger.debug(f"Found {len(pairs)} pairs for query: {query}")
                     return pairs
                 else:
@@ -235,7 +235,7 @@ class DexScreenerClient:
             async with self.session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
-                    tokens = data.get('tokens', [])[:limit]
+                    tokens = (data.get('tokens') or [])[:limit]  # Handle null/None from API
                     logger.debug(f"Retrieved {len(tokens)} trending tokens")
                     return tokens
                 elif response.status == 403:

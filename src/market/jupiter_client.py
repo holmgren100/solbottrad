@@ -71,13 +71,13 @@ class JupiterClient:
                             'name': token.get('name'),
                             'decimals': token.get('decimals'),
                             'logoURI': token.get('icon') or token.get('logoURI'),  # Jupiter uses 'icon'
-                            'tags': token.get('tags', []),
+                            'tags': token.get('tags') or [],  # Handle null/None from API
                             'liquidity': token.get('liquidity'),
                             'fdv': token.get('fdv'),
                             'mcap': token.get('mcap'),
                             'usdPrice': token.get('usdPrice'),
                             'holderCount': token.get('holderCount'),
-                            'audit': token.get('audit', {}),
+                            'audit': token.get('audit') or {},  # Handle null/None from API
                             'launchpad': token.get('launchpad'),
                             'createdAt': token.get('createdAt')
                         })
