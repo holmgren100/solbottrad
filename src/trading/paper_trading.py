@@ -28,6 +28,10 @@ class PaperTradingEngine:
         self.stale_price_minutes = float(os.getenv('STALE_PRICE_MINUTES', '5'))
         self.min_position_liquidity = float(os.getenv('MIN_POSITION_LIQUIDITY', '5000.0'))
 
+        # Read trailing stop settings from environment
+        self.use_trailing_stop = os.getenv('USE_TRAILING_STOP', 'true').lower() == 'true'
+        self.trailing_stop_percent = float(os.getenv('TRAILING_STOP_PERCENT', '15.0'))
+
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
         self.position_manager = PositionManager(max_open_positions=5)
@@ -49,6 +53,15 @@ class PaperTradingEngine:
             f"{len(self.position_manager.open_positions)} positions"
         )
 
+        # Log trailing stop settings
+        if self.use_trailing_stop:
+            logger.info(
+                f"📈 Trailing stop ENABLED: {self.trailing_stop_percent:.0f}% below peak "
+                f"(exits sooner, captures pumps, avoids rugs)"
+            )
+        else:
+            logger.info(f"🎯 Fixed take profit at {os.getenv('TAKE_PROFIT_PERCENT', '20')}%")
+
         # Log rug detection settings
         if self.rug_detection_enabled:
             logger.info(
@@ -66,8 +79,8 @@ class PaperTradingEngine:
         price: float,
         stop_loss: float,
         take_profit: float,
-        use_trailing_stop: bool = True,
-        trailing_stop_percent: float = 15.0
+        use_trailing_stop: Optional[bool] = None,
+        trailing_stop_percent: Optional[float] = None
     ) -> Dict:
         """
         Execute a simulated buy order.
@@ -78,12 +91,17 @@ class PaperTradingEngine:
             price: Current token price
             stop_loss: Stop loss price
             take_profit: Take profit price (ignored if using trailing stop)
-            use_trailing_stop: Whether to use trailing stop (default: True)
-            trailing_stop_percent: Percent to trail below peak (default: 15%)
+            use_trailing_stop: Whether to use trailing stop (reads from .env if None)
+            trailing_stop_percent: Percent to trail below peak (reads from .env if None)
 
         Returns:
             Execution result dictionary
         """
+        # Use .env settings if not explicitly provided
+        if use_trailing_stop is None:
+            use_trailing_stop = self.use_trailing_stop
+        if trailing_stop_percent is None:
+            trailing_stop_percent = self.trailing_stop_percent
         # Check if we have enough capital
         if amount_usd > self.current_capital:
             logger.warning(
@@ -415,8 +433,8 @@ class PaperTradingEngine:
                     entry_time=datetime.fromisoformat(pos_data['entry_time']),
                     stop_loss=pos_data['stop_loss'],
                     take_profit=pos_data['take_profit'],
-                    use_trailing_stop=pos_data.get('use_trailing_stop', True),
-                    trailing_stop_percent=pos_data.get('trailing_stop_percent', 15.0),
+                    use_trailing_stop=pos_data.get('use_trailing_stop', self.use_trailing_stop),
+                    trailing_stop_percent=pos_data.get('trailing_stop_percent', self.trailing_stop_percent),
                     highest_price=pos_data.get('highest_price', pos_data['entry_price']),
                     trailing_stop_price=pos_data.get('trailing_stop_price', pos_data['stop_loss']),
                     last_price_update=datetime.fromisoformat(pos_data.get('last_price_update', pos_data['entry_time'])),
