@@ -356,6 +356,12 @@ class PaperTradingEngine:
 
         # Now check stop loss/take profit/trailing stop for remaining positions
         for token_address in list(self.position_manager.open_positions.keys()):
+            # Get current position price (don't use undefined variable!)
+            position = self.position_manager.get_position(token_address)
+            if not position:
+                continue
+
+            current_price = position.current_price
 
             # Check stop loss (regular stop loss, for downside protection)
             if self.position_manager.check_stop_loss(token_address):
