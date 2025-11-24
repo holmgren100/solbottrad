@@ -653,14 +653,22 @@ class SolanaTradingBot:
                     symbol = profile.get('symbol', position.token_address[:8])
                     print(f"  💹 {symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%) [{data_source}]")
 
-                    # Check if close to stop loss or take profit
-                    sl_distance = ((current_price - position.stop_loss) / position.stop_loss) * 100
-                    tp_distance = ((position.take_profit - current_price) / current_price) * 100
+                    # Check if close to stop loss or take profit/trailing stop
+                    if position.use_trailing_stop:
+                        # Show trailing stop info
+                        print(f"  🔄 Trailing stop: ${position.trailing_stop_price:.8f} ({position.trailing_stop_percent:.0f}% below peak ${position.highest_price:.8f})")
+                        # Warn if close to trailing stop
+                        if current_price <= position.trailing_stop_price * 1.02:  # Within 2% of trailing stop
+                            print(f"  ⚠️  Warning: Close to trailing stop!")
+                    else:
+                        # Fixed stop loss / take profit
+                        sl_distance = ((current_price - position.stop_loss) / position.stop_loss) * 100
+                        tp_distance = ((position.take_profit - current_price) / current_price) * 100
 
-                    if sl_distance < 5:  # Within 5% of stop loss
-                        print(f"  ⚠️  Warning: Close to stop loss (${position.stop_loss:.8f})")
-                    elif tp_distance < 10:  # Within 10% of take profit
-                        print(f"  🎯 Near take profit target (${position.take_profit:.8f})")
+                        if sl_distance < 5:  # Within 5% of stop loss
+                            print(f"  ⚠️  Warning: Close to stop loss (${position.stop_loss:.8f})")
+                        elif tp_distance < 10:  # Within 10% of take profit
+                            print(f"  🎯 Near take profit target (${position.take_profit:.8f})")
 
                 except Exception as e:
                     logger.error(f"Error getting price for {position.token_address}: {e}")
