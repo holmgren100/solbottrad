@@ -107,12 +107,14 @@ class SolanaTradingBot:
         # self.health_checker.register_component('twitter', self.twitter.health_check)
         # self.health_checker.register_component('wallet_tracker', self.wallet_tracker.health_check)
 
-    async def analyze_token(self, token_address: str) -> Optional[dict]:
+    async def analyze_token(self, token_address: str, jupiter_token_data: Optional[dict] = None) -> Optional[dict]:
         """
         Perform comprehensive analysis on a token.
 
         Args:
             token_address: Token contract address
+            jupiter_token_data: Optional pre-fetched data from Jupiter discovery
+                              (includes usdPrice, liquidity, mcap, etc.)
 
         Returns:
             Analysis results dictionary or None
@@ -120,19 +122,41 @@ class SolanaTradingBot:
         logger.info(f"Analyzing token: {token_address}")
 
         try:
-            # 1. Get market data from BOTH sources for validation
-            dex_profile = await self.dexscreener.get_token_profile(token_address)
-            jupiter_data = await self.jupiter.get_token_price_data(token_address)
+            # 1. Get market data - prioritize Jupiter discovery data if available
+            profile = None
 
-            # Validate we have data from at least one source
-            if not dex_profile and not jupiter_data:
-                logger.warning(f"No market data from either source for {token_address}")
-                return None
+            # If Jupiter already provided price/liquidity data in discovery, use it!
+            if jupiter_token_data and jupiter_token_data.get('usdPrice'):
+                # Convert Jupiter discovery format to profile format
+                profile = {
+                    'address': token_address,
+                    'symbol': jupiter_token_data.get('symbol', 'UNKNOWN'),
+                    'name': jupiter_token_data.get('name', 'Unknown'),
+                    'price_usd': float(jupiter_token_data.get('usdPrice', 0)),
+                    'liquidity_usd': float(jupiter_token_data.get('liquidity', 0)),
+                    'volume_24h': 0,  # Not in discovery data
+                    'price_change_24h': 0,  # Not in discovery data
+                    'market_cap': float(jupiter_token_data.get('mcap', 0)),
+                    'fdv': float(jupiter_token_data.get('fdv', 0)),
+                    'pair_created_at': jupiter_token_data.get('createdAt'),
+                    'source': 'jupiter_discovery'
+                }
+                logger.info(f"✅ Using Jupiter discovery data for {token_address[:12]}... (price: ${profile['price_usd']:.8f}, liq: ${profile['liquidity_usd']:,.0f})")
 
-            # Use DexScreener as primary (most reliable), fallback to Jupiter
-            # Note: Removed price divergence check - it was blocking legit volatile tokens
-            # With partial profit-taking + trailing stops, we can handle data variance
-            profile = dex_profile if dex_profile else jupiter_data
+            # Fallback: Try fetching from APIs if Jupiter discovery data insufficient
+            if not profile or profile['price_usd'] == 0:
+                dex_profile = await self.dexscreener.get_token_profile(token_address)
+                jupiter_data = await self.jupiter.get_token_price_data(token_address)
+
+                # Validate we have data from at least one source
+                if not dex_profile and not jupiter_data:
+                    logger.warning(f"No market data from either source for {token_address}")
+                    return None
+
+                # Use DexScreener as primary (most reliable), fallback to Jupiter
+                # Note: Removed price divergence check - it was blocking legit volatile tokens
+                # With partial profit-taking + trailing stops, we can handle data variance
+                profile = dex_profile if dex_profile else jupiter_data
 
             # 2. Get security data
             security_data = await self.solsniffer.analyze_token(token_address)
@@ -440,8 +464,8 @@ class SolanaTradingBot:
 
                 print(f"  → Analyzing {token_address[:8]}...")
 
-                # Analyze token
-                analysis = await self.analyze_token(token_address)
+                # Analyze token - pass Jupiter data so we don't need to fetch it again
+                analysis = await self.analyze_token(token_address, jupiter_token_data=token_data)
                 if not analysis:
                     print(f"  ❌ No analysis data")
                     continue
