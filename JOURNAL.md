@@ -4,6 +4,65 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 - New Token Bonus (CRITICAL!)
+
+### Commit: `e02f851`
+**Status: ✅ CRITICAL FIX - ZERO TRADES FOR 2-3 HOURS**
+
+### What Changed:
+Give brand new tokens a +0.15 BONUS instead of -0.1 penalty
+
+### Why:
+User report: "bot has run for nearly 2-3 hours no signal buy at all"
+
+### Root Cause:
+1. New tokens from Jupiter have `volume_24h=0`, `price_change_24h=0` (too new for data)
+2. Market analyzer saw volume_ratio < 0.1 → penalized score by -0.1
+3. Final score: 0.5 - 0.1 = 0.4 < 0.50 threshold → "hold" signal ❌
+4. **EVERY new token was rejected!**
+
+### The Math (Before Fix):
+```
+score = 0.5                      # Start neutral
+volume_ratio = 0/liquidity = 0   # New tokens have no volume yet
+if ratio < 0.1: score -= 0.1     # PENALTY
+small cap: score += 0.05         # Small bonus
+Final: 0.45 < 0.50 threshold     # "hold" - NO BUY SIGNAL ❌
+```
+
+### The Math (After Fix):
+```
+score = 0.5                      # Start neutral
+is_new_token? YES                # volume=0 or price_change=0
+New token bonus: score += 0.15   # BONUS for early entry!
+small cap: score += 0.05         # Small bonus
+Final: 0.70 >= 0.50 threshold    # "buy" - BUY SIGNAL ✅
+```
+
+### Philosophy:
+**New tokens are WHERE THE GAINS ARE!**
+- Early entry = maximum profit potential
+- Get in before the pump
+- Partial profit-taking protects from rugs
+- Trailing stops limit downside
+
+### Files Modified:
+- `src/market/market_analyzer.py` - Detect new tokens, give bonus, skip volume check
+
+### Result:
+- ✅ New tokens get buy signals
+- ✅ Early entry opportunities
+- ✅ More trades
+- ✅ Catch launches before they moon
+
+### How to Revert:
+```bash
+git revert e02f851
+# This will block all new token trades again
+```
+
+---
+
 ## 2025-11-24 - Use Jupiter Discovery Data Directly
 
 ### Commit: `568bea6`
