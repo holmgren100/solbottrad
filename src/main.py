@@ -423,23 +423,18 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Rotate through different token sources each scan for maximum coverage
-            # This discovers more diverse opportunities across different market segments
-            categories = ['toptraded', 'toptrending', 'toporganicscore', 'recent']
-            current_category = categories[self.scan_cycle % len(categories)]
+            # Use SolSniffer for Solana token discovery (Jupiter endpoints don't work)
+            print(f"  📡 Fetching new tokens from SolSniffer (scan #{self.scan_cycle})...")
             self.scan_cycle += 1
 
-            print(f"  📡 Fetching tokens from Jupiter ({current_category}, cycle #{self.scan_cycle})...")
-
-            if current_category == 'recent':
-                new_tokens = await self.jupiter.get_recent_tokens(limit=50)
-            else:
-                new_tokens = await self.jupiter.get_trending_tokens(category=current_category, limit=50)
+            new_tokens = await self.solsniffer.get_new_tokens(limit=50)
 
             if not new_tokens:
-                print(f"  ⚠️  No {current_category} tokens, trying fallback...")
-                # Try different category as fallback
-                new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
+                print("  ⚠️  No tokens from SolSniffer, trying DexScreener trending...")
+                # Fallback to DexScreener trending
+                dex_tokens = await self.dexscreener.get_trending_tokens(chain='solana', limit=50)
+                if dex_tokens:
+                    new_tokens = [{'address': t.get('baseToken', {}).get('address')} for t in dex_tokens if t.get('baseToken', {}).get('address')]
 
             if not new_tokens:
                 print("  ⚠️  No tokens returned from Jupiter, using fallback tokens")
