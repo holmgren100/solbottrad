@@ -4,7 +4,65 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
-## 2025-11-24 14:00 - Revert to Simple /recent Endpoint (USER WAS RIGHT AGAIN!)
+## 2025-11-24 15:00 - Use Trending Tokens First (They Have Market Data!)
+
+### Commit: `4960573`
+**Status: ✅ FIXED - Solves "No market data from either source" problem**
+
+### What Changed:
+Switched from recent-only to trending-first with fallback chain
+
+### The Problem User Showed Me:
+```
+Retrieved 30 recent tokens from Jupiter
+→ Analyzing 8eN451Ka...
+WARNING - No market data from either source for 8eN451Ka...
+```
+
+### Root Cause:
+- `/recent` endpoint returns BRAND NEW tokens (literally just created their first pool)
+- Too new = DexScreener doesn't have them indexed yet
+- Too new = Jupiter search API doesn't return price data yet
+- Bot can't analyze tokens without price/liquidity data → skips all of them
+
+### The Solution (from working commit 61e8653):
+```python
+# Try trending tokens FIRST (they have market data!)
+new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
+
+# Fallback to recent if trending fails (graceful degradation)
+if not new_tokens:
+    new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+
+# Fallback to popular tokens as last resort
+if not new_tokens:
+    new_tokens = [SOL, USDC, BONK, JUP]
+```
+
+### Why This Works:
+- **Trending tokens** = Already trading → Have price data on DexScreener ✅
+- **Recent tokens** = Brand new → No price data yet ❌
+- **Popular tokens** = Always have data ✅
+
+### Three-Tier Fallback System:
+1. Try trending (best - have market data)
+2. Try recent (okay - some might have data if not too new)
+3. Use popular tokens (guaranteed data)
+
+### Result:
+- Bot gets tokens that actually have analyzable market data
+- If categories endpoint fails (400), falls back to recent
+- If recent also fails, uses popular tokens (SOL/USDC/BONK/JUP)
+- Bot never stops, always has something to analyze
+
+### How to Revert:
+```bash
+git revert 4960573
+```
+
+---
+
+## 2025-11-24 14:00 - Revert to Simple /recent Endpoint (PARTIALLY WRONG!)
 
 ### Commit: `b0b1b0d`
 **Status: ✅ CRITICAL FIX - Categories endpoint was BREAKING things!**
