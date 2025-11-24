@@ -106,7 +106,7 @@ class JupiterClient:
         await self._ensure_session()
 
         try:
-            url = f"{self.base_url}/categories/{category}"
+            url = f"{self.base_url}/category/{category}"
             params = {'limit': limit}
 
             async with self.session.get(url, params=params) as response:
