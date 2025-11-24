@@ -67,7 +67,7 @@ class Position:
             Milestone level (100, 200, 300, 500) if new milestone hit, None otherwise
         """
         # Check milestones in order from highest to lowest
-        milestones = [500, 300, 200, 100]
+        milestones = [700, 600, 500, 400, 300, 200, 100]
 
         for milestone in milestones:
             if self.unrealized_pnl_percent >= milestone and milestone not in self.milestones_hit:

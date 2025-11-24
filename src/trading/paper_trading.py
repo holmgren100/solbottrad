@@ -37,7 +37,10 @@ class PaperTradingEngine:
         self.profit_milestone_100 = float(os.getenv('PROFIT_MILESTONE_100', '25'))
         self.profit_milestone_200 = float(os.getenv('PROFIT_MILESTONE_200', '15'))
         self.profit_milestone_300 = float(os.getenv('PROFIT_MILESTONE_300', '10'))
+        self.profit_milestone_400 = float(os.getenv('PROFIT_MILESTONE_400', '10'))
         self.profit_milestone_500 = float(os.getenv('PROFIT_MILESTONE_500', '10'))
+        self.profit_milestone_600 = float(os.getenv('PROFIT_MILESTONE_600', '10'))
+        self.profit_milestone_700 = float(os.getenv('PROFIT_MILESTONE_700', '10'))
 
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
@@ -319,8 +322,14 @@ class PaperTradingEngine:
                         sell_pct = self.profit_milestone_200
                     elif milestone == 300:
                         sell_pct = self.profit_milestone_300
+                    elif milestone == 400:
+                        sell_pct = self.profit_milestone_400
                     elif milestone == 500:
                         sell_pct = self.profit_milestone_500
+                    elif milestone == 600:
+                        sell_pct = self.profit_milestone_600
+                    elif milestone == 700:
+                        sell_pct = self.profit_milestone_700
 
                     if sell_pct > 0:
                         # Calculate quantity to sell (percentage of INITIAL quantity, not current)
@@ -335,12 +344,15 @@ class PaperTradingEngine:
                                 f"Selling {sell_pct}% ({sell_quantity:.2f} tokens) = ${sell_value:.2f}"
                             )
 
-                            # Reduce position quantity
+                            # Reduce position quantity AND amount_usd to reflect smaller position
                             position.quantity -= sell_quantity
+                            position.amount_usd = position.quantity * position.entry_price  # Update cost basis
                             position.milestones_hit.add(milestone)
 
                             # Add proceeds to capital
                             self.current_capital += sell_value
+                            # Reduce total_invested since we sold part of the position
+                            self.total_invested -= (sell_quantity * position.entry_price)
 
                             # Calculate profit on this partial sell
                             cost_basis = (position.entry_price * sell_quantity)
@@ -348,7 +360,7 @@ class PaperTradingEngine:
 
                             logger.info(
                                 f"💵 Locked in ${partial_profit:.2f} profit, "
-                                f"Remaining: {position.quantity:.2f} tokens (continues with trailing stop)"
+                                f"Remaining: {position.quantity:.2f} tokens (${position.amount_usd:.2f} cost basis)"
                             )
 
                             # Save state after partial sell
