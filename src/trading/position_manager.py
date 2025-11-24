@@ -397,14 +397,15 @@ class PositionManager:
                 dead_positions.append(token_address)
                 continue
 
-            # NEW: Check if price hasn't actually changed (fake updates)
-            # If price is exactly the same as entry after 5+ minutes, likely honeypot
-            if position.current_price == position.entry_price:
-                minutes_held = (datetime.now() - position.entry_time).total_seconds() / 60
-                if minutes_held >= 5:
+            # NEW: Check if price hasn't actually changed (fake updates / minimal movement)
+            # If price moved less than 1% after 5+ minutes, likely honeypot/dead/manipulated
+            minutes_held = (datetime.now() - position.entry_time).total_seconds() / 60
+            if minutes_held >= 5:
+                price_change_pct = abs((position.current_price - position.entry_price) / position.entry_price) * 100
+                if price_change_pct < 1.0:  # Less than 1% movement in 5+ minutes
                     logger.warning(
                         f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
-                        f"Price unchanged for {minutes_held:.1f} minutes (likely honeypot/rugged)"
+                        f"Minimal price movement ({price_change_pct:.2f}%) for {minutes_held:.1f} minutes (likely honeypot/dead/rugged)"
                     )
                     dead_positions.append(token_address)
 
