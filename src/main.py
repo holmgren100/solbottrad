@@ -434,19 +434,28 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Get trending tokens from Jupiter (what was working at 02:40!)
-            # With fallbacks like the working branches
-            print("  📡 Fetching trending tokens from Jupiter...")
-            new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
+            # Rotate through different token sources each scan (working at 02:40!)
+            # Discovers diverse opportunities across market segments
+            categories = ['toptraded', 'toptrending', 'toporganicscore', 'recent']
+            current_category = categories[self.scan_cycle % len(categories)]
+            self.scan_cycle += 1
+
+            print(f"  📡 Fetching tokens from Jupiter ({current_category}, cycle #{self.scan_cycle})...")
+
+            if current_category == 'recent':
+                new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+            else:
+                new_tokens = await self.jupiter.get_trending_tokens(category=current_category, limit=50)
 
             if not new_tokens:
-                print("  ⚠️  No trending tokens, trying recent tokens...")
-                new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+                print(f"  ⚠️  No {current_category} tokens, trying fallback...")
+                # Try different category as fallback
+                new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
 
             if not new_tokens:
                 print("  ⚠️  No tokens from Jupiter, using fallback tokens")
                 logger.warning("Jupiter returned no tokens, using fallback")
-                # Fallback to popular tokens (same as working branches)
+                # Fallback to popular tokens as last resort
                 new_tokens = [
                     {'address': 'So11111111111111111111111111111111111111112'},  # SOL
                     {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},  # USDC
