@@ -434,9 +434,10 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Get new tokens from Jupiter (simple, no fancy rotation - just what works)
-            print("  📡 Fetching tokens from Jupiter...")
-            new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+            # Get trending tokens from Jupiter (what was working at 02:40!)
+            # Trending tokens have DexScreener data available (vs brand new tokens that don't)
+            print("  📡 Fetching trending tokens from Jupiter...")
+            new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
 
             if not new_tokens:
                 print("  ⚠️  No tokens from Jupiter")
@@ -464,8 +465,8 @@ class SolanaTradingBot:
 
                 print(f"  → Analyzing {token_address[:8]}...")
 
-                # Analyze token - pass Jupiter data so we don't need to fetch it again
-                analysis = await self.analyze_token(token_address, jupiter_token_data=token_data)
+                # Analyze token (trending tokens don't have price data, will fetch from DexScreener)
+                analysis = await self.analyze_token(token_address)
                 if not analysis:
                     print(f"  ❌ No analysis data")
                     continue
