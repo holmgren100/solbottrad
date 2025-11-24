@@ -4,6 +4,73 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 - Revert to ACTUAL Working State from 02:40
+
+### Commit: `d2782eb`
+**Status: ✅ CRITICAL FIX - BACK TO 02:40 WORKING STATE**
+
+### What Changed:
+Reverted TWO of my "fixes" that actually BROKE the working 02:40 code:
+
+1. **Jupiter endpoint**: Changed `/category/` back to `/categories/`
+2. **Category rotation**: Restored rotating through 4 categories
+
+### Why User Was Right:
+User said: "fallbacks was only because dexscreener didn't work, when jupiter worked we didn't use fallbacks, I want back when find buy opportunity worked when get buy signals whole time several per 10 minutes"
+
+**At 02:40 (WORKING):**
+- Used `/categories/{category}` endpoint ✅
+- Rotated through 4 categories: toptraded, toptrending, toporganicscore, recent
+- Got **several buy signals per 10 minutes** ✅
+- 200 unique tokens per 12 minutes (50 × 4 categories)
+
+**My "fixes" (BROKE IT):**
+- Changed to `/category/` thinking I was fixing a typo ❌
+- Removed rotation, only tried one category ❌
+- Result: Zero trades for 2-3 hours ❌
+
+### The Truth:
+- `/categories/` WAS WORKING at 02:40
+- My research was WRONG - I thought /category/ was correct
+- Jupiter API has `/categories/` (plural), not `/category/` (singular)
+- User was right: look at what was working at 02:40!
+
+### What's Restored:
+```python
+# Rotate through 4 categories each scan (3 min intervals)
+categories = ['toptraded', 'toptrending', 'toporganicscore', 'recent']
+current_category = categories[self.scan_cycle % 4]
+
+# Get 50 tokens from current category
+if current_category == 'recent':
+    tokens = await jupiter.get_recent_tokens(limit=50)
+else:
+    tokens = await jupiter.get_trending_tokens(category=current_category, limit=50)
+```
+
+### Benefits (from 02:40 working state):
+- **200 tokens per 12 minutes** (50 × 4 categories)
+- **Diverse sources**: volume + trends + organic + new launches
+- **Several buy signals per 10 minutes** (user's requirement)
+- **All security features retained**: partial profits, trailing stops, rug detection
+
+### Result:
+- ✅ Back to 02:40 working code
+- ✅ Category rotation working
+- ✅ Should get several buy signals per 10 minutes again
+- ✅ All security protections still active
+
+### Lesson Learned:
+**USER WAS RIGHT!** When user says "look at 02:40 when it was working", don't try to "fix" what was working. Use the EXACT code from 02:40!
+
+### How to Revert:
+```bash
+git revert d2782eb
+# This will break it again - don't do it!
+```
+
+---
+
 ## 2025-11-24 - Add Fallback Tokens (CRITICAL!)
 
 ### Commit: `b1fcef8`
