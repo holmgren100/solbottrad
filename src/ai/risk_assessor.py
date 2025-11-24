@@ -115,13 +115,15 @@ class RiskAssessor:
             warnings.append("Very new token - high risk")
 
         # Calculate Overall Risk Score
+        # Adjusted weights: With partial profit-taking and trailing stops,
+        # we can afford to be more aggressive on volatile/new tokens
         weights = {
-            'liquidity': 0.25,
-            'security': 0.30,
-            'volatility': 0.15,
-            'sentiment': 0.15,
-            'prediction_uncertainty': 0.10,
-            'age': 0.05
+            'liquidity': 0.35,      # Most important - can't sell with no liquidity
+            'security': 0.35,        # Rug pull indicators matter
+            'volatility': 0.05,      # Volatility is GOOD - that's where gains are!
+            'sentiment': 0.15,       # Coordination pumps still risky
+            'prediction_uncertainty': 0.05,  # Less important with good exits
+            'age': 0.05              # New tokens moon - age matters less
         }
 
         overall_risk_score = sum(
@@ -189,6 +191,8 @@ class RiskAssessor:
     def _assess_liquidity_risk(self, liquidity: float) -> float:
         """
         Assess liquidity risk.
+        Liquidity is critical - can't sell tokens with no liquidity!
+        Rug detection will auto-exit if liquidity drops below $8k.
 
         Args:
             liquidity: Liquidity in USD
@@ -196,18 +200,18 @@ class RiskAssessor:
         Returns:
             Risk score (0-1)
         """
-        if liquidity >= 500000:
+        if liquidity >= 100000:
             return 0.1
-        elif liquidity >= 100000:
-            return 0.2
         elif liquidity >= 50000:
-            return 0.4
+            return 0.2
         elif liquidity >= 20000:
-            return 0.6
+            return 0.3
         elif liquidity >= 10000:
-            return 0.8
+            return 0.5
+        elif liquidity >= 5000:
+            return 0.7
         else:
-            return 1.0
+            return 1.0  # Below $5k = too risky, can't exit
 
     def _assess_security_risk(self, security_data: Dict) -> float:
         """
@@ -369,7 +373,8 @@ class RiskAssessor:
             True if should trade, False otherwise
         """
         # Don't trade if risk is extreme
-        if risk_score > 0.75:
+        # Raised to 0.8 since we de-weighted volatility/age and have good exit protections
+        if risk_score > 0.8:
             return False
 
         # Don't trade if position size is too small (lowered to 0.05 for testing)
@@ -377,7 +382,8 @@ class RiskAssessor:
             return False
 
         # Don't trade if there are critical warnings
-        critical_keywords = ['rug pull', 'coordinated pump', 'extreme']
+        # Note: Removed "extreme" - extreme volatility is OK with our protections
+        critical_keywords = ['rug pull', 'coordinated pump']
         for warning in warnings:
             if any(keyword in warning.lower() for keyword in critical_keywords):
                 return False
