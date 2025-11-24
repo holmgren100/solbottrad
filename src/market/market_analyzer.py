@@ -96,14 +96,21 @@ class MarketAnalyzer:
                 liquidity=liquidity
             )
 
-        # Volume analysis
-        volume_to_liquidity_ratio = volume_24h / liquidity if liquidity > 0 else 0
-        if volume_to_liquidity_ratio > 0.5:
-            reasons.append(f"Strong volume/liquidity ratio ({volume_to_liquidity_ratio:.2f})")
-            score += 0.15
-        elif volume_to_liquidity_ratio < 0.1:
-            reasons.append(f"Low volume/liquidity ratio ({volume_to_liquidity_ratio:.2f})")
-            score -= 0.1
+        # Check if this is a brand new token (no volume/price data yet)
+        is_new_token = (volume_24h == 0 or price_change_24h == 0)
+        if is_new_token:
+            reasons.append("Brand new token - early entry opportunity")
+            score += 0.15  # BONUS for new launches instead of penalty!
+
+        # Volume analysis (skip if brand new token)
+        if not is_new_token:
+            volume_to_liquidity_ratio = volume_24h / liquidity if liquidity > 0 else 0
+            if volume_to_liquidity_ratio > 0.5:
+                reasons.append(f"Strong volume/liquidity ratio ({volume_to_liquidity_ratio:.2f})")
+                score += 0.15
+            elif volume_to_liquidity_ratio < 0.1:
+                reasons.append(f"Low volume/liquidity ratio ({volume_to_liquidity_ratio:.2f})")
+                score -= 0.1
 
         # Price change analysis
         if price_change_24h > 20:
