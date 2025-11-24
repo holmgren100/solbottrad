@@ -4,6 +4,47 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 - Fix Null API Response Handling
+
+### Commit: `71d3d6e`
+**Status: ✅ WORKING**
+
+### What Changed:
+Fixed handling of null/None values in API responses from DexScreener and Jupiter
+
+### Why:
+Bot was crashing with error: "object of type 'NoneType' has no len()"
+When APIs return `{"pairs": null}` instead of `{"pairs": []}`, trying to call `len()` on the result failed.
+
+### Root Cause:
+`data.get('pairs', [])` returns `None` (not `[]`) when the key exists but value is null
+
+### Files Modified:
+- `src/market/dexscreener_client.py` - Fixed `get_token_pairs()`, `search_pairs()`, `get_trending_tokens()`
+- `src/market/jupiter_client.py` - Fixed null handling for tags and audit fields
+
+### Fix Applied:
+Changed all instances:
+```python
+# BEFORE (broken with null values)
+pairs = data.get('pairs', [])
+
+# AFTER (handles null properly)
+pairs = data.get('pairs') or []
+```
+
+### Result:
+- ✅ No more "NoneType has no len()" crashes
+- ✅ Token analysis continues even with partial API data
+- ✅ Bot handles malformed API responses gracefully
+
+### How to Revert:
+```bash
+git revert 71d3d6e
+```
+
+---
+
 ## 2025-11-24 - Partial Profit-Taking Strategy
 
 ### Commit: `18b451e`
