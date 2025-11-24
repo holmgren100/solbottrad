@@ -4,6 +4,54 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 - Aggressive Risk Assessment for Moonshots
+
+### Commit: `b7ff7fc`
+**Status: ✅ TESTING - MORE AGGRESSIVE**
+
+### What Changed:
+Made risk assessment much more aggressive to catch volatile moonshots
+
+### Why:
+User insight: "High volatility and new tokens are WHERE THE MONEY IS!"
+With partial profit-taking + trailing stops, we can handle the risk.
+
+### Old Behavior (Too Conservative):
+- Blocked "Extreme volatility +81%" automatically
+- Weighted volatility at 15%, age at 5%
+- Risk threshold 0.75 (too strict)
+- Result: Missing moonshot opportunities
+
+### New Behavior (Aggressive):
+- Volatility weight: 15% → 5% (volatility is opportunity!)
+- Liquidity weight: 25% → 35% (most critical - can we exit?)
+- Security weight: 30% → 35% (rug detection matters)
+- Removed "extreme" from auto-block keywords
+- Risk threshold: 0.75 → 0.8 (accept riskier trades)
+- Softer liquidity scoring ($10k = 0.5 risk vs 0.8)
+
+### Philosophy:
+**Be aggressive on ENTRY, let protections handle EXITS**
+- Partial profit-taking locks gains at +100%, +200%, +300%, +500%
+- Trailing stop limits losses to 10%
+- Rug detection auto-exits dead tokens
+
+### Files Modified:
+- `src/ai/risk_assessor.py` - Reweighted risk factors, removed blocking keywords
+
+### Expected Result:
+- ✅ More trades on volatile new tokens
+- ✅ Catch moonshots early
+- ✅ Partial profits protect from crashes
+- ✅ Trailing stops limit downside
+
+### How to Revert:
+```bash
+git revert b7ff7fc
+```
+
+---
+
 ## 2025-11-24 - Fix Null API Response Handling
 
 ### Commit: `71d3d6e`
