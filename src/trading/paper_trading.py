@@ -453,7 +453,9 @@ class PaperTradingEngine:
                     'trailing_stop_price': pos.trailing_stop_price,
                     'last_price_update': pos.last_price_update.isoformat(),
                     'current_liquidity': pos.current_liquidity,
-                    'price_update_failures': pos.price_update_failures
+                    'price_update_failures': pos.price_update_failures,
+                    'initial_quantity': pos.initial_quantity,  # Partial profit tracking
+                    'milestones_hit': list(pos.milestones_hit)  # Convert set to list for JSON
                 }
 
             # Save recent trades (last 100)
@@ -515,7 +517,9 @@ class PaperTradingEngine:
                     trailing_stop_price=pos_data.get('trailing_stop_price', pos_data['stop_loss']),
                     last_price_update=datetime.fromisoformat(pos_data.get('last_price_update', pos_data['entry_time'])),
                     current_liquidity=pos_data.get('current_liquidity', 0.0),
-                    price_update_failures=pos_data.get('price_update_failures', 0)
+                    price_update_failures=pos_data.get('price_update_failures', 0),
+                    initial_quantity=pos_data.get('initial_quantity', pos_data['quantity']),  # Partial profit tracking
+                    milestones_hit=set(pos_data.get('milestones_hit', []))  # Convert list back to set
                 )
                 self.position_manager.open_positions[token_addr] = position
                 pnl_pct = position.unrealized_pnl_percent
