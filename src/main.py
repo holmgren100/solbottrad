@@ -136,11 +136,25 @@ class SolanaTradingBot:
                 sentiment_analysis = self.sentiment_analyzer.analyze_tweets(tweets)
                 coordination_analysis = self.sentiment_analyzer.detect_coordinated_activity(tweets)
             except Exception as e:
-                # Twitter optional - use defaults if rate limited or unavailable
+                # Twitter optional - use neutral defaults with proper structure
                 logger.debug(f"Twitter sentiment unavailable for {token_symbol}: {e}")
-                social_data = {'mentions': 0, 'sentiment': 'neutral', 'buzz_score': 0.5}
-                sentiment_analysis = {'sentiment': 'neutral', 'score': 0.5}
-                coordination_analysis = {'coordinated': False, 'score': 0.0}
+                social_data = {
+                    'mentions': 0,
+                    'sentiment': 'neutral',
+                    'buzz_score': 0.5,
+                    'tweet_count': 0,
+                    'influential_mentions': 0
+                }
+                sentiment_analysis = {
+                    'sentiment': 'neutral',
+                    'score': 0.5,
+                    'normalized_score': 0.5,
+                    'confidence': 0.6  # Moderate confidence even without Twitter
+                }
+                coordination_analysis = {
+                    'coordinated': False,
+                    'coordination_score': 0.0
+                }
 
             # 4. Generate market signal
             market_signal = self.market_analyzer.analyze_token(profile)
