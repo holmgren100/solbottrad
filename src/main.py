@@ -422,9 +422,13 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Get new tokens from Jupiter
-            print("  📡 Fetching new tokens from Jupiter...")
-            new_tokens = await self.jupiter.get_recent_tokens(limit=20)
+            # Get new tokens from Jupiter - try trending first, fallback to recent
+            print("  📡 Fetching trending tokens from Jupiter...")
+            new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=20)
+
+            if not new_tokens:
+                print("  ⚠️  No trending tokens, trying recent tokens...")
+                new_tokens = await self.jupiter.get_recent_tokens(limit=20)
 
             if not new_tokens:
                 print("  ⚠️  No tokens returned from Jupiter, using fallback tokens")
@@ -437,7 +441,7 @@ class SolanaTradingBot:
                     {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
                 ]
             else:
-                print(f"  ✅ Found {len(new_tokens)} new tokens from Jupiter!")
+                print(f"  ✅ Found {len(new_tokens)} tokens from Jupiter!")
                 logger.info(f"Retrieved {len(new_tokens)} tokens from Jupiter")
 
             # Get currently open positions
