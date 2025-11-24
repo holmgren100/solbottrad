@@ -95,7 +95,8 @@ class TwitterClient:
                     logger.debug(f"Retrieved {len(tweets)} tweets for query: {query}")
                     return tweets
                 elif response.status == 429:
-                    logger.warning("Twitter API rate limit reached")
+                    # Rate limit is expected and handled gracefully - use debug
+                    logger.debug("Twitter API rate limit reached (using defaults)")
                     return []
                 else:
                     logger.error(f"Twitter API error: {response.status}")
