@@ -141,15 +141,15 @@ class MarketAnalyzer:
             score += 0.05
 
         # Determine signal type and strength
-        # Lowered to 0.50 for aggressive buying like before (85-95% win rate)
-        # Trailing stops + rug detection protect from losses
-        if score >= 0.50:
+        # Lowered to 0.40 for aggressive buying (was 0.50, too conservative)
+        # We have good protections: trailing stops, partial profits, rug detection
+        if score >= 0.40:
             signal_type = 'buy'
-            strength = min((score - 0.50) / 0.50, 1.0)
+            strength = min((score - 0.40) / 0.60, 1.0)
             confidence = 0.5 + (strength * 0.4)
-        elif score <= 0.35:
+        elif score <= 0.30:
             signal_type = 'sell'
-            strength = min((0.35 - score) / 0.35, 1.0)
+            strength = min((0.30 - score) / 0.30, 1.0)
             confidence = 0.6 + (strength * 0.3)
         else:
             signal_type = 'hold'

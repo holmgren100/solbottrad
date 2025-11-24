@@ -161,14 +161,15 @@ class SentimentModel:
             return 'avoid'
 
         # Recommendations based on score and confidence
+        # Lowered thresholds - Twitter often unavailable, don't block all trades!
         if overall_score >= 0.75 and confidence >= 0.6:
             return 'strong_buy'
         elif overall_score >= 0.6 and confidence >= 0.5:
             return 'buy'
-        elif overall_score >= 0.4:
+        elif overall_score >= 0.25:  # Was 0.4 - too high when Twitter unavailable
             return 'hold'
         else:
-            return 'avoid'
+            return 'avoid'  # Only avoid truly negative sentiment < 0.25
 
     def record_score(self, token_address: str, score: SentimentScore):
         """
