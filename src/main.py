@@ -95,12 +95,16 @@ class SolanaTradingBot:
 
     def _register_health_checks(self):
         """Register component health checks."""
+        # Core components - essential for trading
         self.health_checker.register_component('alchemy', self.alchemy.health_check)
         self.health_checker.register_component('jupiter', self.jupiter.health_check)
-        self.health_checker.register_component('solsniffer', self.solsniffer.health_check)
         self.health_checker.register_component('dexscreener', self.dexscreener.health_check)
-        self.health_checker.register_component('twitter', self.twitter.health_check)
-        self.health_checker.register_component('wallet_tracker', self.wallet_tracker.health_check)
+
+        # Optional components - disabled to reduce log noise
+        # These components are not critical for core trading functionality
+        # self.health_checker.register_component('solsniffer', self.solsniffer.health_check)
+        # self.health_checker.register_component('twitter', self.twitter.health_check)
+        # self.health_checker.register_component('wallet_tracker', self.wallet_tracker.health_check)
 
     async def analyze_token(self, token_address: str) -> Optional[dict]:
         """
