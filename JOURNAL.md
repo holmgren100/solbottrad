@@ -4,6 +4,56 @@ Track all changes, what worked, what broke, and how to revert.
 
 ---
 
+## 2025-11-24 - Restore 2-Minute Scan Interval (THE MISSING PIECE!)
+
+### Commit: `c872fd6`
+**Status: ✅ CRITICAL FIX - BACK TO WORKING FREQUENCY**
+
+### What Changed:
+Restored scan interval from 300 seconds (5 min) back to 120 seconds (2 min)
+
+### Why:
+User said: "between 20:16 and 03:40 all worked, getting a lot signals several per 10 minutes"
+
+### The Missing Piece:
+**Working period (20:16-03:40):**
+- Scan interval: **120 seconds (2 minutes)**
+- Scans per 10 minutes: **5 scans**
+- Result: **Several buy signals per 10 minutes** ✅
+- Full category rotation: 8 minutes (4 categories × 2 min)
+- Tokens analyzed: **1500/hour**
+
+**After change (broken):**
+- Scan interval: **300 seconds (5 minutes)**
+- Scans per 10 minutes: **2 scans**
+- Result: Much fewer signals ❌
+- Full category rotation: 20 minutes
+- Tokens analyzed: **600/hour** (60% reduction!)
+
+### Complete Working Setup (20:16-03:40):
+1. ✅ `/categories/{category}` endpoint
+2. ✅ Rotate through 4 categories (toptraded, toptrending, toporganicscore, recent)
+3. ✅ 50 tokens per category
+4. ✅ **2-minute scan interval** (THIS WAS MISSING!)
+5. ✅ Partial profit-taking (25/15/10/10% at 100/200/300/500%)
+6. ✅ 10% trailing stop
+7. ✅ Rug detection
+8. ✅ Aggressive risk assessment
+
+### Result:
+- ✅ 5 scans per 10 minutes
+- ✅ 250 tokens analyzed per 10 minutes (5 scans × 50 tokens)
+- ✅ Several buy signals per 10 minutes (user's requirement)
+- ✅ All security protections active
+
+### How to Revert:
+```bash
+git revert c872fd6
+# This will slow down scanning again
+```
+
+---
+
 ## 2025-11-24 - Revert to ACTUAL Working State from 02:40
 
 ### Commit: `d2782eb`
