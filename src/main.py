@@ -38,6 +38,7 @@ class SolanaTradingBot:
         self.settings = settings
         self.running = False
         self.trading_paused = False  # Can pause trading via Telegram
+        self.scan_cycle = 0  # Rotate through different token categories each scan
 
         # Monitoring
         self.notifier = TelegramNotifier(
@@ -422,14 +423,23 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Get new tokens from Jupiter - try trending first, fallback to recent
-            # Increased to 50 tokens to find quality opportunities among the noise
-            print("  📡 Fetching trending tokens from Jupiter...")
-            new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
+            # Rotate through different token sources each scan for maximum coverage
+            # This discovers more diverse opportunities across different market segments
+            categories = ['toptraded', 'toptrending', 'toporganicscore', 'recent']
+            current_category = categories[self.scan_cycle % len(categories)]
+            self.scan_cycle += 1
+
+            print(f"  📡 Fetching tokens from Jupiter ({current_category}, cycle #{self.scan_cycle})...")
+
+            if current_category == 'recent':
+                new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+            else:
+                new_tokens = await self.jupiter.get_trending_tokens(category=current_category, limit=50)
 
             if not new_tokens:
-                print("  ⚠️  No trending tokens, trying recent tokens...")
-                new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+                print(f"  ⚠️  No {current_category} tokens, trying fallback...")
+                # Try different category as fallback
+                new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
 
             if not new_tokens:
                 print("  ⚠️  No tokens returned from Jupiter, using fallback tokens")
