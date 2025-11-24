@@ -38,7 +38,6 @@ class SolanaTradingBot:
         self.settings = settings
         self.running = False
         self.trading_paused = False  # Can pause trading via Telegram
-        self.scan_cycle = 0  # Rotate through different token categories each scan
 
         # Monitoring
         self.notifier = TelegramNotifier(
@@ -434,37 +433,14 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Rotate through different token sources each scan (working at 02:40!)
-            # Discovers diverse opportunities across market segments
-            categories = ['toptraded', 'toptrending', 'toporganicscore', 'recent']
-            current_category = categories[self.scan_cycle % len(categories)]
-            self.scan_cycle += 1
-
-            print(f"  📡 Fetching tokens from Jupiter ({current_category}, cycle #{self.scan_cycle})...")
-
-            if current_category == 'recent':
-                new_tokens = await self.jupiter.get_recent_tokens(limit=50)
-            else:
-                new_tokens = await self.jupiter.get_trending_tokens(category=current_category, limit=50)
+            # Get new tokens from Jupiter (simple, no fancy rotation - just what works)
+            print("  📡 Fetching tokens from Jupiter...")
+            new_tokens = await self.jupiter.get_recent_tokens(limit=50)
 
             if not new_tokens:
-                print(f"  ⚠️  No {current_category} tokens, trying fallback...")
-                # Try different category as fallback
-                new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
-
-            if not new_tokens:
-                print("  ⚠️  No tokens from Jupiter, using fallback tokens")
-                logger.warning("Jupiter returned no tokens, using fallback")
-                # Fallback to popular tokens as last resort
-                new_tokens = [
-                    {'address': 'So11111111111111111111111111111111111111112'},  # SOL
-                    {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},  # USDC
-                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
-                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
-                ]
-            else:
-                print(f"  ✅ Found {len(new_tokens)} tokens from Jupiter!")
-                logger.info(f"Retrieved {len(new_tokens)} tokens from Jupiter")
+                print("  ⚠️  No tokens from Jupiter")
+                logger.warning("Jupiter returned no tokens")
+                return
 
             # Get currently open positions
             if settings.is_paper_trading():
