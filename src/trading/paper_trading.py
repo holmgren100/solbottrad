@@ -1,5 +1,6 @@
 """
 Paper trading engine for testing strategies without real funds.
+Now includes Jupiter + Jito simulation for realistic execution modeling.
 """
 
 from typing import Dict, Optional
@@ -7,6 +8,7 @@ from datetime import datetime
 import json
 import os
 from .position_manager import PositionManager, Trade, Position
+from ..blockchain.jupiter_executor import JupiterSwapExecutor
 from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,6 +58,16 @@ class PaperTradingEngine:
             self.state_file = state_file
 
         logger.info(f"State file location: {self.state_file}")
+
+        # Initialize Jupiter executor for realistic simulation
+        rpc_url = os.getenv('SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com')
+        use_jito = os.getenv('USE_JITO_BUNDLES', 'true').lower() == 'true'
+        self.jupiter_executor = JupiterSwapExecutor(
+            rpc_url=rpc_url,
+            use_jito=use_jito,
+            paper_trading=True  # Always True in paper trading mode
+        )
+        logger.info(f"✅ Jupiter executor initialized (Paper Mode, Jito: {use_jito})")
 
         # Load previous state if exists
         self.load_state()
