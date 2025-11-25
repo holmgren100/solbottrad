@@ -17,6 +17,7 @@ from .market import DexScreenerClient, MarketAnalyzer, JupiterClient
 from .social import TwitterClient, SentimentAnalyzer
 from .ai import SentimentModel, PricePredictor, RiskAssessor
 from .trading import TelegramExecutor, PositionManager, PaperTradingEngine
+from .data import MLDataCollector
 
 # Setup logging
 setup_logger(
@@ -87,6 +88,14 @@ class SolanaTradingBot:
         self.position_manager = PositionManager(
             max_open_positions=settings.risk.max_open_positions
         )
+
+        # ML Data Collection
+        self.ml_collector = MLDataCollector()
+        logger.info("📊 ML data collection enabled - all trades will be logged for future training")
+
+        # Connect ML collector to trading engine
+        from .trading.paper_trading import set_ml_collector
+        set_ml_collector(self.ml_collector)
 
         # Register health checks
         self._register_health_checks()
@@ -328,7 +337,9 @@ class SolanaTradingBot:
             'stop_loss': stop_loss,
             'take_profit': take_profit,
             'confidence': sentiment_score.confidence,
-            'reasons': sentiment_score.reasoning + price_prediction.factors
+            'reasons': sentiment_score.reasoning + price_prediction.factors,
+            # Store full analysis for ML data collection
+            'analysis_data': analysis
         }
 
         return decision
@@ -379,7 +390,8 @@ class SolanaTradingBot:
                     amount_usd=decision['position_size'],
                     price=decision['entry_price'],
                     stop_loss=decision['stop_loss'],
-                    take_profit=decision['take_profit']
+                    take_profit=decision['take_profit'],
+                    analysis_data=decision.get('analysis_data')  # Pass analysis for ML collection
                 )
                 print(f"      ✅ Trade result: {result}")
             else:

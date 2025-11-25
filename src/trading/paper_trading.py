@@ -7,11 +7,22 @@ from typing import Dict, Optional
 from datetime import datetime
 import json
 import os
+import uuid
 from .position_manager import PositionManager, Trade, Position
 from ..blockchain.jupiter_executor import JupiterSwapExecutor
 from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
+
+# For ML data collection - will be set by main bot
+_ml_collector = None
+_trade_contexts = {}  # Store analysis context for each trade
+
+
+def set_ml_collector(collector):
+    """Set the ML data collector (called by main bot)."""
+    global _ml_collector
+    _ml_collector = collector
 
 
 class PaperTradingEngine:
@@ -109,6 +120,130 @@ class PaperTradingEngine:
         else:
             logger.info("💰 Partial profit taking DISABLED")
 
+    def store_trade_context(self, token_address: str, analysis_data: Dict):
+        """
+        Store analysis context for ML data collection.
+
+        Args:
+            token_address: Token address
+            analysis_data: Full analysis data from token analysis
+        """
+        global _trade_contexts
+        _trade_contexts[token_address] = {
+            'timestamp': datetime.now(),
+            'analysis': analysis_data
+        }
+
+    def _record_ml_trade(self, trade: Trade, position: Position, exit_reason: str):
+        """
+        Record completed trade for ML training.
+
+        Args:
+            trade: Trade object
+            position: Position object (before closing)
+            exit_reason: Reason for exit
+        """
+        global _ml_collector, _trade_contexts
+
+        if not _ml_collector:
+            return  # ML collection not enabled
+
+        try:
+            from ..data import MLTradeRecord
+
+            # Get stored analysis context
+            context = _trade_contexts.get(trade.token_address, {})
+            analysis = context.get('analysis', {})
+
+            # Extract data from analysis
+            market_data = analysis.get('market_data', {})
+            risk_assessment = analysis.get('risk_assessment', {})
+            price_prediction = analysis.get('price_prediction', {})
+            sentiment = analysis.get('sentiment', {})
+            security = analysis.get('security', {})
+
+            # Calculate hold duration
+            hold_duration = (trade.timestamp - position.entry_time).total_seconds() / 60  # minutes
+
+            # Create ML trade record
+            ml_record = MLTradeRecord(
+                trade_id=str(uuid.uuid4()),
+                token_address=trade.token_address,
+                token_symbol=trade.symbol or trade.token_address[:8],
+                action='completed',
+                entry_time=position.entry_time,
+                exit_time=trade.timestamp,
+                hold_duration_minutes=hold_duration,
+                entry_price=position.entry_price,
+                exit_price=trade.price,
+                highest_price_reached=position.highest_price,
+                lowest_price_reached=position.entry_price,  # We don't track lowest (could add)
+                amount_usd=trade.amount_usd,
+                quantity=trade.quantity,
+                position_size_percent_of_portfolio=(trade.amount_usd / self.get_portfolio_value() * 100) if self.get_portfolio_value() > 0 else 0,
+                pnl_usd=trade.pnl,
+                pnl_percent=trade.pnl_percent,
+                win=trade.pnl > 0,
+                exit_reason=exit_reason,
+                # Market conditions at entry
+                entry_liquidity_usd=market_data.get('liquidity_usd', 0),
+                entry_volume_24h=market_data.get('volume_24h', 0),
+                entry_price_change_24h=market_data.get('price_change_24h', 0),
+                entry_holder_count=market_data.get('holder_count', 0),
+                entry_market_cap=market_data.get('market_cap', 0),
+                # Market conditions at exit (we don't have this - could fetch)
+                exit_liquidity_usd=position.current_liquidity,
+                exit_volume_24h=0,
+                exit_price_change_24h=0,
+                # Token characteristics
+                token_age_hours=security.get('token_age_hours', 0),
+                is_mintable=security.get('is_mintable', False),
+                has_freeze_authority=security.get('has_freeze_authority', False),
+                is_verified=security.get('is_verified', False),
+                ownership_renounced=security.get('ownership_renounced', False),
+                # Risk scores
+                overall_risk_score=risk_assessment.get('risk_score', 0),
+                liquidity_risk=risk_assessment.get('risk_factors', {}).get('liquidity', 0),
+                security_risk=risk_assessment.get('risk_factors', {}).get('security', 0),
+                volatility_risk=risk_assessment.get('risk_factors', {}).get('volatility', 0),
+                sentiment_risk=risk_assessment.get('risk_factors', {}).get('sentiment', 0),
+                age_risk=risk_assessment.get('risk_factors', {}).get('age', 0),
+                # Signals & predictions
+                sentiment_score=sentiment.get('overall_score', 0.5),
+                sentiment_confidence=sentiment.get('confidence', 0),
+                coordination_risk=sentiment.get('coordination_risk', 0),
+                price_prediction_direction=price_prediction.get('predicted_direction', ''),
+                price_prediction_confidence=price_prediction.get('confidence', 0),
+                predicted_change_percent=price_prediction.get('predicted_change_percent', 0),
+                # Portfolio context
+                portfolio_value_at_entry=self.get_portfolio_value(),
+                open_positions_count=len(self.position_manager.open_positions),
+                daily_trades_before_this=len([t for t in self.position_manager.closed_trades if t.timestamp.date() == datetime.now().date()]),
+                # Execution
+                execution_method='jupiter',
+                # Trailing stop
+                used_trailing_stop=position.use_trailing_stop,
+                trailing_stop_percent=position.trailing_stop_percent,
+                max_drawdown_from_peak_percent=((position.highest_price - trade.price) / position.highest_price * 100) if position.highest_price > 0 else 0,
+                # Partial profits
+                is_partial_sell=False,  # Could enhance this
+                milestones_hit=list(position.milestones_hit),
+                partial_sell_count=len(position.milestones_hit),
+                # Metadata
+                paper_trading=True
+            )
+
+            # Record to ML collector
+            _ml_collector.record_trade(ml_record)
+            logger.debug(f"📊 ML trade recorded: {trade.token_symbol} ({trade.pnl_percent:+.2f}%)")
+
+            # Clean up context
+            if trade.token_address in _trade_contexts:
+                del _trade_contexts[trade.token_address]
+
+        except Exception as e:
+            logger.error(f"❌ Error recording ML trade: {e}", exc_info=True)
+
     async def execute_buy(
         self,
         token_address: str,
@@ -117,7 +252,8 @@ class PaperTradingEngine:
         stop_loss: float,
         take_profit: float,
         use_trailing_stop: Optional[bool] = None,
-        trailing_stop_percent: Optional[float] = None
+        trailing_stop_percent: Optional[float] = None,
+        analysis_data: Optional[Dict] = None
     ) -> Dict:
         """
         Execute a simulated buy order.
@@ -157,6 +293,10 @@ class PaperTradingEngine:
                 'status': 'failed',
                 'reason': 'max_positions_reached'
             }
+
+        # Store analysis context for ML data collection
+        if analysis_data:
+            self.store_trade_context(token_address, analysis_data)
 
         # Open position
         position = self.position_manager.open_position(
@@ -230,6 +370,28 @@ class PaperTradingEngine:
                 'reason': 'no_position'
             }
 
+        # Record position state before closing (for ML)
+        position_snapshot = Position(
+            token_address=position.token_address,
+            entry_price=position.entry_price,
+            current_price=position.current_price,
+            amount_usd=position.amount_usd,
+            quantity=position.quantity,
+            entry_time=position.entry_time,
+            stop_loss=position.stop_loss,
+            take_profit=position.take_profit,
+            use_trailing_stop=position.use_trailing_stop,
+            trailing_stop_percent=position.trailing_stop_percent,
+            highest_price=position.highest_price,
+            trailing_stop_price=position.trailing_stop_price,
+            last_price_update=position.last_price_update,
+            current_liquidity=position.current_liquidity,
+            price_update_failures=position.price_update_failures,
+            initial_quantity=position.initial_quantity,
+            milestones_hit=position.milestones_hit.copy(),
+            symbol=position.symbol
+        )
+
         # Close position
         trade = self.position_manager.close_position(
             token_address=token_address,
@@ -242,6 +404,9 @@ class PaperTradingEngine:
                 'status': 'failed',
                 'reason': 'close_failed'
             }
+
+        # Record trade for ML training
+        self._record_ml_trade(trade, position_snapshot, reason)
 
         # Add proceeds to capital
         proceeds = trade.amount_usd

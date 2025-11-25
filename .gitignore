@@ -51,5 +51,6 @@ htmlcov/
 trading_bot.log
 *.db
 *.sqlite
-data/
+/data/
+!src/data/
 paper_trading_state.json
