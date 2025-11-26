@@ -157,10 +157,21 @@ class PaperTradingEngine:
 
             # Extract data from analysis
             market_data = analysis.get('market_data', {})
-            risk_assessment = analysis.get('risk_assessment', {})
+            risk_assessment_raw = analysis.get('risk_assessment', {})
             price_prediction = analysis.get('price_prediction', {})
             sentiment = analysis.get('sentiment', {})
             security = analysis.get('security', {})
+
+            # Handle risk_assessment being either dict or RiskAssessment object
+            if hasattr(risk_assessment_raw, '__dict__'):
+                # It's an object, convert to dict
+                risk_assessment = {
+                    'risk_score': getattr(risk_assessment_raw, 'risk_score', 0),
+                    'risk_factors': getattr(risk_assessment_raw, 'risk_factors', {})
+                }
+            else:
+                # It's already a dict
+                risk_assessment = risk_assessment_raw
 
             # Calculate hold duration
             hold_duration = (trade.timestamp - position.entry_time).total_seconds() / 60  # minutes
@@ -473,14 +484,18 @@ class PaperTradingEngine:
         for token_address in dead_positions:
             position = self.position_manager.get_position(token_address)
             if position:
-                # Close at effectively $0 (rugged/dead token has no value)
+                # Use current price if available, otherwise assume rugged ($0)
+                exit_price = position.current_price if position.current_price > 0 else 0.00000001
+                potential_loss = position.amount_usd - (position.quantity * exit_price)
+
                 logger.error(
                     f"💀 AUTO-CLOSING DEAD TOKEN: {token_address[:8]}... "
                     f"Entry: ${position.entry_price:.8f}, "
                     f"Last known: ${position.current_price:.8f}, "
-                    f"Loss: ${position.amount_usd:.2f}"
+                    f"Exit at: ${exit_price:.8f}, "
+                    f"Potential loss: ${potential_loss:.2f}"
                 )
-                await self.execute_sell(token_address, 0.00000001, reason='rugged/dead')
+                await self.execute_sell(token_address, exit_price, reason='low_liquidity')
 
         # Check for partial profit milestones (before stop loss/take profit checks)
         if self.partial_profit_enabled:
