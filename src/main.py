@@ -304,7 +304,19 @@ class SolanaTradingBot:
         if market_signal.signal_type == 'buy' and sentiment_score.recommendation != 'avoid':
             action = 'buy'
         elif market_signal.signal_type == 'sell':
-            action = 'sell'
+            # Can't short on DEXs - only sell if we own the token
+            token_address = analysis['token_address']
+            if settings.is_paper_trading():
+                has_position = token_address in self.trading_engine.position_manager.open_positions
+            else:
+                has_position = token_address in self.position_manager.open_positions
+
+            if has_position:
+                action = 'sell'
+            else:
+                print(f"    ⏭️  SELL signal ignored: no position in {analysis['symbol']} (can't short on DEX)")
+                logger.info(f"SELL signal ignored - no position in {token_address[:8]}")
+                return None
 
         if not action:
             print(f"    ❌ No action: market={market_signal.signal_type}, sentiment={sentiment_score.recommendation}")
