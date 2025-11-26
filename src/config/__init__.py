@@ -2,4 +2,7 @@
 
 from .settings import Settings
 
-__all__ = ['Settings']
+# Create global settings instance
+settings = Settings()
+
+__all__ = ['Settings', 'settings']

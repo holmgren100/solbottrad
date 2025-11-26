@@ -3,7 +3,7 @@ Wallet tracking system for monitoring "smart money" movements.
 """
 
 import asyncio
-from typing import Dict, List, Set, Callable, Awaitable
+from typing import Dict, List, Set, Callable, Awaitable, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from ..monitoring.logger import get_logger
