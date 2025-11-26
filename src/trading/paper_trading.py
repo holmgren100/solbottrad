@@ -200,7 +200,7 @@ class PaperTradingEngine:
             ml_record = MLTradeRecord(
                 trade_id=str(uuid.uuid4()),
                 token_address=trade.token_address,
-                token_symbol=trade.symbol or trade.token_address[:8],
+                token_symbol=getattr(trade, 'symbol', None) or getattr(trade, 'token_symbol', None) or trade.token_address[:8],
                 action='completed',
                 entry_time=position.entry_time,
                 exit_time=trade.timestamp,
