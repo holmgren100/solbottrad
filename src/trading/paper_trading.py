@@ -684,6 +684,8 @@ class PaperTradingEngine:
                     'highest_price': pos.highest_price,
                     'trailing_stop_price': pos.trailing_stop_price,
                     'last_price_update': pos.last_price_update.isoformat(),
+                    'last_price_change': pos.last_price_change.isoformat(),  # Frozen price detection
+                    'last_known_price': pos.last_known_price,  # Frozen price detection
                     'current_liquidity': pos.current_liquidity,
                     'price_update_failures': pos.price_update_failures,
                     'initial_quantity': pos.initial_quantity,  # Partial profit tracking
@@ -748,6 +750,8 @@ class PaperTradingEngine:
                     highest_price=pos_data.get('highest_price', pos_data['entry_price']),
                     trailing_stop_price=pos_data.get('trailing_stop_price', pos_data['stop_loss']),
                     last_price_update=datetime.fromisoformat(pos_data.get('last_price_update', pos_data['entry_time'])),
+                    last_price_change=datetime.fromisoformat(pos_data.get('last_price_change', pos_data['entry_time'])),  # Frozen price detection
+                    last_known_price=pos_data.get('last_known_price', pos_data['entry_price']),  # Frozen price detection
                     current_liquidity=pos_data.get('current_liquidity', 0.0),
                     price_update_failures=pos_data.get('price_update_failures', 0),
                     initial_quantity=pos_data.get('initial_quantity', pos_data['quantity']),  # Partial profit tracking
