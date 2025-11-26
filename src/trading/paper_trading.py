@@ -158,8 +158,8 @@ class PaperTradingEngine:
             # Extract data from analysis
             market_data = analysis.get('market_data', {})
             risk_assessment_raw = analysis.get('risk_assessment', {})
-            price_prediction = analysis.get('price_prediction', {})
-            sentiment = analysis.get('sentiment', {})
+            price_prediction_raw = analysis.get('price_prediction', {})
+            sentiment_raw = analysis.get('sentiment', {})
             security = analysis.get('security', {})
 
             # Handle risk_assessment being either dict or RiskAssessment object
@@ -172,6 +172,26 @@ class PaperTradingEngine:
             else:
                 # It's already a dict
                 risk_assessment = risk_assessment_raw
+
+            # Handle price_prediction being either dict or PricePrediction object
+            if hasattr(price_prediction_raw, '__dict__'):
+                price_prediction = {
+                    'predicted_direction': getattr(price_prediction_raw, 'predicted_direction', ''),
+                    'confidence': getattr(price_prediction_raw, 'confidence', 0),
+                    'predicted_change_percent': getattr(price_prediction_raw, 'predicted_change_percent', 0)
+                }
+            else:
+                price_prediction = price_prediction_raw
+
+            # Handle sentiment being either dict or SentimentScore object
+            if hasattr(sentiment_raw, '__dict__'):
+                sentiment = {
+                    'overall_score': getattr(sentiment_raw, 'overall_score', 0.5),
+                    'confidence': getattr(sentiment_raw, 'confidence', 0),
+                    'coordination_risk': getattr(sentiment_raw, 'coordination_risk', 0)
+                }
+            else:
+                sentiment = sentiment_raw
 
             # Calculate hold duration
             hold_duration = (trade.timestamp - position.entry_time).total_seconds() / 60  # minutes
