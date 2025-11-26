@@ -39,6 +39,7 @@ class PaperTradingEngine:
         # Read rug detection settings from environment
         self.rug_detection_enabled = os.getenv('RUG_DETECTION_ENABLED', 'true').lower() == 'true'
         self.stale_price_minutes = float(os.getenv('STALE_PRICE_MINUTES', '5'))
+        self.frozen_price_minutes = float(os.getenv('FROZEN_PRICE_MINUTES', '15'))
         self.min_position_liquidity = float(os.getenv('MIN_POSITION_LIQUIDITY', '5000.0'))
 
         # Read trailing stop settings from environment
@@ -496,7 +497,8 @@ class PaperTradingEngine:
         if self.rug_detection_enabled:
             dead_positions = self.position_manager.get_dead_positions(
                 stale_minutes=self.stale_price_minutes,
-                min_liquidity=self.min_position_liquidity
+                min_liquidity=self.min_position_liquidity,
+                freeze_minutes=self.frozen_price_minutes
             )
         else:
             dead_positions = []

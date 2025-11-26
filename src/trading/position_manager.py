@@ -33,6 +33,8 @@ class Position:
     symbol: str = ''  # Token symbol for display
     # Rug detection fields
     last_price_update: datetime = field(default_factory=datetime.now)  # Track when price was last updated
+    last_price_change: datetime = field(default_factory=datetime.now)  # Track when price ACTUALLY changed
+    last_known_price: float = 0.0  # Track previous price to detect changes
     current_liquidity: float = 0.0  # Track current liquidity
     price_update_failures: int = 0  # Count consecutive failed price updates
     # Partial profit taking fields
@@ -41,6 +43,17 @@ class Position:
 
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
+        # Track if price ACTUALLY changed (not just API responding with same price)
+        # Use 0.1% threshold to ignore tiny API noise but catch real freezes
+        if self.last_known_price > 0:
+            price_change_pct = abs((new_price - self.last_known_price) / self.last_known_price) * 100
+            if price_change_pct >= 0.1:  # Real change (>0.1%)
+                self.last_price_change = datetime.now()
+        else:
+            # First price update
+            self.last_price_change = datetime.now()
+
+        self.last_known_price = new_price  # Store for next comparison
         self.current_price = new_price
         self.last_price_update = datetime.now()
         self.price_update_failures = 0  # Reset failure count on successful update
@@ -87,6 +100,31 @@ class Position:
         from datetime import timedelta
         time_since_update = datetime.now() - self.last_price_update
         return time_since_update > timedelta(minutes=stale_minutes)
+
+    def is_price_frozen(self, freeze_minutes: int = 15) -> bool:
+        """
+        Check if price hasn't CHANGED for too long (frozen/stuck price).
+
+        Different from is_price_stale - this checks if APIs are responding
+        but the price itself isn't moving (honeypot, frozen, dead token).
+
+        Args:
+            freeze_minutes: Minutes without price change to consider frozen
+
+        Returns:
+            True if price has been frozen (not changed) for too long
+        """
+        from datetime import timedelta
+        time_since_change = datetime.now() - self.last_price_change
+        minutes_frozen = time_since_change.total_seconds() / 60
+
+        # Only flag as frozen if we've held for at least 5 minutes
+        # (prevents false positives on new positions)
+        minutes_held = (datetime.now() - self.entry_time).total_seconds() / 60
+        if minutes_held < 5:
+            return False
+
+        return time_since_change > timedelta(minutes=freeze_minutes)
 
     def is_liquidity_dead(self, min_liquidity: float = 1000.0) -> bool:
         """
@@ -193,7 +231,8 @@ class PositionManager:
             trailing_stop_percent=trailing_stop_percent,
             highest_price=entry_price,  # Initialize with entry price
             trailing_stop_price=stop_loss,  # Start with regular stop loss
-            initial_quantity=quantity  # Track original quantity for partial profit taking
+            initial_quantity=quantity,  # Track original quantity for partial profit taking
+            last_known_price=entry_price  # Initialize for frozen price detection
         )
 
         self.open_positions[token_address] = position
@@ -366,13 +405,14 @@ class PositionManager:
 
         return False
 
-    def get_dead_positions(self, stale_minutes: int = 10, min_liquidity: float = 1000.0) -> List[str]:
+    def get_dead_positions(self, stale_minutes: int = 10, min_liquidity: float = 1000.0, freeze_minutes: int = 15) -> List[str]:
         """
         Get positions that are likely rugged or dead (stale price or no liquidity).
 
         Args:
             stale_minutes: Minutes without price update to consider stale
             min_liquidity: Minimum liquidity threshold in USD
+            freeze_minutes: Minutes without price CHANGE to consider frozen
 
         Returns:
             List of token addresses for dead positions
@@ -386,6 +426,17 @@ class PositionManager:
                 logger.warning(
                     f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
                     f"No price update for {minutes_since:.1f} minutes (likely rugged)"
+                )
+                dead_positions.append(token_address)
+                continue
+
+            # Check if price is FROZEN (APIs responding but price not moving)
+            if position.is_price_frozen(freeze_minutes):
+                minutes_frozen = (datetime.now() - position.last_price_change).total_seconds() / 60
+                logger.warning(
+                    f"🚨 FROZEN TOKEN DETECTED: {token_address[:8]}... - "
+                    f"Price hasn't changed for {minutes_frozen:.1f} minutes @ ${position.current_price:.8f} "
+                    f"(likely honeypot/dead/locked)"
                 )
                 dead_positions.append(token_address)
                 continue
@@ -409,7 +460,7 @@ class PositionManager:
                 dead_positions.append(token_address)
                 continue
 
-            # NEW: Check if price hasn't actually changed (fake updates / minimal movement)
+            # Check if price hasn't actually changed (fake updates / minimal movement)
             # If price moved less than 1% after 5+ minutes, likely honeypot/dead/manipulated
             minutes_held = (datetime.now() - position.entry_time).total_seconds() / 60
             if minutes_held >= 5:
