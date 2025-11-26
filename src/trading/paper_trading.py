@@ -267,7 +267,7 @@ class PaperTradingEngine:
 
             # Record to ML collector
             _ml_collector.record_trade(ml_record)
-            logger.debug(f"📊 ML trade recorded: {trade.token_symbol} ({trade.pnl_percent:+.2f}%)")
+            logger.debug(f"📊 ML trade recorded: {trade.symbol or trade.token_address[:8]} ({trade.pnl_percent:+.2f}%)")
 
             # Clean up context
             if trade.token_address in _trade_contexts:
