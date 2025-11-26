@@ -1,7 +1,5 @@
-# Environment and secrets
+# Environment variables
 .env
-*.env
-!.env.example
 
 # Python
 __pycache__/
@@ -29,10 +27,7 @@ wheels/
 venv/
 ENV/
 env/
-
-# Logs
-*.log
-trading_bot.log
+.venv
 
 # IDE
 .vscode/
@@ -40,12 +35,22 @@ trading_bot.log
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
-Thumbs.db
 
-# Data files
-*.csv
-*.json
-!package.json
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Project specific
+trading_bot.log
+*.db
+*.sqlite
+/data/
+!src/data/
+paper_trading_state.json

@@ -1,138 +1,425 @@
-import logging
-from typing import Dict, Optional
+"""
+Risk assessment system for evaluating trading opportunities.
+"""
+
+from typing import Dict, List
+from datetime import datetime
 from dataclasses import dataclass
+from ..monitoring.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class RiskAssessment:
-    risk_score: float  # 0.0 (low risk) to 1.0 (high risk)
-    recommended_position_size: float  # In USD
-    warnings: list
-    approved: bool
+    """Represents a comprehensive risk assessment."""
+    token_address: str
+    overall_risk: str  # 'low', 'medium', 'high', 'extreme'
+    risk_score: float  # 0-1 (0=low risk, 1=extreme risk)
+    confidence: float  # 0-1
+    risk_factors: Dict[str, float]
+    warnings: List[str]
+    recommended_position_size: float  # 0-1 (percentage of max position)
+    should_trade: bool
+    timestamp: datetime
+
 
 class RiskAssessor:
-    """Assess risk and recommend position sizing"""
+    """Assesses risk for trading decisions."""
 
     def __init__(self, max_position_size: float = 100.0):
+        """
+        Initialize risk assessor.
+
+        Args:
+            max_position_size: Maximum position size in USD
+        """
         self.max_position_size = max_position_size
-        self.logger = logging.getLogger('trading_bot.risk_assessor')
 
-    def assess(
+    def assess_risk(
         self,
-        token_data: Dict,
-        prediction_confidence: float,
-        sentiment_score: float,
-        current_portfolio_value: float
+        token_address: str,
+        market_data: Dict,
+        security_data: Dict,
+        sentiment_score: Dict,
+        price_prediction: Dict
     ) -> RiskAssessment:
-        """Assess risk for a trading opportunity"""
+        """
+        Perform comprehensive risk assessment.
+
+        Args:
+            token_address: Token address
+            market_data: Market data including liquidity, volume
+            security_data: Security analysis from SolSniffer
+            sentiment_score: Sentiment analysis results
+            price_prediction: Price prediction results
+
+        Returns:
+            RiskAssessment with comprehensive analysis
+        """
+        risk_factors = {}
+        warnings = []
+
+        # 1. Liquidity Risk
+        liquidity = market_data.get('liquidity_usd', 0)
+        liquidity_risk = self._assess_liquidity_risk(liquidity)
+        risk_factors['liquidity'] = liquidity_risk
+
+        if liquidity_risk > 0.6:
+            warnings.append(f"Low liquidity: ${liquidity:,.0f}")
+        elif liquidity_risk > 0.4:
+            warnings.append(f"Moderate liquidity: ${liquidity:,.0f}")
+
+        # 2. Security Risk
+        security_risk = self._assess_security_risk(security_data)
+        risk_factors['security'] = security_risk
+
+        if security_risk > 0.7:
+            warnings.append("High security risk - potential rug pull indicators")
+        elif security_risk > 0.5:
+            warnings.append("Moderate security concerns detected")
+
+        # 3. Volatility Risk
+        volatility = market_data.get('price_change_24h', 0)
+        volatility_risk = self._assess_volatility_risk(volatility)
+        risk_factors['volatility'] = volatility_risk
+
+        if abs(volatility) > 50:
+            warnings.append(f"Extreme volatility: {volatility:+.1f}% in 24h")
+        elif abs(volatility) > 25:
+            warnings.append(f"High volatility: {volatility:+.1f}% in 24h")
+
+        # 4. Sentiment Risk
+        coordination_risk = sentiment_score.get('coordination_risk', 0.0)
+        sentiment_confidence = sentiment_score.get('confidence', 0.5)
+        sentiment_risk = self._assess_sentiment_risk(coordination_risk, sentiment_confidence)
+        risk_factors['sentiment'] = sentiment_risk
+
+        if coordination_risk > 0.6:
+            warnings.append("Possible coordinated pump detected")
+
+        # 5. Prediction Uncertainty
+        prediction_confidence = price_prediction.get('confidence', 0.5)
+        prediction_risk = 1.0 - prediction_confidence
+        risk_factors['prediction_uncertainty'] = prediction_risk
+
+        if prediction_confidence < 0.4:
+            warnings.append("Low prediction confidence")
+
+        # 6. Age Risk (new tokens are riskier)
+        pair_age = market_data.get('pair_created_at')
+        age_risk = self._assess_age_risk(pair_age)
+        risk_factors['age'] = age_risk
+
+        if age_risk > 0.6:
+            warnings.append("Very new token - high risk")
+
+        # Calculate Overall Risk Score
+        # Adjusted weights: With partial profit-taking and trailing stops,
+        # we can afford to be more aggressive on volatile/new tokens
+        weights = {
+            'liquidity': 0.35,      # Most important - can't sell with no liquidity
+            'security': 0.35,        # Rug pull indicators matter
+            'volatility': 0.05,      # Volatility is GOOD - that's where gains are!
+            'sentiment': 0.15,       # Coordination pumps still risky
+            'prediction_uncertainty': 0.05,  # Less important with good exits
+            'age': 0.05              # New tokens moon - age matters less
+        }
+
+        overall_risk_score = sum(
+            risk_factors[factor] * weights[factor]
+            for factor in risk_factors
+        )
+
+        # Determine Risk Level
+        if overall_risk_score < 0.3:
+            overall_risk = 'low'
+        elif overall_risk_score < 0.5:
+            overall_risk = 'medium'
+        elif overall_risk_score < 0.7:
+            overall_risk = 'high'
+        else:
+            overall_risk = 'extreme'
+
+        # Calculate Recommended Position Size
+        recommended_position = self._calculate_position_size(
+            overall_risk_score,
+            liquidity,
+            prediction_confidence
+        )
+
+        # Debug: print position size calculation
+        print(f"      💰 Position size: {recommended_position:.3f} (pred_conf: {prediction_confidence:.2f})")
+
+        # Determine if Should Trade
+        should_trade = self._should_trade_decision(
+            overall_risk_score,
+            warnings,
+            recommended_position
+        )
+
+        # Calculate Assessment Confidence
+        # Higher confidence if we have all data points
+        data_completeness = sum([
+            1 if liquidity > 0 else 0,
+            1 if security_data else 0,
+            1 if sentiment_score else 0,
+            1 if prediction_confidence > 0 else 0
+        ]) / 4
+        confidence = data_completeness * 0.7 + (1.0 - overall_risk_score) * 0.3
+
+        assessment = RiskAssessment(
+            token_address=token_address,
+            overall_risk=overall_risk,
+            risk_score=overall_risk_score,
+            confidence=confidence,
+            risk_factors=risk_factors,
+            warnings=warnings,
+            recommended_position_size=recommended_position,
+            should_trade=should_trade,
+            timestamp=datetime.now()
+        )
+
+        logger.debug(
+            f"Risk assessment for {token_address[:8]}...: "
+            f"{overall_risk} (score: {overall_risk_score:.2f}), "
+            f"should_trade: {should_trade}"
+        )
+
+        return assessment
+
+    def _assess_liquidity_risk(self, liquidity: float) -> float:
+        """
+        Assess liquidity risk.
+        Liquidity is critical - can't sell tokens with no liquidity!
+        Rug detection will auto-exit if liquidity drops below $8k.
+
+        Args:
+            liquidity: Liquidity in USD
+
+        Returns:
+            Risk score (0-1)
+        """
+        if liquidity >= 100000:
+            return 0.1
+        elif liquidity >= 50000:
+            return 0.2
+        elif liquidity >= 20000:
+            return 0.3
+        elif liquidity >= 10000:
+            return 0.5
+        elif liquidity >= 5000:
+            return 0.7
+        else:
+            return 1.0  # Below $5k = too risky, can't exit
+
+    def _assess_security_risk(self, security_data: Dict) -> float:
+        """
+        Assess security risk from token analysis.
+
+        Args:
+            security_data: Security analysis data
+
+        Returns:
+            Risk score (0-1)
+        """
+        if not security_data:
+            return 0.5  # Medium risk if no data
+
+        risk_score = 0.0
+
+        # Check for common red flags
+        if security_data.get('is_mintable'):
+            risk_score += 0.25
+        if security_data.get('has_freeze_authority'):
+            risk_score += 0.25
+        if not security_data.get('is_verified'):
+            risk_score += 0.20
+        if security_data.get('ownership_renounced') is False:
+            risk_score += 0.20
+        if security_data.get('has_blacklist'):
+            risk_score += 0.10
+
+        return min(risk_score, 1.0)
+
+    def _assess_volatility_risk(self, price_change_24h: float) -> float:
+        """
+        Assess volatility risk.
+
+        Args:
+            price_change_24h: 24h price change percentage
+
+        Returns:
+            Risk score (0-1)
+        """
+        abs_change = abs(price_change_24h)
+
+        if abs_change >= 100:
+            return 1.0
+        elif abs_change >= 50:
+            return 0.8
+        elif abs_change >= 25:
+            return 0.6
+        elif abs_change >= 10:
+            return 0.4
+        else:
+            return 0.2
+
+    def _assess_sentiment_risk(
+        self,
+        coordination_risk: float,
+        sentiment_confidence: float
+    ) -> float:
+        """
+        Assess sentiment-related risk.
+
+        Args:
+            coordination_risk: Risk of coordinated activity
+            sentiment_confidence: Confidence in sentiment analysis
+
+        Returns:
+            Risk score (0-1)
+        """
+        # High coordination is risky
+        base_risk = coordination_risk * 0.7
+
+        # Low confidence adds risk
+        confidence_risk = (1.0 - sentiment_confidence) * 0.3
+
+        return base_risk + confidence_risk
+
+    def _assess_age_risk(self, pair_created_at: Optional[int]) -> float:
+        """
+        Assess risk based on token age.
+
+        Args:
+            pair_created_at: Timestamp when pair was created
+
+        Returns:
+            Risk score (0-1)
+        """
+        if not pair_created_at:
+            return 0.5  # Medium risk if unknown
+
         try:
-            warnings = []
-            risk_score = 0.5  # Start at medium risk
+            created_date = datetime.fromtimestamp(pair_created_at / 1000)
+            age_hours = (datetime.now() - created_date).total_seconds() / 3600
 
-            # Extract token metrics
-            liquidity = float(token_data.get('liquidity', {}).get('usd', 0))
-            volume_24h = float(token_data.get('volume', {}).get('h24', 0))
-            price_change_24h = float(token_data.get('priceChange', {}).get('h24', 0))
-
-            # Risk factors
-
-            # 1. Liquidity risk
-            if liquidity < 5000:
-                risk_score += 0.3
-                warnings.append("Very low liquidity")
-            elif liquidity < 10000:
-                risk_score += 0.15
-                warnings.append("Low liquidity")
-
-            # 2. Volume risk
-            if volume_24h < 1000:
-                risk_score += 0.2
-                warnings.append("Very low volume")
-            elif volume_24h < 5000:
-                risk_score += 0.1
-                warnings.append("Low volume")
-
-            # 3. Volatility risk
-            if abs(price_change_24h) > 50:
-                risk_score += 0.25
-                warnings.append("Extreme volatility")
-            elif abs(price_change_24h) > 20:
-                risk_score += 0.1
-                warnings.append("High volatility")
-
-            # 4. Prediction confidence (FIXED: Set minimum to 0.4)
-            confidence_factor = max(prediction_confidence, 0.4)
-            if confidence_factor < 0.5:
-                warnings.append("Low prediction confidence")
-
-            # Clamp risk score
-            risk_score = min(max(risk_score, 0.0), 1.0)
-
-            # Calculate position size
-            recommended_position = self._calculate_position_size(
-                risk_score,
-                confidence_factor,
-                sentiment_score,
-                liquidity,
-                current_portfolio_value
-            )
-
-            # Approve trade if position size is reasonable (FIXED: Lowered threshold to 0.05)
-            if recommended_position < 0.05:
-                warnings.append("Position size too small")
-                approved = False
+            if age_hours < 6:
+                return 0.9
+            elif age_hours < 24:
+                return 0.7
+            elif age_hours < 72:
+                return 0.5
+            elif age_hours < 168:  # 1 week
+                return 0.3
             else:
-                approved = True
+                return 0.1
 
-            return RiskAssessment(
-                risk_score=risk_score,
-                recommended_position_size=recommended_position,
-                warnings=warnings,
-                approved=approved
-            )
-
-        except Exception as e:
-            self.logger.error(f"Error in risk assessment: {e}")
-            return RiskAssessment(
-                risk_score=1.0,
-                recommended_position_size=0.0,
-                warnings=["Error in risk assessment"],
-                approved=False
-            )
+        except Exception:
+            return 0.5
 
     def _calculate_position_size(
         self,
         risk_score: float,
-        prediction_confidence: float,
-        sentiment_score: float,
         liquidity: float,
-        portfolio_value: float
+        prediction_confidence: float
     ) -> float:
-        """Calculate recommended position size based on risk factors"""
+        """
+        Calculate recommended position size.
 
-        # Start with max position size
-        position = self.max_position_size
+        Args:
+            risk_score: Overall risk score
+            liquidity: Token liquidity
+            prediction_confidence: Confidence in price prediction
 
-        # Adjust for risk (lower risk = larger position)
-        risk_factor = 1.0 - (risk_score * 0.5)  # Risk reduces position by up to 50%
-        position *= risk_factor
+        Returns:
+            Recommended position size as percentage of max (0-1)
+        """
+        # Base position size inversely proportional to risk
+        base_size = 1.0 - risk_score
 
-        # Adjust for confidence
-        position *= prediction_confidence
+        # Adjust for prediction confidence (minimum 0.4 to avoid blocking all trades)
+        confidence_factor = max(prediction_confidence, 0.4)
 
-        # Adjust for sentiment (-1 to 1, we want positive sentiment)
-        sentiment_factor = (sentiment_score + 1) / 2  # Normalize to 0-1
-        sentiment_factor = max(sentiment_factor, 0.5)  # Don't reduce below 50%
-        position *= sentiment_factor
-
-        # Adjust for liquidity (FIXED: For high liquidity tokens, use full position)
+        # Adjust for liquidity (don't risk too much of the liquidity)
+        # For testing with small positions, if liquidity > $10k just use full position
         if liquidity > 10000:
             liquidity_factor = 1.0
         else:
             liquidity_factor = min(self.max_position_size / max(liquidity * 0.05, 1), 1.0)
-        position *= liquidity_factor
 
-        # Don't exceed max position size or portfolio percentage
-        max_portfolio_percent = 0.1  # Max 10% of portfolio
-        position = min(position, portfolio_value * max_portfolio_percent, self.max_position_size)
+        # Combine factors
+        position_size = base_size * confidence_factor * liquidity_factor
 
-        return round(position, 2)
+        # Ensure reasonable bounds
+        return max(min(position_size, 1.0), 0.0)
+
+    def _should_trade_decision(
+        self,
+        risk_score: float,
+        warnings: List[str],
+        recommended_position: float
+    ) -> bool:
+        """
+        Decide if trading should proceed.
+
+        Args:
+            risk_score: Overall risk score
+            warnings: List of risk warnings
+            recommended_position: Recommended position size
+
+        Returns:
+            True if should trade, False otherwise
+        """
+        # Don't trade if risk is extreme
+        # Raised to 0.8 since we de-weighted volatility/age and have good exit protections
+        if risk_score > 0.8:
+            return False
+
+        # Don't trade if position size is too small (lowered to 0.05 for testing)
+        if recommended_position < 0.05:
+            return False
+
+        # Don't trade if there are critical warnings
+        # Note: Removed "extreme" - extreme volatility is OK with our protections
+        critical_keywords = ['rug pull', 'coordinated pump']
+        for warning in warnings:
+            if any(keyword in warning.lower() for keyword in critical_keywords):
+                return False
+
+        return True
+
+    def calculate_stop_loss(
+        self,
+        entry_price: float,
+        risk_tolerance_percent: float = 20.0
+    ) -> float:
+        """
+        Calculate stop loss price.
+
+        Args:
+            entry_price: Entry price
+            risk_tolerance_percent: Maximum acceptable loss percentage
+
+        Returns:
+            Stop loss price
+        """
+        return entry_price * (1 - risk_tolerance_percent / 100)
+
+    def calculate_take_profit(
+        self,
+        entry_price: float,
+        profit_target_percent: float = 50.0
+    ) -> float:
+        """
+        Calculate take profit price.
+
+        Args:
+            entry_price: Entry price
+            profit_target_percent: Target profit percentage
+
+        Returns:
+            Take profit price
+        """
+        return entry_price * (1 + profit_target_percent / 100)

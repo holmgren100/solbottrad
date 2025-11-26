@@ -1,52 +1,88 @@
+"""
+Logging configuration for the trading bot.
+Provides structured logging to file and console.
+"""
+
 import logging
-import os
-from datetime import datetime
+import sys
+from pathlib import Path
+from typing import Optional
 
-def setup_logger(name: str = 'trading_bot', log_file: str = 'trading_bot.log') -> logging.Logger:
-    """Setup logger with file and console handlers"""
 
-    # Create logger
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+class FlushFileHandler(logging.FileHandler):
+    """File handler that flushes after every log write."""
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+
+def setup_logger(
+    name: str = 'trading_bot',
+    log_file: Optional[str] = None,
+    log_level: str = 'INFO'
+) -> logging.Logger:
+    """
+    Set up a logger with file and console handlers.
+
+    This configures the ROOT logger so all child loggers inherit the handlers.
+
+    Args:
+        name: Logger name (ignored, kept for compatibility)
+        log_file: Path to log file (optional)
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+
+    Returns:
+        Configured logger instance
+    """
+    # Get the root logger so ALL loggers inherit these handlers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level.upper()))
 
     # Prevent duplicate handlers
-    if logger.handlers:
-        return logger
+    if root_logger.handlers:
+        return root_logger
 
     # Create formatters
     detailed_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-
-    # File handler - ensure it's created in the current working directory
-    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(detailed_formatter)
-    logger.addHandler(file_handler)
+    simple_formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
 
     # Console handler
-    console_handler = logging.StreamHandler()
+    console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
-    console_formatter = logging.Formatter('%(levelname)s: %(message)s')
-    console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
+    console_handler.setFormatter(simple_formatter)
+    root_logger.addHandler(console_handler)
 
-    # Test that logging works
-    logger.info(f"Logger initialized - Log file: {os.path.abspath(log_file)}")
+    # File handler with auto-flush for real-time logging
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = FlushFileHandler(log_file, mode='a', encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(detailed_formatter)
+        root_logger.addHandler(file_handler)
 
-    return logger
+        # Write initial log entry to verify file is working
+        root_logger.info("=" * 60)
+        root_logger.info("Trading Bot Log File Initialized")
+        root_logger.info("=" * 60)
 
-def log_trade(logger: logging.Logger, action: str, symbol: str, amount: float, price: float, result: dict):
-    """Log trade execution with details"""
-    logger.info(f"TRADE EXECUTED: {action.upper()} {symbol}")
-    logger.info(f"  Amount: ${amount:.2f} @ ${price:.8f}")
-    logger.info(f"  Result: {result}")
+    return root_logger
 
-def log_signal(logger: logging.Logger, symbol: str, signal_type: str, confidence: float):
-    """Log trading signal"""
-    logger.info(f"SIGNAL: {signal_type.upper()} {symbol} (confidence: {confidence:.2f})")
 
-def log_error(logger: logging.Logger, error: Exception, context: str = ""):
-    """Log error with context"""
-    logger.error(f"ERROR in {context}: {type(error).__name__}: {str(error)}", exc_info=True)
+def get_logger(name: str) -> logging.Logger:
+    """
+    Get a logger instance.
+
+    Args:
+        name: Logger name
+
+    Returns:
+        Logger instance
+    """
+    return logging.getLogger(name)

@@ -25,7 +25,7 @@ def check_state():
         print("\nThis means:")
         print("  • The bot hasn't saved any state yet, OR")
         print("  • You're running from a different directory than where the bot runs\n")
-        print("Try running this script from the same directory where you run src/main.py")
+        print("Try running this script from the same directory where you run the bot")
         return
 
     print(f"✅ State file found!\n")
@@ -44,10 +44,10 @@ def check_state():
         print()
 
         # Show state contents
-        cash = state.get('cash', 0)
+        cash = state.get('current_capital', 0)
         initial_capital = state.get('initial_capital', 1000)
         positions = state.get('positions', {})
-        trades = state.get('trade_history', [])
+        trades = state.get('trades', [])
 
         total_pnl = cash - initial_capital
         pnl_percent = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0
@@ -61,31 +61,29 @@ def check_state():
         print(f"📊 Open Positions: {len(positions)}")
         if positions:
             for token_addr, pos in positions.items():
-                symbol = pos.get('symbol', 'Unknown')
                 entry_price = pos.get('entry_price', 0)
                 current_price = pos.get('current_price', 0)
-                pnl_pct = pos.get('pnl_percent', 0)
-                position_size = pos.get('position_size_usd', 0)
+                amount = pos.get('amount_usd', 0)
 
-                print(f"\n   🔹 {symbol}")
-                print(f"      Address: {token_addr[:20]}...")
+                pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+
+                print(f"\n   🔹 {token_addr[:12]}...")
                 print(f"      Entry: ${entry_price:.8f}")
                 print(f"      Current: ${current_price:.8f}")
                 print(f"      P&L: {pnl_pct:+.2f}%")
-                print(f"      Size: ${position_size:.2f}")
+                print(f"      Size: ${amount:.2f}")
 
         print(f"\n📈 Trade History: {len(trades)} trades")
         if trades:
             print("\n   Recent trades (last 5):")
             for trade in trades[-5:]:
-                timestamp = trade.get('timestamp', 'Unknown')
+                timestamp = trade.get('timestamp', 'Unknown')[:19]
                 action = trade.get('action', 'unknown')
-                symbol = trade.get('symbol', 'Unknown')
-                price = trade.get('price', 0)
-                total = trade.get('total_usd', 0)
+                token = trade.get('token_address', 'Unknown')[:12]
+                pnl = trade.get('pnl', 0)
 
-                emoji = "🟢" if action == "buy" else "🔴"
-                print(f"   {emoji} {timestamp[:19]} - {action.upper()} {symbol} @ ${price:.8f} (${total:.2f})")
+                emoji = "🟢" if action == "buy" else ("🔴" if pnl >= 0 else "💔")
+                print(f"   {emoji} {timestamp} - {action.upper()} {token}... (P&L: ${pnl:.2f})")
 
         print("\n" + "=" * 60)
         print("✅ State file is working correctly!")

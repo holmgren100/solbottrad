@@ -1,554 +1,797 @@
-#!/usr/bin/env python3
 """
-Solana Trading Bot - Main Orchestrator
-Automated trading bot for Solana meme coins and small-cap tokens
+Main entry point for the Solana Trading Bot.
+Orchestrates all components and manages the trading loop.
 """
 
 import asyncio
-import logging
+import signal
+import sys
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Optional
 
-# Configuration
-from config.settings import TradingConfig, RiskConfig, APIConfig, validate_config
+from .config import settings
+from .monitoring import setup_logger, get_logger, TelegramNotifier, HealthChecker
+from .monitoring.telegram_commands import TelegramCommandHandler
+from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker
+from .market import DexScreenerClient, MarketAnalyzer, JupiterClient
+from .social import TwitterClient, SentimentAnalyzer
+from .ai import SentimentModel, PricePredictor, RiskAssessor
+from .trading import TelegramExecutor, PositionManager, PaperTradingEngine
+from .data import MLDataCollector
 
-# Blockchain clients
-from blockchain.alchemy_client import AlchemyClient
-from blockchain.solsniffer_client import SolSnifferClient
-from blockchain.wallet_tracker import WalletTracker
-
-# Market analysis
-from market.dexscreener_client import DexScreenerClient
-from market.market_analyzer import MarketAnalyzer, MarketSignal
-
-# Social sentiment
-from social.twitter_client import TwitterClient
-from social.sentiment_analyzer import SentimentAnalyzer, SentimentScore
-
-# AI models
-from ai.sentiment_model import SentimentModel
-from ai.price_predictor import PricePredictor, PricePrediction
-from ai.risk_assessor import RiskAssessor, RiskAssessment
-
-# Trading
-from trading.paper_trading import PaperTradingEngine
-from trading.position_manager import PositionManager
-from trading.telegram_executor import TelegramExecutor
-
-# Monitoring
-from monitoring.logger import setup_logger, log_trade, log_signal, log_error
-from monitoring.telegram_notifier import TelegramNotifier
-from monitoring.health_checker import HealthChecker
+# Setup logging
+setup_logger(
+    name='trading_bot',
+    log_file=settings.log_file,
+    log_level=settings.log_level
+)
+logger = get_logger(__name__)
 
 
 class SolanaTradingBot:
-    """Main trading bot orchestrator"""
+    """Main trading bot orchestrator."""
 
     def __init__(self):
-        # Setup logging
-        self.logger = setup_logger('trading_bot', 'trading_bot.log')
-        self.logger.info("=" * 60)
-        self.logger.info("SOLANA TRADING BOT STARTING")
-        self.logger.info("=" * 60)
+        """Initialize the trading bot with all components."""
+        logger.info("Initializing Solana Trading Bot...")
 
-        # Initialize components
+        # Configuration
+        self.settings = settings
+        self.running = False
+        self.trading_paused = False  # Can pause trading via Telegram
+
+        # Monitoring
+        self.notifier = TelegramNotifier(
+            bot_token=settings.api.telegram_bot_token,
+            chat_id=settings.api.telegram_chat_id
+        )
         self.health_checker = HealthChecker()
-
-        # API Clients
-        self.alchemy_client = AlchemyClient(APIConfig.ALCHEMY_API_KEY) if APIConfig.ALCHEMY_API_KEY else None
-        self.solsniffer_client = SolSnifferClient(APIConfig.SOLSNIFFER_API_KEY)
-        self.dexscreener_client = DexScreenerClient(APIConfig.DEXSCREENER_API_KEY)
-        self.twitter_client = TwitterClient(APIConfig.TWITTER_BEARER_TOKEN)
-
-        # Analysis engines
-        self.market_analyzer = MarketAnalyzer()
-        self.sentiment_analyzer = SentimentAnalyzer()
-        self.wallet_tracker = WalletTracker()
-
-        # AI models
-        self.sentiment_model = SentimentModel(APIConfig.SENTIMENT_MODEL)
-        self.price_predictor = PricePredictor(APIConfig.PRICE_MODEL)
-        self.risk_assessor = RiskAssessor(TradingConfig.MAX_POSITION_SIZE)
-
-        # Trading engine
-        if TradingConfig.PAPER_TRADING_MODE:
-            self.logger.info("📄 PAPER TRADING MODE ENABLED")
-            self.trading_engine = PaperTradingEngine(
-                initial_capital=TradingConfig.INITIAL_CAPITAL,
-                stop_loss_percent=TradingConfig.STOP_LOSS_PERCENT,
-                take_profit_percent=TradingConfig.TAKE_PROFIT_PERCENT
-            )
-        else:
-            self.logger.warning("🔴 LIVE TRADING MODE - USE WITH CAUTION")
-            self.trading_engine = TelegramExecutor()
-
-        self.position_manager = PositionManager(self.trading_engine)
-
-        # Notifications
-        self.telegram_notifier = TelegramNotifier(
-            APIConfig.TELEGRAM_BOT_TOKEN,
-            APIConfig.TELEGRAM_CHAT_ID
+        self.command_handler = TelegramCommandHandler(
+            bot_token=settings.api.telegram_bot_token,
+            chat_id=settings.api.telegram_chat_id,
+            bot_instance=self
         )
 
-        # State
-        self.running = False
-        self.scan_count = 0
+        # Blockchain
+        self.alchemy = AlchemyClient(settings.api.alchemy_api_key)
+        self.solsniffer = SolSnifferClient(settings.api.solsniffer_api_key)
+        self.wallet_tracker = WalletTracker()
 
-        self.logger.info("✅ Bot initialized successfully")
+        # Market
+        self.dexscreener = DexScreenerClient(settings.api.dexscreener_api_key)
+        self.market_analyzer = MarketAnalyzer(
+            min_liquidity_usd=settings.trading.min_liquidity_usd
+        )
 
-    async def start(self):
-        """Start the trading bot"""
-        self.logger.info("🚀 Starting trading bot...")
-        print("\n" + "=" * 60)
-        print("🤖 SOLANA TRADING BOT")
-        print("=" * 60)
-        print(f"Mode: {'📄 PAPER TRADING' if TradingConfig.PAPER_TRADING_MODE else '🔴 LIVE TRADING'}")
-        print(f"Initial Capital: ${TradingConfig.INITIAL_CAPITAL:,.2f}")
-        print(f"Max Position Size: ${TradingConfig.MAX_POSITION_SIZE:,.2f}")
-        print(f"Scan Interval: {TradingConfig.SCAN_INTERVAL}s")
-        print("=" * 60 + "\n")
+        # Token Discovery
+        self.jupiter = JupiterClient()
 
-        # Validate configuration
-        if not validate_config():
-            self.logger.error("❌ Configuration validation failed")
-            return
+        # Social
+        self.twitter = TwitterClient(settings.api.twitter_bearer_token)
+        self.sentiment_analyzer = SentimentAnalyzer()
 
-        # Send startup notification
-        await self.telegram_notifier.notify_status("🤖 Trading bot started")
+        # AI Models
+        self.sentiment_model = SentimentModel()
+        self.price_predictor = PricePredictor()
+        self.risk_assessor = RiskAssessor(
+            max_position_size=settings.trading.max_position_size
+        )
 
-        # Check API health
-        await self.check_health()
-
-        # Start main loop
-        self.running = True
-        await self.main_loop()
-
-    async def check_health(self):
-        """Check health of all components"""
-        self.logger.info("🏥 Checking component health...")
-
-        # Check DexScreener
-        if await self.dexscreener_client.is_connected():
-            self.health_checker.update_component_status('dexscreener', 'healthy')
-            self.logger.info("  ✅ DexScreener: Connected")
+        # Trading
+        if settings.is_paper_trading():
+            logger.info("Paper trading mode enabled")
+            self.trading_engine = PaperTradingEngine(initial_capital=1000.0)
         else:
-            self.health_checker.update_component_status('dexscreener', 'degraded')
-            self.logger.warning("  ⚠️ DexScreener: Connection issues")
+            logger.warning("Live trading mode - using TelegramExecutor")
+            self.trading_engine = TelegramExecutor(settings.api.gmgn_telegram_bot)
 
-        # Check SolSniffer
-        if await self.solsniffer_client.is_connected():
-            self.health_checker.update_component_status('solsniffer', 'healthy')
-            self.logger.info("  ✅ SolSniffer: Connected")
-        else:
-            self.health_checker.update_component_status('solsniffer', 'degraded')
-            self.logger.warning("  ⚠️ SolSniffer: Connection issues (will use test tokens)")
+        self.position_manager = PositionManager(
+            max_open_positions=settings.risk.max_open_positions
+        )
 
-        # Check Twitter
-        if self.twitter_client.enabled:
-            if await self.twitter_client.is_connected():
-                self.health_checker.update_component_status('twitter', 'healthy')
-                self.logger.info("  ✅ Twitter: Connected")
-            else:
-                self.health_checker.update_component_status('twitter', 'degraded')
-                self.logger.warning("  ⚠️ Twitter: Connection issues")
-        else:
-            self.health_checker.update_component_status('twitter', 'disabled')
-            self.logger.info("  ⚠️ Twitter: Disabled (no credentials)")
+        # ML Data Collection
+        self.ml_collector = MLDataCollector()
+        logger.info("📊 ML data collection enabled - all trades will be logged for future training")
 
-    async def main_loop(self):
-        """Main trading loop"""
-        self.logger.info("🔄 Entering main trading loop...")
+        # Connect ML collector to trading engine
+        from .trading.paper_trading import set_ml_collector
+        set_ml_collector(self.ml_collector)
 
-        while self.running:
+        # Register health checks
+        self._register_health_checks()
+
+        logger.info("Bot initialization complete")
+
+    def _register_health_checks(self):
+        """Register component health checks."""
+        # Core components - essential for trading
+        self.health_checker.register_component('alchemy', self.alchemy.health_check)
+        self.health_checker.register_component('jupiter', self.jupiter.health_check)
+        self.health_checker.register_component('dexscreener', self.dexscreener.health_check)
+
+        # Optional components - disabled to reduce log noise
+        # These components are not critical for core trading functionality
+        # self.health_checker.register_component('solsniffer', self.solsniffer.health_check)
+        # self.health_checker.register_component('twitter', self.twitter.health_check)
+        # self.health_checker.register_component('wallet_tracker', self.wallet_tracker.health_check)
+
+    async def analyze_token(self, token_address: str, jupiter_token_data: Optional[dict] = None) -> Optional[dict]:
+        """
+        Perform comprehensive analysis on a token.
+
+        Args:
+            token_address: Token contract address
+            jupiter_token_data: Optional pre-fetched data from Jupiter discovery
+                              (includes usdPrice, liquidity, mcap, etc.)
+
+        Returns:
+            Analysis results dictionary or None
+        """
+        logger.info(f"Analyzing token: {token_address}")
+
+        try:
+            # 1. Get market data - prioritize Jupiter discovery data if available
+            profile = None
+
+            # If Jupiter already provided price/liquidity data in discovery, use it!
+            if jupiter_token_data and jupiter_token_data.get('usdPrice'):
+                # Convert Jupiter discovery format to profile format
+                profile = {
+                    'address': token_address,
+                    'symbol': jupiter_token_data.get('symbol', 'UNKNOWN'),
+                    'name': jupiter_token_data.get('name', 'Unknown'),
+                    'price_usd': float(jupiter_token_data.get('usdPrice', 0)),
+                    'liquidity_usd': float(jupiter_token_data.get('liquidity', 0)),
+                    'volume_24h': 0,  # Not in discovery data
+                    'price_change_24h': 0,  # Not in discovery data
+                    'market_cap': float(jupiter_token_data.get('mcap', 0)),
+                    'fdv': float(jupiter_token_data.get('fdv', 0)),
+                    'pair_created_at': jupiter_token_data.get('createdAt'),
+                    'source': 'jupiter_discovery'
+                }
+                logger.info(f"✅ Using Jupiter discovery data for {token_address[:12]}... (price: ${profile['price_usd']:.8f}, liq: ${profile['liquidity_usd']:,.0f})")
+
+            # Fallback: Try fetching from APIs if Jupiter discovery data insufficient
+            if not profile or profile['price_usd'] == 0:
+                dex_profile = await self.dexscreener.get_token_profile(token_address)
+                jupiter_data = await self.jupiter.get_token_price_data(token_address)
+
+                # Validate we have data from at least one source
+                if not dex_profile and not jupiter_data:
+                    logger.warning(f"No market data from either source for {token_address}")
+                    return None
+
+                # Use DexScreener as primary (most reliable), fallback to Jupiter
+                # Note: Removed price divergence check - it was blocking legit volatile tokens
+                # With partial profit-taking + trailing stops, we can handle data variance
+                profile = dex_profile if dex_profile else jupiter_data
+
+            # 2. Get security data
+            security_data = await self.solsniffer.analyze_token(token_address)
+
+            # 3. Get social sentiment (optional - skip if rate limited)
+            token_symbol = profile.get('symbol', 'UNKNOWN')
             try:
-                self.scan_count += 1
-                self.logger.info(f"\n{'=' * 60}")
-                self.logger.info(f"SCAN #{self.scan_count} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                self.logger.info(f"{'=' * 60}")
-
-                print(f"\n🔍 Scan #{self.scan_count} - {datetime.now().strftime('%H:%M:%S')}")
-
-                # 1. Scan for new tokens
-                tokens = await self.scan_tokens()
-                self.logger.info(f"📊 Found {len(tokens)} tokens to analyze")
-
-                # 2. Analyze each token (with timeout protection)
-                for i, token in enumerate(tokens, 1):
-                    try:
-                        # Add timeout to prevent hanging on a single token
-                        await asyncio.wait_for(
-                            self.analyze_token(token),
-                            timeout=30.0  # 30 second timeout per token
-                        )
-                    except asyncio.TimeoutError:
-                        token_symbol = token.get('symbol', token.get('address', 'unknown')[:8])
-                        self.logger.warning(f"⏰ Timeout analyzing token {token_symbol} (took >30s), skipping")
-                    except Exception as e:
-                        token_symbol = token.get('symbol', token.get('address', 'unknown')[:8])
-                        self.logger.error(f"❌ Error analyzing token {token_symbol}: {e}")
-
-                # 3. Check existing positions for stop loss / take profit
-                if hasattr(self.trading_engine, 'positions'):
-                    try:
-                        await asyncio.wait_for(
-                            self.check_positions(),
-                            timeout=60.0  # 60 second timeout for position checks
-                        )
-                    except asyncio.TimeoutError:
-                        self.logger.warning(f"⏰ Timeout checking positions (took >60s)")
-                    except Exception as e:
-                        self.logger.error(f"❌ Error checking positions: {e}")
-
-                # 4. Save state periodically (every 10 scans)
-                if self.scan_count % 10 == 0 and hasattr(self.trading_engine, 'save_state'):
-                    self.logger.info("💾 Periodic state save...")
-                    self.trading_engine.save_state()
-
-                # 5. Display status
-                self.display_status()
-
-                # Wait before next scan
-                self.logger.info(f"⏳ Waiting {TradingConfig.SCAN_INTERVAL}s until next scan...")
-                await asyncio.sleep(TradingConfig.SCAN_INTERVAL)
-
-            except KeyboardInterrupt:
-                self.logger.info("⚠️ Keyboard interrupt received")
-                break
+                social_data = await self.twitter.analyze_token_buzz(token_symbol, token_address)
+                tweets = await self.twitter.search_token_mentions(token_symbol, token_address)
+                sentiment_analysis = self.sentiment_analyzer.analyze_tweets(tweets)
+                coordination_analysis = self.sentiment_analyzer.detect_coordinated_activity(tweets)
             except Exception as e:
-                self.logger.error(f"❌ Error in main loop: {e}", exc_info=True)
-                log_error(self.logger, e, "main_loop")
-                await asyncio.sleep(10)  # Wait before retrying
+                # Twitter optional - use neutral defaults with proper structure
+                logger.debug(f"Twitter sentiment unavailable for {token_symbol}: {e}")
+                social_data = {
+                    'mentions': 0,
+                    'sentiment': 'neutral',
+                    'buzz_score': 0.5,
+                    'tweet_count': 0,
+                    'influential_mentions': 0
+                }
+                sentiment_analysis = {
+                    'sentiment': 'neutral',
+                    'score': 0.5,
+                    'normalized_score': 0.5,
+                    'confidence': 0.6  # Moderate confidence even without Twitter
+                }
+                coordination_analysis = {
+                    'coordinated': False,
+                    'coordination_score': 0.0
+                }
 
-        await self.shutdown()
+            # 4. Generate market signal
+            market_signal = self.market_analyzer.analyze_token(profile)
 
-    async def scan_tokens(self) -> List[Dict]:
-        """Scan for new tokens to analyze"""
-        self.logger.info("🔍 Scanning for tokens...")
+            # 5. Score sentiment
+            sentiment_score = self.sentiment_model.score_sentiment(
+                social_data=social_data,
+                sentiment_analysis=sentiment_analysis,
+                coordination_analysis=coordination_analysis
+            )
 
-        try:
-            # Try to get tokens from SolSniffer
-            tokens = await self.solsniffer_client.get_new_tokens(limit=20)
-
-            if tokens:
-                self.logger.info(f"  Found {len(tokens)} tokens from SolSniffer")
-                return tokens
-            else:
-                # FALLBACK: Use hardcoded test tokens when SolSniffer is down
-                self.logger.warning("  SolSniffer returned no tokens, using test tokens")
-                test_tokens = [
-                    {'address': 'So11111111111111111111111111111111111111112', 'symbol': 'SOL'},  # Wrapped SOL
-                    {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'symbol': 'USDC'},  # USDC
-                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', 'symbol': 'Bonk'},  # Bonk
-                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', 'symbol': 'JUP'},  # Jupiter
-                ]
-                self.logger.info(f"  Using {len(test_tokens)} test tokens")
-                return test_tokens
-
-        except Exception as e:
-            self.logger.error(f"Error scanning tokens: {e}")
-            log_error(self.logger, e, "scan_tokens")
-            return []
-
-    async def analyze_token(self, token: Dict):
-        """Analyze a token and make trading decision"""
-        token_address = token.get('address')
-        token_symbol = token.get('symbol', token_address[:8])
-
-        self.logger.info(f"\n  🔍 Analyzing {token_symbol} ({token_address[:12]}...)")
-
-        try:
-            # Skip if we already have a position
-            if hasattr(self.trading_engine, 'positions') and token_address in self.trading_engine.positions:
-                self.logger.info(f"    ⏭️  Position already exists for {token_symbol}")
-                return
-
-            # Check max positions limit (prevent accumulating too many positions)
-            if hasattr(self.trading_engine, 'positions') and len(self.trading_engine.positions) >= TradingConfig.MAX_OPEN_POSITIONS:
-                self.logger.info(f"    ⏭️  Max positions ({TradingConfig.MAX_OPEN_POSITIONS}) reached, skipping new trades")
-                return
-
-            # 1. Get market data from DexScreener
-            self.logger.info(f"    📊 Fetching market data...")
-            market_data = await self.dexscreener_client.get_token_data(token_address)
-
-            if not market_data:
-                self.logger.warning(f"    ❌ No market data available for {token_symbol}")
-                return
-
-            # 2. Analyze market signals
-            market_signal = self.market_analyzer.analyze(market_data)
-            self.logger.info(f"    📈 Market signal: {market_signal.signal_type} (confidence: {market_signal.confidence:.2f})")
-            self.logger.info(f"       Price: ${market_signal.price:.8f} | 24h change: {market_signal.price_change_24h:+.2f}%")
-            self.logger.info(f"       Volume: ${market_signal.volume_24h:,.2f} | Liquidity: ${market_signal.liquidity:,.2f}")
-
-            # 3. Get social sentiment
-            self.logger.info(f"    💬 Analyzing sentiment...")
-            tweets = await self.twitter_client.get_token_mentions(token_symbol, token_address)
-            sentiment_score = await self.sentiment_analyzer.analyze_tweets(tweets)
-            self.logger.info(f"    💭 Sentiment: {sentiment_score.sentiment} (score: {sentiment_score.score:.2f}, confidence: {sentiment_score.confidence:.2f})")
-
-            # 4. Make trading decision
-            decision = await self.make_trading_decision(
+            # 6. Predict price movement
+            price_prediction = self.price_predictor.predict(
                 token_address=token_address,
-                token_symbol=token_symbol,
-                market_data=market_data,
-                market_signal=market_signal,
-                sentiment_score=sentiment_score
+                current_price=profile['price_usd'],
+                market_signal=market_signal.__dict__,
+                sentiment_score=sentiment_score.__dict__,
+                timeframe_hours=24
             )
 
-            # 5. Execute trade if decision is made
-            if decision:
-                await self.execute_trade(decision)
-
-        except Exception as e:
-            self.logger.error(f"Error analyzing token {token_symbol}: {e}", exc_info=True)
-            log_error(self.logger, e, f"analyze_token:{token_symbol}")
-
-    async def make_trading_decision(
-        self,
-        token_address: str,
-        token_symbol: str,
-        market_data: Dict,
-        market_signal: MarketSignal,
-        sentiment_score: SentimentScore
-    ) -> Optional[Dict]:
-        """Make trading decision based on all available data"""
-
-        self.logger.info(f"    🤔 Making trading decision for {token_symbol}...")
-
-        try:
-            # Get price prediction
-            prediction = self.price_predictor.predict(
-                current_price=market_signal.price,
-                price_change_24h=market_signal.price_change_24h,
-                volume_24h=market_signal.volume_24h,
-                liquidity=market_signal.liquidity
-            )
-            self.logger.info(f"    🔮 Price prediction: {prediction.direction} (confidence: {prediction.confidence:.2f})")
-
-            # Determine action based on market signal and sentiment
-            action = None
-
-            # FIXED: Allow trading when sentiment confidence is 0 (no social data)
-            if sentiment_score.confidence == 0.0:
-                # No sentiment data available, use market signal only
-                if market_signal.signal_type == 'buy':
-                    action = 'buy'
-                    self.logger.info(f"    ℹ️  Using market signal only (no sentiment data)")
-            else:
-                # Both market and sentiment available
-                if market_signal.signal_type == 'buy' and sentiment_score.sentiment in ['positive', 'neutral']:
-                    action = 'buy'
-                elif market_signal.signal_type == 'sell' or sentiment_score.sentiment == 'negative':
-                    action = 'sell'
-
-            if action != 'buy':
-                self.logger.info(f"    ❌ No buy action: market={market_signal.signal_type}, sentiment={sentiment_score.sentiment}")
-                return None
-
-            # Risk assessment
-            portfolio_value = self.trading_engine.get_portfolio_value() if hasattr(self.trading_engine, 'get_portfolio_value') else TradingConfig.INITIAL_CAPITAL
-
-            risk_assessment = self.risk_assessor.assess(
-                token_data=market_data,
-                prediction_confidence=prediction.confidence,
-                sentiment_score=sentiment_score.score,
-                current_portfolio_value=portfolio_value
+            # 7. Assess risk
+            risk_assessment = self.risk_assessor.assess_risk(
+                token_address=token_address,
+                market_data=profile,
+                security_data=security_data,
+                sentiment_score=sentiment_score.__dict__,
+                price_prediction=price_prediction.__dict__
             )
 
-            self.logger.info(f"    ⚖️  Risk score: {risk_assessment.risk_score:.2f}")
-            self.logger.info(f"    💰 Recommended position: ${risk_assessment.recommended_position_size:.2f}")
+            # Record data for learning
+            self.market_analyzer.record_price(
+                token_address,
+                profile['price_usd'],
+                profile['volume_24h']
+            )
+            self.price_predictor.record_price(
+                token_address,
+                profile['price_usd'],
+                profile['volume_24h'],
+                profile['liquidity_usd']
+            )
 
-            if risk_assessment.warnings:
-                for warning in risk_assessment.warnings:
-                    self.logger.warning(f"    ⚠️  {warning}")
-
-            if not risk_assessment.approved:
-                self.logger.warning(f"    ❌ Trade not approved by risk assessment")
-                return None
-
-            # Create trading decision
-            decision = {
-                'action': action,
+            analysis = {
                 'token_address': token_address,
                 'symbol': token_symbol,
-                'entry_price': market_signal.price,
-                'position_size': risk_assessment.recommended_position_size,
+                'profile': profile,
+                'security': security_data,
                 'market_signal': market_signal,
-                'sentiment': sentiment_score,
-                'prediction': prediction,
-                'risk_assessment': risk_assessment
+                'sentiment_score': sentiment_score,
+                'price_prediction': price_prediction,
+                'risk_assessment': risk_assessment,
+                'timestamp': datetime.now().isoformat()
             }
 
-            self.logger.info(f"    ✅ DECISION: {action.upper()} ${risk_assessment.recommended_position_size:.2f} of {token_symbol}")
+            logger.info(
+                f"Analysis complete for {token_symbol}: "
+                f"Market={market_signal.signal_type}, "
+                f"Sentiment={sentiment_score.recommendation}, "
+                f"Risk={risk_assessment.overall_risk}"
+            )
 
-            return decision
+            return analysis
 
         except Exception as e:
-            self.logger.error(f"Error making trading decision: {e}", exc_info=True)
-            log_error(self.logger, e, "make_trading_decision")
+            logger.error(f"Error analyzing token {token_address}: {e}")
             return None
 
-    async def execute_trade(self, decision: Dict) -> bool:
-        """Execute a trading decision with detailed logging"""
-        print(f"\n      🎯 TRADING OPPORTUNITY: {decision['symbol']}")
+    async def make_trading_decision(self, analysis: dict) -> Optional[dict]:
+        """
+        Make a trading decision based on analysis.
+
+        Args:
+            analysis: Token analysis results
+
+        Returns:
+            Trading decision dictionary or None
+        """
+        risk_assessment = analysis['risk_assessment']
+        market_signal = analysis['market_signal']
+        sentiment_score = analysis['sentiment_score']
+        price_prediction = analysis['price_prediction']
+        profile = analysis['profile']
+
+        # Debug output
+        print(f"    📊 Market Signal: {market_signal.signal_type} (confidence: {market_signal.confidence:.2f})")
+        print(f"    😊 Sentiment: {sentiment_score.recommendation} (score: {sentiment_score.overall_score:.2f})")
+        print(f"    ⚠️  Risk: {risk_assessment.overall_risk} (score: {risk_assessment.risk_score:.2f})")
+        print(f"    ✅ Should Trade: {risk_assessment.should_trade}")
+
+        # Check if we should trade
+        if not risk_assessment.should_trade:
+            print(f"    ❌ Risk assessment says NO: {', '.join(risk_assessment.warnings)}")
+            logger.info("Risk assessment advises against trading")
+            return None
+
+        # Check confidence thresholds
+        if sentiment_score.confidence < self.settings.trading.min_confidence_score:
+            print(f"    ❌ Confidence too low: {sentiment_score.confidence:.2f} < {self.settings.trading.min_confidence_score}")
+            logger.info(f"Sentiment confidence too low: {sentiment_score.confidence:.2f}")
+            return None
+
+        # Determine action
+        # Market signal must be 'buy' AND sentiment must NOT be 'avoid' (allow hold/buy/strong_buy)
+        # This allows trading when Twitter unavailable (sentiment='hold') but blocks bearish tokens
+        action = None
+        if market_signal.signal_type == 'buy' and sentiment_score.recommendation != 'avoid':
+            action = 'buy'
+        elif market_signal.signal_type == 'sell':
+            action = 'sell'
+
+        if not action:
+            print(f"    ❌ No action: market={market_signal.signal_type}, sentiment={sentiment_score.recommendation}")
+            logger.info("No clear trading signal")
+            return None
+
+        # Calculate position size
+        position_size = (
+            risk_assessment.recommended_position_size *
+            self.settings.trading.max_position_size
+        )
+
+        # Calculate stop loss and take profit
+        entry_price = profile['price_usd']
+        stop_loss = self.risk_assessor.calculate_stop_loss(
+            entry_price,
+            self.settings.risk.stop_loss_percent
+        )
+        take_profit = self.risk_assessor.calculate_take_profit(
+            entry_price,
+            self.settings.risk.take_profit_percent
+        )
+
+        decision = {
+            'action': action,
+            'token_address': analysis['token_address'],
+            'symbol': analysis['symbol'],
+            'entry_price': entry_price,
+            'position_size': position_size,
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
+            'confidence': sentiment_score.confidence,
+            'reasons': sentiment_score.reasoning + price_prediction.factors,
+            # Store full analysis for ML data collection
+            'analysis_data': analysis
+        }
+
+        return decision
+
+    async def execute_trade(self, decision: dict) -> bool:
+        """
+        Execute a trading decision.
+
+        Args:
+            decision: Trading decision dictionary
+
+        Returns:
+            True if executed successfully
+        """
+        try:
+            # Wrap trade execution with timeout
+            async with asyncio.timeout(30):  # 30 second timeout for single trade
+                return await self._execute_trade_impl(decision)
+        except asyncio.TimeoutError:
+            logger.error(f"Trade execution timed out for {decision['symbol']}")
+            print(f"      ⚠️  Trade execution timed out - skipping")
+            return False
+        except Exception as e:
+            logger.error(f"Error executing trade for {decision['symbol']}: {e}")
+            print(f"      ❌ Trade execution error: {e}")
+            return False
+
+    async def _execute_trade_impl(self, decision: dict) -> bool:
+        """Internal implementation of trade execution."""
         print(f"      🔧 EXECUTING TRADE: {decision['action'].upper()} {decision['symbol']}")
         print(f"      💵 Amount: ${decision['position_size']:.2f} @ ${decision['entry_price']:.8f}")
 
-        self.logger.info(f"🔧 EXECUTING TRADE: {decision['action'].upper()} {decision['symbol']}")
-        self.logger.info(f"   Amount: ${decision['position_size']:.2f} @ ${decision['entry_price']:.8f}")
-
         try:
-            # Send Telegram notification about opportunity
+            # Send trade signal notification
             print(f"      📱 Sending Telegram notification...")
-            self.logger.info("   📱 Sending Telegram notification...")
-
-            await self.telegram_notifier.notify_opportunity(
-                symbol=decision['symbol'],
-                confidence=decision['market_signal'].confidence,
-                signal_type=decision['action']
+            await self.notifier.send_trade_signal(
+                token_address=decision['token_address'],
+                action=decision['action'].upper(),
+                confidence=decision['confidence'],
+                price=decision['entry_price'],
+                reasons=decision['reasons']
             )
 
-            # Execute trade
             print(f"      💰 Calling trading engine...")
-            self.logger.info("   💰 Calling trading engine...")
-
             if decision['action'] == 'buy':
                 result = await self.trading_engine.execute_buy(
                     token_address=decision['token_address'],
-                    symbol=decision['symbol'],
+                    amount_usd=decision['position_size'],
                     price=decision['entry_price'],
-                    amount_usd=decision['position_size']
+                    stop_loss=decision['stop_loss'],
+                    take_profit=decision['take_profit'],
+                    analysis_data=decision.get('analysis_data')  # Pass analysis for ML collection
                 )
+                print(f"      ✅ Trade result: {result}")
             else:
                 result = await self.trading_engine.execute_sell(
                     token_address=decision['token_address'],
                     price=decision['entry_price']
                 )
 
-            print(f"      ✅ Trade result: {result}")
-            self.logger.info(f"   ✅ Trade result: {result}")
+            # Send execution notification
+            await self.notifier.send_trade_execution(
+                token_address=decision['token_address'],
+                action=decision['action'].upper(),
+                amount=decision['position_size'],
+                price=decision['entry_price'],
+                status=result.get('status', 'UNKNOWN').upper()
+            )
 
-            # Log the trade
-            if result.get('success'):
-                log_trade(
-                    self.logger,
-                    action=decision['action'],
-                    symbol=decision['symbol'],
-                    amount=decision['position_size'],
-                    price=decision['entry_price'],
-                    result=result
-                )
-
-                # Send trade notification
-                await self.telegram_notifier.notify_trade(
-                    action=decision['action'],
-                    symbol=decision['symbol'],
-                    amount=decision['position_size'],
-                    price=decision['entry_price'],
-                    position_size=decision['position_size']
-                )
-
-                return True
-            else:
-                self.logger.warning(f"   ⚠️ Trade failed: {result.get('reason')}")
-                return False
+            return result.get('status') == 'success'
 
         except Exception as e:
-            self.logger.error(f"Error executing trade: {e}", exc_info=True)
-            log_error(self.logger, e, "execute_trade")
-            await self.telegram_notifier.notify_error(f"Trade execution error: {str(e)}")
+            logger.error(f"Error executing trade: {e}")
+            await self.notifier.send_alert(
+                title="Trade Execution Error",
+                message=f"Failed to execute {decision['action']} for {decision['symbol']}: {str(e)}",
+                level="ERROR"
+            )
             return False
 
-    async def check_positions(self):
-        """Check existing positions for stop loss / take profit"""
-        if not hasattr(self.trading_engine, 'positions'):
+    async def scan_tokens(self):
+        """Scan for new tokens and trading opportunities."""
+        # Check if trading is paused
+        if self.trading_paused:
+            print("⏸️  Trading paused - skipping token scan")
+            logger.info("Token scan skipped - trading paused")
             return
 
-        positions = self.position_manager.get_open_positions()
+        try:
+            # Wrap entire scan with timeout to prevent hangs
+            async with asyncio.timeout(300):  # 5 minute timeout for entire scan cycle
+                await self._scan_tokens_impl()
+        except asyncio.TimeoutError:
+            logger.error("Token scan timed out after 5 minutes")
+            print("  ⚠️  Token scan timed out - will retry next cycle")
+        except Exception as e:
+            logger.error(f"Error in token scan: {e}")
+            print(f"  ❌ Token scan error: {e}")
 
-        if not positions:
-            return
+    async def _scan_tokens_impl(self):
+        """Internal implementation of token scanning."""
+        logger.info("Scanning for tokens...")
+        print("🔍 Starting token scan...")
 
-        self.logger.info(f"\n  📊 Checking {len(positions)} open position(s)...")
+        try:
+            # Get trending tokens (they have market data!) or fallback to recent
+            print("  📡 Fetching trending tokens from Jupiter...")
+            new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
 
-        # Get current prices
-        price_data = {}
-        for position in positions:
-            self.logger.debug(f"    Fetching price for {position['symbol']} ({position['token_address'][:12]}...)")
-            market_data = await self.dexscreener_client.get_token_data(position['token_address'])
-            if market_data:
-                current_price = float(market_data.get('priceUsd', 0))
-                price_data[position['token_address']] = current_price
+            if not new_tokens:
+                print("  ⚠️  No trending tokens, trying recent...")
+                new_tokens = await self.jupiter.get_recent_tokens(limit=50)
 
-                # Log position status
-                pnl_pct = ((current_price - position['entry_price']) / position['entry_price']) * 100
-                self.logger.info(f"    {position['symbol']}: ${current_price:.8f} (entry: ${position['entry_price']:.8f}, P&L: {pnl_pct:+.2f}%)")
-                self.logger.info(f"       SL: ${position['stop_loss']:.8f} | TP: ${position['take_profit']:.8f}")
+            if not new_tokens:
+                print("  ⚠️  No tokens from Jupiter, using fallback")
+                logger.warning("Jupiter returned no tokens, using fallback")
+                # Fallback to popular tokens as last resort
+                new_tokens = [
+                    {'address': 'So11111111111111111111111111111111111111112'},  # SOL
+                    {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},  # USDC
+                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
+                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
+                ]
             else:
-                self.logger.warning(f"    ⚠️ Could not fetch price for {position['symbol']}")
+                print(f"  ✅ Found {len(new_tokens)} tokens!")
+                logger.info(f"Retrieved {len(new_tokens)} tokens from Jupiter")
 
-        # Check for stop loss / take profit triggers
-        actions = await self.position_manager.check_positions(price_data)
+            # Get currently open positions
+            if settings.is_paper_trading():
+                open_positions = self.trading_engine.position_manager.open_positions
+            else:
+                open_positions = self.position_manager.open_positions
 
-        for action in actions:
-            self.logger.info(f"  🎯 Triggered: {action['reason']} for {action['symbol']}")
+            print(f"Analyzing {len(new_tokens)} tokens ({len(open_positions)} positions already open)...")
 
-            # Execute sell
-            decision = {
-                'action': 'sell',
-                'token_address': action['token_address'],
-                'symbol': action['symbol'],
-                'entry_price': action['price'],
-                'position_size': 0,  # Selling full position
-            }
+            for token_data in new_tokens:
+                token_address = token_data.get('address')
+                if not token_address:
+                    logger.warning(f"Skipping token with no address: {token_data}")
+                    continue
 
-            await self.execute_trade(decision)
+                # Skip tokens we already have positions in
+                if token_address in open_positions:
+                    print(f"  ⏭️  Skipping {token_address[:8]}... (position already open)")
+                    continue
 
-    def display_status(self):
-        """Display current bot status"""
-        if not hasattr(self.trading_engine, 'get_statistics'):
-            return
+                print(f"  → Analyzing {token_address[:8]}...")
 
-        stats = self.trading_engine.get_statistics()
+                # Analyze token (trending tokens don't have price data, will fetch from DexScreener)
+                analysis = await self.analyze_token(token_address)
+                if not analysis:
+                    print(f"  ❌ No analysis data")
+                    continue
 
-        print(f"\n📈 Portfolio Status:")
-        print(f"   Cash: ${stats['current_cash']:.2f}")
-        print(f"   Portfolio Value: ${stats['portfolio_value']:.2f}")
-        print(f"   P&L: ${stats['total_pnl']:.2f} ({stats['total_pnl_percent']:+.2f}%)")
-        print(f"   Trades: {stats['total_trades']} ({stats['total_buys']} buys, {stats['total_sells']} sells)")
-        print(f"   Open Positions: {stats['open_positions']}")
+                print(f"  ✅ Analysis complete")
 
-        self.logger.info(f"\n📈 Portfolio: ${stats['portfolio_value']:.2f} | P&L: ${stats['total_pnl']:.2f} ({stats['total_pnl_percent']:+.2f}%) | Positions: {stats['open_positions']}")
+                # Make trading decision
+                decision = await self.make_trading_decision(analysis)
+                if decision:
+                    print(f"  🎯 TRADING OPPORTUNITY: {decision['symbol']}")
+                    logger.info(f"Trading opportunity found: {decision['symbol']}")
+                    await self.execute_trade(decision)
+                else:
+                    print(f"  ⏸️  No trade signal")
 
-    async def shutdown(self):
-        """Shutdown the bot gracefully"""
-        self.logger.info("\n" + "=" * 60)
-        self.logger.info("🛑 SHUTTING DOWN TRADING BOT")
-        self.logger.info("=" * 60)
+                # Delay between analyses
+                await asyncio.sleep(2)
 
+            print("✅ Scan cycle complete\n")
+
+        except Exception as e:
+            logger.error(f"Error scanning tokens: {e}")
+            print(f"❌ Error: {e}")
+
+    async def monitor_positions(self):
+        """Monitor open positions for stop loss/take profit."""
+        try:
+            # Wrap entire method with timeout to prevent hangs
+            async with asyncio.timeout(60):  # 60 second timeout for entire monitoring cycle
+                await self._monitor_positions_impl()
+        except asyncio.TimeoutError:
+            logger.error("Position monitoring timed out after 60 seconds")
+            print("  ⚠️  Position monitoring timed out - will retry next cycle")
+        except Exception as e:
+            logger.error(f"Error in position monitoring: {e}")
+            print(f"  ❌ Position monitoring error: {e}")
+
+    async def _monitor_positions_impl(self):
+        """Internal implementation of position monitoring."""
+        if settings.is_paper_trading():
+            # Get current prices for all open positions
+            positions = self.trading_engine.position_manager.get_all_positions()
+
+            if not positions:
+                return  # No positions to monitor
+
+            print(f"📊 Monitoring {len(positions)} open position(s)...")
+            logger.info(f"Monitoring {len(positions)} positions")
+
+            price_updates = {}
+            liquidity_updates = {}  # Track liquidity for rug detection
+
+            for position in positions:
+                try:
+                    # DUAL-SOURCE VALIDATION: Query both DexScreener and Jupiter
+                    dex_profile = await self.dexscreener.get_token_profile(position.token_address)
+                    jupiter_data = await self.jupiter.get_token_price_data(position.token_address)
+
+                    # Extract data from both sources
+                    dex_price = dex_profile['price_usd'] if dex_profile else None
+                    dex_liquidity = dex_profile.get('liquidity_usd', 0.0) if dex_profile else 0.0
+
+                    jupiter_price = jupiter_data['price_usd'] if jupiter_data else None
+                    jupiter_liquidity = jupiter_data.get('liquidity_usd', 0.0) if jupiter_data else 0.0
+
+                    # Cross-validate and choose best data
+                    current_price = None
+                    liquidity = 0.0
+                    data_source = None
+
+                    if dex_price and jupiter_price:
+                        # Both sources available - cross-validate
+                        price_diff_pct = abs((dex_price - jupiter_price) / dex_price) * 100
+
+                        if price_diff_pct < 10:
+                            # Prices agree (within 10%) - use average
+                            current_price = (dex_price + jupiter_price) / 2
+                            liquidity = max(dex_liquidity, jupiter_liquidity)  # Use higher liquidity
+                            data_source = "✅ DexScreener + Jupiter"
+                            logger.debug(f"Price agreement for {position.token_address[:8]}: Dex ${dex_price:.8f} vs Jup ${jupiter_price:.8f} (diff: {price_diff_pct:.1f}%)")
+                        else:
+                            # Large divergence - flag as suspicious
+                            logger.warning(
+                                f"⚠️  PRICE DIVERGENCE: {position.token_address[:8]}... "
+                                f"DexScreener ${dex_price:.8f} vs Jupiter ${jupiter_price:.8f} ({price_diff_pct:.1f}% diff!)"
+                            )
+                            # Use DexScreener as primary (more reliable for liquidity)
+                            current_price = dex_price
+                            liquidity = dex_liquidity
+                            data_source = "⚠️  DexScreener (divergence)"
+
+                    elif dex_price:
+                        # Only DexScreener available
+                        current_price = dex_price
+                        liquidity = dex_liquidity
+                        data_source = "📊 DexScreener"
+
+                    elif jupiter_price:
+                        # Only Jupiter available - use as fallback
+                        current_price = jupiter_price
+                        liquidity = jupiter_liquidity
+                        data_source = "🔄 Jupiter (fallback)"
+                        logger.info(f"Using Jupiter fallback for {position.token_address[:8]}...")
+
+                    else:
+                        # No data from either source
+                        logger.error(f"❌ No price data from either source for {position.token_address[:8]}...")
+                        # Mark position as having failed price update
+                        self.trading_engine.position_manager.mark_position_price_failed(position.token_address)
+                        continue
+
+                    # Now validate the chosen price
+                    profile = dex_profile or jupiter_data  # Use whichever is available for symbol/name
+
+                    # 🛡️ ENHANCED PRICE VALIDATION - Reject bad data that would cause 100% loss
+                    # Check 1: None or not a number
+                    if current_price is None:
+                        print(f"  ⚠️  Price is None - SKIPPING UPDATE")
+                        logger.warning(f"Price is None for {position.token_address[:8]}")
+                        continue
+
+                    # Check 2: NaN (not a number)
+                    try:
+                        if not isinstance(current_price, (int, float)) or (isinstance(current_price, float) and (current_price != current_price)):  # NaN check
+                            print(f"  ⚠️  Price is NaN - SKIPPING UPDATE")
+                            logger.warning(f"Price is NaN for {position.token_address[:8]}")
+                            continue
+                    except (TypeError, ValueError):
+                        print(f"  ⚠️  Invalid price type - SKIPPING UPDATE")
+                        logger.warning(f"Invalid price type for {position.token_address[:8]}: {type(current_price)}")
+                        continue
+
+                    # Check 3: Infinity
+                    try:
+                        import math
+                        if math.isinf(current_price):
+                            print(f"  ⚠️  Price is Infinity - SKIPPING UPDATE")
+                            logger.warning(f"Price is Infinity for {position.token_address[:8]}")
+                            continue
+                    except:
+                        pass
+
+                    # Check 4: Zero or negative
+                    if current_price <= 0:
+                        print(f"  ⚠️  Bad price data: ${current_price} - SKIPPING UPDATE")
+                        logger.warning(f"Invalid price ${current_price} for {position.token_address[:8]}")
+                        continue
+
+                    # Check 5: Extremely small (effectively zero, < $0.000000001)
+                    if current_price < 1e-9:
+                        print(f"  ⚠️  Price too small: ${current_price} - SKIPPING UPDATE")
+                        logger.warning(f"Price too small ${current_price} for {position.token_address[:8]}")
+                        continue
+
+                    # Check 6: Suspicious price drops (>80% loss in one update)
+                    try:
+                        price_change_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+                    except (ZeroDivisionError, TypeError):
+                        print(f"  ⚠️  Error calculating price change - SKIPPING UPDATE")
+                        logger.error(f"Error calculating price change for {position.token_address[:8]}")
+                        continue
+
+                    if price_change_pct < -80:
+                        print(f"  🚨 SUSPICIOUS: Price dropped {price_change_pct:.1f}% - SKIPPING (likely bad data)")
+                        logger.error(
+                            f"Rejected suspicious price for {position.token_address[:8]}: "
+                            f"${position.entry_price:.8f} → ${current_price:.8f} ({price_change_pct:.1f}%)"
+                        )
+                        continue
+
+                    # Price validated - safe to use
+                    price_updates[position.token_address] = current_price
+                    liquidity_updates[position.token_address] = liquidity
+
+                    # Calculate current P&L
+                    pnl_percent = ((current_price - position.entry_price) / position.entry_price) * 100
+
+                    # Show price update with data source
+                    symbol = profile.get('symbol', position.token_address[:8])
+                    print(f"  💹 {symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%) [{data_source}]")
+
+                    # Check if close to stop loss or take profit/trailing stop
+                    if position.use_trailing_stop:
+                        # Show trailing stop info
+                        print(f"  🔄 Trailing stop: ${position.trailing_stop_price:.8f} ({position.trailing_stop_percent:.0f}% below peak ${position.highest_price:.8f})")
+                        # Warn if close to trailing stop
+                        if current_price <= position.trailing_stop_price * 1.02:  # Within 2% of trailing stop
+                            print(f"  ⚠️  Warning: Close to trailing stop!")
+                    else:
+                        # Fixed stop loss / take profit
+                        sl_distance = ((current_price - position.stop_loss) / position.stop_loss) * 100
+                        tp_distance = ((position.take_profit - current_price) / current_price) * 100
+
+                        if sl_distance < 5:  # Within 5% of stop loss
+                            print(f"  ⚠️  Warning: Close to stop loss (${position.stop_loss:.8f})")
+                        elif tp_distance < 10:  # Within 10% of take profit
+                            print(f"  🎯 Near take profit target (${position.take_profit:.8f})")
+
+                except Exception as e:
+                    logger.error(f"Error getting price for {position.token_address}: {e}")
+                    print(f"  ❌ Error updating price for {position.token_address[:8]}...")
+                    # Mark position as having failed price update
+                    self.trading_engine.position_manager.mark_position_price_failed(position.token_address)
+
+            # Update positions (this triggers stop loss/take profit checks AND rug detection)
+            await self.trading_engine.update_prices(price_updates, liquidity_updates)
+            print()
+
+    async def main_loop(self):
+        """Main trading loop."""
+        logger.info("Starting main trading loop...")
+
+        scan_interval = 120  # 2 minutes (was working between 20:16 and 03:40)
+        monitor_interval = 60  # 1 minute
+
+        last_scan = 0
+        last_monitor = 0
+
+        while self.running:
+            try:
+                current_time = asyncio.get_event_loop().time()
+
+                # Scan for new opportunities
+                if current_time - last_scan >= scan_interval:
+                    await self.scan_tokens()
+                    last_scan = current_time
+
+                # Monitor positions
+                if current_time - last_monitor >= monitor_interval:
+                    await self.monitor_positions()
+                    last_monitor = current_time
+
+                # Sleep briefly
+                await asyncio.sleep(10)
+
+            except Exception as e:
+                logger.error(f"Error in main loop: {e}")
+                await asyncio.sleep(30)
+
+    async def start(self):
+        """Start the trading bot."""
+        logger.info("Starting Solana Trading Bot...")
+        self.running = True
+
+        # Send startup notification
+        await self.notifier.send_startup_message()
+
+        # Start Telegram command handler
+        asyncio.create_task(self.command_handler.start())
+
+        # Start health monitoring in background
+        asyncio.create_task(self.health_checker.monitor())
+
+        # Run main loop
+        await self.main_loop()
+
+    async def stop(self):
+        """Stop the trading bot."""
+        logger.info("Stopping Solana Trading Bot...")
         self.running = False
 
-        # Display final statistics
-        if hasattr(self.trading_engine, 'get_statistics'):
-            stats = self.trading_engine.get_statistics()
-            self.logger.info(f"Final Portfolio Value: ${stats['portfolio_value']:.2f}")
-            self.logger.info(f"Total P&L: ${stats['total_pnl']:.2f} ({stats['total_pnl_percent']:+.2f}%)")
-            self.logger.info(f"Total Trades: {stats['total_trades']}")
+        # Stop Telegram command handler
+        await self.command_handler.stop()
 
-        await self.telegram_notifier.notify_status("🛑 Trading bot stopped")
+        # Stop health monitoring
+        self.health_checker.stop()
 
-        self.logger.info("✅ Shutdown complete")
+        # Send shutdown notification
+        await self.notifier.send_shutdown_message()
+
+        # Close connections
+        await self.alchemy.close()
+        await self.jupiter.close()
+        await self.solsniffer.close()
+        await self.dexscreener.close()
+        await self.twitter.close()
+
+        logger.info("Bot stopped successfully")
 
 
 async def main():
-    """Main entry point"""
+    """Main entry point."""
     bot = SolanaTradingBot()
-    await bot.start()
+
+    # Setup signal handlers
+    def signal_handler(sig, frame):
+        logger.info("Received shutdown signal")
+        asyncio.create_task(bot.stop())
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        await bot.start()
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        await bot.stop()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n\n👋 Bot stopped by user")
+        logger.info("Bot terminated by user")
