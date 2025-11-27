@@ -35,7 +35,7 @@ class JupiterSwapExecutor:
             use_jito: Whether to use Jito bundles for MEV protection
             paper_trading: If True, simulates trades without execution
         """
-        self.jupiter_api = "https://quote-api.jup.ag/v6"
+        self.jupiter_api = "https://lite-api.jup.ag/swap/v1"
         self.rpc_url = rpc_url
         self.use_jito = use_jito
         self.paper_trading = paper_trading
