@@ -176,8 +176,14 @@ class WalletManager:
             # Deserialize the transaction
             tx = VersionedTransaction.from_bytes(transaction_data)
 
-            # Sign the transaction with keypair
-            signed_tx = VersionedTransaction.populate(tx.message, [self.keypair])
+            # Get the message bytes to sign
+            message_bytes = bytes(tx.message.serialize())
+
+            # Sign the message with keypair to get a Signature object
+            signature = self.keypair.sign_message(message_bytes)
+
+            # Create signed transaction with the message and signature
+            signed_tx = VersionedTransaction.populate(tx.message, [signature])
 
             # Return the signed transaction as bytes
             return bytes(signed_tx)
