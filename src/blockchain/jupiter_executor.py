@@ -544,6 +544,7 @@ class JupiterSwapExecutor:
             tx_base64 = base64.b64encode(signed_tx).decode('utf-8')
 
             # Create RPC request payload
+            # Skip preflight to avoid blockhash expiration issues
             payload = {
                 'jsonrpc': '2.0',
                 'id': 1,
@@ -551,9 +552,10 @@ class JupiterSwapExecutor:
                 'params': [
                     tx_base64,
                     {
-                        'skipPreflight': False,
+                        'skipPreflight': True,  # Skip simulation to avoid blockhash issues
                         'maxRetries': 3,
-                        'encoding': 'base64'
+                        'encoding': 'base64',
+                        'preflightCommitment': 'confirmed'
                     }
                 ]
             }
