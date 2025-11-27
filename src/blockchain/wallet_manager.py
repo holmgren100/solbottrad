@@ -170,23 +170,32 @@ class WalletManager:
 
         try:
             from solders.transaction import VersionedTransaction
+            from solders.hash import Hash
 
             logger.info(f"✍️  Signing transaction with wallet {self.public_key[:8]}...")
 
             # Deserialize the transaction
             tx = VersionedTransaction.from_bytes(transaction_data)
 
-            # Get the message bytes to sign (convert message directly to bytes)
-            message_bytes = bytes(tx.message)
+            # Try creating a new signed transaction by passing the keypair directly
+            # This ensures the signature is computed correctly for the message
+            try:
+                # Method 1: Use VersionedTransaction constructor with keypair
+                signed_tx = VersionedTransaction(tx.message, [self.keypair])
+                return bytes(signed_tx)
+            except Exception as e:
+                logger.debug(f"Method 1 failed: {e}, trying method 2...")
 
-            # Sign the message with keypair to get a Signature object
-            signature = self.keypair.sign_message(message_bytes)
+                # Method 2: Manual signing with proper message serialization
+                # Serialize message to get the exact bytes that need to be signed
+                message_bytes = bytes(tx.message)
 
-            # Create signed transaction with the message and signature
-            signed_tx = VersionedTransaction.populate(tx.message, [signature])
+                # Sign the message bytes
+                signature = self.keypair.sign_message(message_bytes)
 
-            # Return the signed transaction as bytes
-            return bytes(signed_tx)
+                # Create signed transaction
+                signed_tx = VersionedTransaction.populate(tx.message, [signature])
+                return bytes(signed_tx)
 
         except Exception as e:
             logger.error(f"Error signing transaction: {e}")
