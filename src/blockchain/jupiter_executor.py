@@ -531,6 +531,7 @@ class JupiterSwapExecutor:
 
             # Update the message with fresh blockhash
             message = tx.message
+
             # Create new message with updated blockhash
             updated_message = type(message)(
                 message.header,
@@ -540,18 +541,11 @@ class JupiterSwapExecutor:
                 message.address_table_lookups if hasattr(message, 'address_table_lookups') else None
             )
 
-            # Create transaction bytes with updated message
-            updated_tx_bytes = bytes(VersionedTransaction(updated_message, []))
+            # Sign directly with keypair instead of going through wallet manager
+            signed_tx = VersionedTransaction(updated_message, [self.wallet.keypair])
 
-            # Sign the updated transaction with wallet
-            signed_tx = self.wallet.sign_transaction(updated_tx_bytes)
-
-            if signed_tx:
-                logger.debug("✅ Transaction signed with fresh blockhash")
-                return signed_tx
-            else:
-                logger.error("❌ Failed to sign transaction")
-                return None
+            logger.debug("✅ Transaction signed with fresh blockhash")
+            return bytes(signed_tx)
 
         except Exception as e:
             logger.error(f"❌ Error signing transaction: {e}")
