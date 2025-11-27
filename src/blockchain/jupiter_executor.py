@@ -540,7 +540,10 @@ class JupiterSwapExecutor:
             Result dictionary with signature and success status
         """
         try:
-            client = AsyncClient(self.rpc_url)
+            from solana.rpc.commitment import Confirmed
+
+            # Create async client with explicit commitment level
+            client = AsyncClient(self.rpc_url, commitment=Confirmed)
 
             # Deserialize the versioned transaction
             versioned_tx = VersionedTransaction.from_bytes(signed_tx)
@@ -659,7 +662,10 @@ class JupiterSwapExecutor:
             True if confirmed, False if timeout
         """
         try:
-            client = AsyncClient(self.rpc_url)
+            from solana.rpc.commitment import Confirmed
+
+            # Create async client with explicit commitment level
+            client = AsyncClient(self.rpc_url, commitment=Confirmed)
 
             for attempt in range(max_retries):
                 try:
