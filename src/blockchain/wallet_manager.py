@@ -176,8 +176,8 @@ class WalletManager:
             # Deserialize the transaction
             tx = VersionedTransaction.from_bytes(transaction_data)
 
-            # Get the message bytes to sign
-            message_bytes = bytes(tx.message.serialize())
+            # Get the message bytes to sign (convert message directly to bytes)
+            message_bytes = bytes(tx.message)
 
             # Sign the message with keypair to get a Signature object
             signature = self.keypair.sign_message(message_bytes)
