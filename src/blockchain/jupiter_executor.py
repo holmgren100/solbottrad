@@ -10,7 +10,6 @@ import random
 from typing import Dict, Optional
 from datetime import datetime
 from solana.rpc.async_api import AsyncClient
-from solana.transaction import Transaction
 from solders.transaction import VersionedTransaction
 from ..monitoring.logger import get_logger
 
