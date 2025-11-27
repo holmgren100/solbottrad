@@ -169,11 +169,9 @@ class WalletManager:
             return None
 
         try:
-            # This will be implemented when adding real transaction execution
             logger.info(f"✍️  Signing transaction with wallet {self.public_key[:8]}...")
-            # signature = self.keypair.sign(transaction_data)
-            # return bytes(signature)
-            return None  # Placeholder for paper trading mode
+            signature = self.keypair.sign(transaction_data)
+            return bytes(signature)
 
         except Exception as e:
             logger.error(f"Error signing transaction: {e}")

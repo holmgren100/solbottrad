@@ -6,6 +6,7 @@ Orchestrates all components and manages the trading loop.
 import asyncio
 import signal
 import sys
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -13,10 +14,13 @@ from .config import settings
 from .monitoring import setup_logger, get_logger, TelegramNotifier, HealthChecker
 from .monitoring.telegram_commands import TelegramCommandHandler
 from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker
+from .blockchain.jupiter_executor import JupiterSwapExecutor
+from .blockchain.wallet_manager import WalletManager
 from .market import DexScreenerClient, MarketAnalyzer, JupiterClient
 from .social import TwitterClient, SentimentAnalyzer
 from .ai import SentimentModel, PricePredictor, RiskAssessor
 from .trading import TelegramExecutor, PositionManager, PaperTradingEngine
+from .trading.live_trading import LiveTradingEngine
 from .data import MLDataCollector
 
 # Setup logging
@@ -79,15 +83,60 @@ class SolanaTradingBot:
 
         # Trading
         if settings.is_paper_trading():
-            logger.info("Paper trading mode enabled")
+            logger.info("📄 Paper trading mode enabled")
             self.trading_engine = PaperTradingEngine(initial_capital=1000.0)
+            self.position_manager = PositionManager(
+                max_open_positions=settings.risk.max_open_positions
+            )
         else:
-            logger.warning("Live trading mode - using TelegramExecutor")
-            self.trading_engine = TelegramExecutor(settings.api.gmgn_telegram_bot)
+            logger.warning("💰 LIVE TRADING MODE ENABLED")
+            logger.warning("=" * 80)
+            logger.warning("⚠️  REAL MONEY AT RISK - Ensure wallet is funded and tested!")
+            logger.warning("=" * 80)
 
-        self.position_manager = PositionManager(
-            max_open_positions=settings.risk.max_open_positions
-        )
+            # Initialize wallet
+            encryption_key = os.getenv('WALLET_ENCRYPTION_KEY')
+            encrypted_key = os.getenv('SOLANA_PRIVATE_KEY_ENCRYPTED')
+
+            if not encryption_key or not encrypted_key:
+                logger.error("❌ Wallet credentials not found in .env")
+                logger.error("Required: WALLET_ENCRYPTION_KEY and SOLANA_PRIVATE_KEY_ENCRYPTED")
+                raise ValueError("Missing wallet credentials for live trading")
+
+            wallet = WalletManager(encryption_key=encryption_key)
+            success = wallet.load_wallet_from_encrypted_key(encrypted_key)
+
+            if not success:
+                logger.error("❌ Failed to load wallet from encrypted key")
+                raise ValueError("Wallet loading failed")
+
+            logger.info(f"✅ Wallet loaded: {wallet.get_public_key()}")
+
+            # Initialize Jupiter executor with wallet
+            rpc_url = os.getenv('SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com')
+            use_jito = os.getenv('USE_JITO', 'true').lower() == 'true'
+
+            jupiter_executor = JupiterSwapExecutor(
+                rpc_url=rpc_url,
+                use_jito=use_jito,
+                paper_trading=False  # LIVE MODE
+            )
+            jupiter_executor.set_wallet(wallet)
+
+            logger.info(f"✅ Jupiter executor initialized (Jito: {use_jito})")
+
+            # Initialize live trading engine
+            self.position_manager = PositionManager(
+                max_open_positions=settings.risk.max_open_positions
+            )
+            self.trading_engine = LiveTradingEngine(
+                jupiter_executor=jupiter_executor,
+                position_manager=self.position_manager,
+                max_open_positions=settings.risk.max_open_positions
+            )
+
+            logger.info("✅ Live trading engine ready")
+            logger.warning("⚠️  Start with SMALL position sizes for testing!")
 
         # ML Data Collection
         self.ml_collector = MLDataCollector()

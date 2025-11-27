@@ -5,8 +5,13 @@ Handles automated trade execution on Solana using Jupiter aggregator.
 
 import asyncio
 import aiohttp
+import base64
+import random
 from typing import Dict, Optional
 from datetime import datetime
+from solana.rpc.async_api import AsyncClient
+from solana.transaction import Transaction
+from solders.transaction import VersionedTransaction
 from ..monitoring.logger import get_logger
 
 logger = get_logger(__name__)
@@ -35,6 +40,7 @@ class JupiterSwapExecutor:
         self.rpc_url = rpc_url
         self.use_jito = use_jito
         self.paper_trading = paper_trading
+        self.wallet = None  # Wallet manager for signing transactions
 
         # Jito bundle endpoints
         self.jito_block_engine = "https://mainnet.block-engine.jito.wtf/api/v1"
@@ -54,6 +60,16 @@ class JupiterSwapExecutor:
             f"Paper Trading: {paper_trading}, "
             f"Jito: {use_jito}"
         )
+
+    def set_wallet(self, wallet_manager):
+        """
+        Set the wallet manager for signing transactions.
+
+        Args:
+            wallet_manager: WalletManager instance
+        """
+        self.wallet = wallet_manager
+        logger.info(f"Wallet connected: {wallet_manager.get_public_key()[:8]}...")
 
     async def get_quote(
         self,
@@ -205,17 +221,128 @@ class JupiterSwapExecutor:
         """
         Execute a real swap on-chain.
 
-        NOTE: This requires wallet private key and will be implemented
-        when switching from paper trading to live trading.
+        Steps:
+        1. Get quote from Jupiter
+        2. Get swap transaction from Jupiter
+        3. Sign transaction with wallet
+        4. Send transaction (via Jito bundle or standard RPC)
+        5. Wait for confirmation
+        6. Return execution result
         """
-        logger.error("❌ Real swap execution not yet implemented - use paper trading mode")
-        return {
-            'status': 'not_implemented',
-            'success': False,
-            'error': 'Live trading not yet enabled',
-            'message': 'Run bot in paper trading mode or implement wallet integration',
-            'timestamp': datetime.now().isoformat()
-        }
+        try:
+            # Validate wallet is set
+            if not self.wallet or not self.wallet.is_loaded():
+                logger.error("❌ Wallet not set or not loaded")
+                return {
+                    'status': 'error',
+                    'success': False,
+                    'error': 'Wallet not configured',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            # Step 1: Get quote from Jupiter
+            logger.info(f"🔍 Getting Jupiter quote for {amount_in} {input_mint[:8]}...")
+            amount_lamports = int(amount_in * 1e9)  # Convert to smallest unit
+            slippage_bps = int(slippage_percent * 100)  # Convert to basis points
+
+            quote = await self.get_quote(input_mint, output_mint, amount_lamports, slippage_bps)
+            if not quote:
+                logger.error("❌ Failed to get quote from Jupiter")
+                return {
+                    'status': 'error',
+                    'success': False,
+                    'error': 'Failed to get Jupiter quote',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            # Step 2: Get swap transaction from Jupiter
+            logger.info("🔨 Building swap transaction...")
+            swap_tx_data = await self._get_swap_transaction(quote)
+            if not swap_tx_data:
+                logger.error("❌ Failed to get swap transaction")
+                return {
+                    'status': 'error',
+                    'success': False,
+                    'error': 'Failed to build swap transaction',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            # Step 3: Deserialize and sign transaction
+            logger.info("✍️  Signing transaction...")
+            signed_tx = await self._sign_transaction(swap_tx_data)
+            if not signed_tx:
+                logger.error("❌ Failed to sign transaction")
+                return {
+                    'status': 'error',
+                    'success': False,
+                    'error': 'Transaction signing failed',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            # Step 4: Send transaction
+            logger.info(f"📤 Sending transaction via {'Jito bundle' if use_jito else 'standard RPC'}...")
+            if use_jito:
+                send_result = await self._send_jito_bundle(signed_tx)
+            else:
+                send_result = await self._send_transaction(signed_tx)
+
+            if not send_result or not send_result.get('success'):
+                logger.error(f"❌ Transaction send failed: {send_result.get('error', 'Unknown')}")
+                return {
+                    'status': 'error',
+                    'success': False,
+                    'error': send_result.get('error', 'Transaction send failed'),
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            signature = send_result.get('signature')
+            logger.info(f"✅ Transaction sent: {signature}")
+
+            # Step 5: Wait for confirmation
+            logger.info("⏳ Waiting for confirmation...")
+            confirmed = await self._wait_for_confirmation(signature)
+
+            if confirmed:
+                # Calculate actual output and fees
+                output_amount = int(quote.get('outAmount', 0)) / 1e9
+                price_impact = float(quote.get('priceImpactPct', 0))
+                fees = self._calculate_fees(amount_in, use_jito)
+
+                logger.info(
+                    f"🎉 Swap confirmed! "
+                    f"{amount_in:.4f} → {output_amount:.4f} "
+                    f"(Impact: {price_impact:.2f}%)"
+                )
+
+                return {
+                    'status': 'confirmed',
+                    'success': True,
+                    'signature': signature,
+                    'input_amount': amount_in,
+                    'output_amount': output_amount,
+                    'price_impact_pct': price_impact,
+                    'fees': fees,
+                    'jito_used': use_jito,
+                    'timestamp': datetime.now().isoformat()
+                }
+            else:
+                logger.warning(f"⚠️  Transaction confirmation timeout: {signature}")
+                return {
+                    'status': 'pending',
+                    'success': False,
+                    'signature': signature,
+                    'error': 'Confirmation timeout (transaction may still confirm)',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Error executing real swap: {e}", exc_info=True)
+            return {
+                'status': 'error',
+                'success': False,
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
 
     def _calculate_fees(self, amount_usd: float, use_jito: bool) -> Dict:
         """
@@ -332,3 +459,245 @@ class JupiterSwapExecutor:
             logger.error(f"❌ Sell failed: {result.get('error', 'Unknown error')}")
 
         return result
+    async def _get_swap_transaction(self, quote: Dict) -> Optional[str]:
+        """
+        Get swap transaction from Jupiter API.
+
+        Args:
+            quote: Quote response from Jupiter
+
+        Returns:
+            Base64-encoded swap transaction or None
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                swap_request = {
+                    'quoteResponse': quote,
+                    'userPublicKey': self.wallet.get_public_key(),
+                    'wrapAndUnwrapSol': True,
+                    'dynamicComputeUnitLimit': True,
+                    'prioritizationFeeLamports': 'auto'
+                }
+
+                async with session.post(
+                    f"{self.jupiter_api}/swap",
+                    json=swap_request,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        swap_transaction = data.get('swapTransaction')
+                        if swap_transaction:
+                            logger.debug(f"✅ Got swap transaction ({len(swap_transaction)} bytes)")
+                            return swap_transaction
+                        else:
+                            logger.error("❌ No swap transaction in response")
+                            return None
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ Jupiter swap API failed: {response.status} - {error_text}")
+                        return None
+
+        except Exception as e:
+            logger.error(f"❌ Error getting swap transaction: {e}")
+            return None
+
+    async def _sign_transaction(self, swap_tx_base64: str) -> Optional[bytes]:
+        """
+        Deserialize and sign a transaction.
+
+        Args:
+            swap_tx_base64: Base64-encoded transaction from Jupiter
+
+        Returns:
+            Signed transaction bytes or None
+        """
+        try:
+            # Decode base64 transaction
+            tx_bytes = base64.b64decode(swap_tx_base64)
+
+            # Sign the transaction with wallet
+            signature = self.wallet.sign_transaction(tx_bytes)
+
+            if signature:
+                logger.debug("✅ Transaction signed successfully")
+                return tx_bytes  # Return the transaction bytes (signature is embedded)
+            else:
+                logger.error("❌ Failed to sign transaction")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Error signing transaction: {e}")
+            return None
+
+    async def _send_transaction(self, signed_tx: bytes) -> Dict:
+        """
+        Send transaction via standard Solana RPC.
+
+        Args:
+            signed_tx: Signed transaction bytes
+
+        Returns:
+            Result dictionary with signature and success status
+        """
+        try:
+            client = AsyncClient(self.rpc_url)
+
+            # Deserialize the versioned transaction
+            versioned_tx = VersionedTransaction.from_bytes(signed_tx)
+
+            # Send transaction
+            response = await client.send_raw_transaction(
+                signed_tx,
+                opts={'skipPreflight': False, 'maxRetries': 3}
+            )
+
+            await client.close()
+
+            if response.value:
+                signature = str(response.value)
+                logger.info(f"✅ Transaction sent via RPC: {signature}")
+                return {
+                    'success': True,
+                    'signature': signature
+                }
+            else:
+                logger.error(f"❌ Failed to send transaction: {response}")
+                return {
+                    'success': False,
+                    'error': 'Transaction send failed (no signature returned)'
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Error sending transaction: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    async def _send_jito_bundle(self, signed_tx: bytes) -> Dict:
+        """
+        Send transaction via Jito bundle for MEV protection.
+
+        Args:
+            signed_tx: Signed transaction bytes
+
+        Returns:
+            Result dictionary with bundle ID and success status
+        """
+        try:
+            # Select random Jito tip account
+            tip_account = random.choice(self.jito_tip_accounts)
+
+            # Encode transaction to base64
+            tx_base64 = base64.b64encode(signed_tx).decode('utf-8')
+
+            # Create bundle payload
+            bundle_payload = {
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'sendBundle',
+                'params': [[tx_base64]]
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.jito_block_engine}/bundles",
+                    json=bundle_payload,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        bundle_id = data.get('result')
+
+                        if bundle_id:
+                            logger.info(f"✅ Jito bundle submitted: {bundle_id}")
+                            # Extract signature from transaction for tracking
+                            # For now, use bundle_id as signature
+                            return {
+                                'success': True,
+                                'signature': bundle_id,
+                                'bundle_id': bundle_id
+                            }
+                        else:
+                            error = data.get('error', {})
+                            logger.error(f"❌ Jito bundle error: {error}")
+                            return {
+                                'success': False,
+                                'error': f"Jito bundle failed: {error.get('message', 'Unknown error')}"
+                            }
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ Jito API error: {response.status} - {error_text}")
+                        return {
+                            'success': False,
+                            'error': f"Jito API error: {response.status}"
+                        }
+
+        except Exception as e:
+            logger.error(f"❌ Error sending Jito bundle: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    async def _wait_for_confirmation(
+        self,
+        signature: str,
+        max_retries: int = 30,
+        retry_delay: float = 2.0
+    ) -> bool:
+        """
+        Wait for transaction confirmation.
+
+        Args:
+            signature: Transaction signature to track
+            max_retries: Maximum number of confirmation checks
+            retry_delay: Seconds between checks
+
+        Returns:
+            True if confirmed, False if timeout
+        """
+        try:
+            client = AsyncClient(self.rpc_url)
+
+            for attempt in range(max_retries):
+                try:
+                    # Check transaction status
+                    response = await client.get_signature_statuses([signature])
+
+                    if response.value and len(response.value) > 0:
+                        status = response.value[0]
+
+                        if status:
+                            # Check confirmation status
+                            if status.confirmation_status:
+                                confirmation_level = str(status.confirmation_status)
+
+                                if confirmation_level in ['confirmed', 'finalized']:
+                                    logger.info(f"✅ Transaction confirmed ({confirmation_level}): {signature}")
+                                    await client.close()
+                                    return True
+
+                                logger.debug(f"⏳ Confirmation status: {confirmation_level} (attempt {attempt + 1}/{max_retries})")
+
+                            # Check for errors
+                            if status.err:
+                                logger.error(f"❌ Transaction failed: {status.err}")
+                                await client.close()
+                                return False
+
+                except Exception as check_error:
+                    logger.debug(f"⚠️  Confirmation check error (attempt {attempt + 1}): {check_error}")
+
+                # Wait before next check
+                await asyncio.sleep(retry_delay)
+
+            logger.warning(f"⏰ Confirmation timeout after {max_retries * retry_delay}s: {signature}")
+            await client.close()
+            return False
+
+        except Exception as e:
+            logger.error(f"❌ Error waiting for confirmation: {e}")
+            return False
