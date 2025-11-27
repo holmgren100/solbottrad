@@ -162,16 +162,25 @@ class WalletManager:
             transaction_data: Transaction bytes to sign
 
         Returns:
-            Signature bytes or None if failed
+            Signed transaction bytes or None if failed
         """
         if not self.keypair:
             logger.error("❌ No wallet loaded - cannot sign transaction")
             return None
 
         try:
+            from solders.transaction import VersionedTransaction
+
             logger.info(f"✍️  Signing transaction with wallet {self.public_key[:8]}...")
-            signature = self.keypair.sign(transaction_data)
-            return bytes(signature)
+
+            # Deserialize the transaction
+            tx = VersionedTransaction.from_bytes(transaction_data)
+
+            # Sign the transaction with keypair
+            signed_tx = VersionedTransaction.populate(tx.message, [self.keypair])
+
+            # Return the signed transaction as bytes
+            return bytes(signed_tx)
 
         except Exception as e:
             logger.error(f"Error signing transaction: {e}")

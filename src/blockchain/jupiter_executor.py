@@ -516,11 +516,11 @@ class JupiterSwapExecutor:
             tx_bytes = base64.b64decode(swap_tx_base64)
 
             # Sign the transaction with wallet
-            signature = self.wallet.sign_transaction(tx_bytes)
+            signed_tx = self.wallet.sign_transaction(tx_bytes)
 
-            if signature:
+            if signed_tx:
                 logger.debug("✅ Transaction signed successfully")
-                return tx_bytes  # Return the transaction bytes (signature is embedded)
+                return signed_tx  # Return the signed transaction bytes
             else:
                 logger.error("❌ Failed to sign transaction")
                 return None
