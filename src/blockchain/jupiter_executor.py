@@ -503,7 +503,7 @@ class JupiterSwapExecutor:
 
     async def _sign_transaction(self, swap_tx_base64: str) -> Optional[bytes]:
         """
-        Deserialize and sign a transaction.
+        Deserialize, update blockhash, and sign a transaction.
 
         Args:
             swap_tx_base64: Base64-encoded transaction from Jupiter
@@ -512,21 +512,89 @@ class JupiterSwapExecutor:
             Signed transaction bytes or None
         """
         try:
+            from solders.transaction import VersionedTransaction
+            from solders.hash import Hash as Blockhash
+
             # Decode base64 transaction
             tx_bytes = base64.b64decode(swap_tx_base64)
 
-            # Sign the transaction with wallet
-            signed_tx = self.wallet.sign_transaction(tx_bytes)
+            # Deserialize the transaction
+            tx = VersionedTransaction.from_bytes(tx_bytes)
+
+            # Get fresh blockhash from RPC
+            logger.debug("🔄 Getting fresh blockhash...")
+            fresh_blockhash = await self._get_latest_blockhash()
+
+            if not fresh_blockhash:
+                logger.error("❌ Failed to get fresh blockhash")
+                return None
+
+            # Update the message with fresh blockhash
+            message = tx.message
+            # Create new message with updated blockhash
+            updated_message = type(message)(
+                message.header,
+                message.account_keys,
+                fresh_blockhash,
+                message.instructions,
+                message.address_table_lookups if hasattr(message, 'address_table_lookups') else None
+            )
+
+            # Create transaction bytes with updated message
+            updated_tx_bytes = bytes(VersionedTransaction(updated_message, []))
+
+            # Sign the updated transaction with wallet
+            signed_tx = self.wallet.sign_transaction(updated_tx_bytes)
 
             if signed_tx:
-                logger.debug("✅ Transaction signed successfully")
-                return signed_tx  # Return the signed transaction bytes
+                logger.debug("✅ Transaction signed with fresh blockhash")
+                return signed_tx
             else:
                 logger.error("❌ Failed to sign transaction")
                 return None
 
         except Exception as e:
             logger.error(f"❌ Error signing transaction: {e}")
+            return None
+
+    async def _get_latest_blockhash(self) -> Optional[any]:
+        """
+        Get the latest blockhash from Solana RPC.
+
+        Returns:
+            Latest blockhash or None if failed
+        """
+        try:
+            from solders.hash import Hash as Blockhash
+
+            payload = {
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'getLatestBlockhash',
+                'params': [{'commitment': 'finalized'}]
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.rpc_url,
+                    json=payload,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        if 'result' in data and 'value' in data['result']:
+                            blockhash_str = data['result']['value']['blockhash']
+                            blockhash = Blockhash.from_string(blockhash_str)
+                            logger.debug(f"✅ Got fresh blockhash: {blockhash_str[:8]}...")
+                            return blockhash
+
+                    logger.error(f"❌ Failed to get blockhash: HTTP {response.status}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"❌ Error getting blockhash: {e}")
             return None
 
     async def _send_transaction(self, signed_tx: bytes) -> Dict:
