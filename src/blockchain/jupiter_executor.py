@@ -531,7 +531,7 @@ class JupiterSwapExecutor:
 
     async def _send_transaction(self, signed_tx: bytes) -> Dict:
         """
-        Send transaction via standard Solana RPC.
+        Send transaction via standard Solana RPC using direct aiohttp calls.
 
         Args:
             signed_tx: Signed transaction bytes
@@ -540,35 +540,56 @@ class JupiterSwapExecutor:
             Result dictionary with signature and success status
         """
         try:
-            from solana.rpc.commitment import Confirmed
+            # Encode transaction to base64
+            tx_base64 = base64.b64encode(signed_tx).decode('utf-8')
 
-            # Create async client with explicit commitment level
-            client = AsyncClient(self.rpc_url, commitment=Confirmed)
+            # Create RPC request payload
+            payload = {
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'sendTransaction',
+                'params': [
+                    tx_base64,
+                    {
+                        'skipPreflight': False,
+                        'maxRetries': 3,
+                        'encoding': 'base64'
+                    }
+                ]
+            }
 
-            # Deserialize the versioned transaction
-            versioned_tx = VersionedTransaction.from_bytes(signed_tx)
+            # Send via aiohttp to avoid solana-py AsyncClient httpx proxy bug
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.rpc_url,
+                    json=payload,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
 
-            # Send transaction
-            response = await client.send_raw_transaction(
-                signed_tx,
-                opts={'skipPreflight': False, 'maxRetries': 3}
-            )
-
-            await client.close()
-
-            if response.value:
-                signature = str(response.value)
-                logger.info(f"✅ Transaction sent via RPC: {signature}")
-                return {
-                    'success': True,
-                    'signature': signature
-                }
-            else:
-                logger.error(f"❌ Failed to send transaction: {response}")
-                return {
-                    'success': False,
-                    'error': 'Transaction send failed (no signature returned)'
-                }
+                        if 'result' in data:
+                            signature = data['result']
+                            logger.info(f"✅ Transaction sent via RPC: {signature}")
+                            return {
+                                'success': True,
+                                'signature': signature
+                            }
+                        elif 'error' in data:
+                            error = data['error']
+                            logger.error(f"❌ RPC error: {error}")
+                            return {
+                                'success': False,
+                                'error': str(error)
+                            }
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ HTTP {response.status}: {error_text}")
+                        return {
+                            'success': False,
+                            'error': f'HTTP {response.status}: {error_text}'
+                        }
 
         except Exception as e:
             logger.error(f"❌ Error sending transaction: {e}")
@@ -651,7 +672,7 @@ class JupiterSwapExecutor:
         retry_delay: float = 2.0
     ) -> bool:
         """
-        Wait for transaction confirmation.
+        Wait for transaction confirmation using direct aiohttp RPC calls.
 
         Args:
             signature: Transaction signature to track
@@ -662,36 +683,43 @@ class JupiterSwapExecutor:
             True if confirmed, False if timeout
         """
         try:
-            from solana.rpc.commitment import Confirmed
-
-            # Create async client with explicit commitment level
-            client = AsyncClient(self.rpc_url, commitment=Confirmed)
-
             for attempt in range(max_retries):
                 try:
-                    # Check transaction status
-                    response = await client.get_signature_statuses([signature])
+                    # Create RPC request to get signature statuses
+                    payload = {
+                        'jsonrpc': '2.0',
+                        'id': 1,
+                        'method': 'getSignatureStatuses',
+                        'params': [[signature]]
+                    }
 
-                    if response.value and len(response.value) > 0:
-                        status = response.value[0]
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            self.rpc_url,
+                            json=payload,
+                            headers={'Content-Type': 'application/json'},
+                            timeout=aiohttp.ClientTimeout(total=10)
+                        ) as response:
+                            if response.status == 200:
+                                data = await response.json()
 
-                        if status:
-                            # Check confirmation status
-                            if status.confirmation_status:
-                                confirmation_level = str(status.confirmation_status)
+                                if 'result' in data and data['result']['value']:
+                                    status = data['result']['value'][0]
 
-                                if confirmation_level in ['confirmed', 'finalized']:
-                                    logger.info(f"✅ Transaction confirmed ({confirmation_level}): {signature}")
-                                    await client.close()
-                                    return True
+                                    if status:
+                                        # Check confirmation status
+                                        confirmation_status = status.get('confirmationStatus')
 
-                                logger.debug(f"⏳ Confirmation status: {confirmation_level} (attempt {attempt + 1}/{max_retries})")
+                                        if confirmation_status in ['confirmed', 'finalized']:
+                                            logger.info(f"✅ Transaction confirmed ({confirmation_status}): {signature}")
+                                            return True
 
-                            # Check for errors
-                            if status.err:
-                                logger.error(f"❌ Transaction failed: {status.err}")
-                                await client.close()
-                                return False
+                                        logger.debug(f"⏳ Confirmation status: {confirmation_status} (attempt {attempt + 1}/{max_retries})")
+
+                                        # Check for errors
+                                        if status.get('err'):
+                                            logger.error(f"❌ Transaction failed: {status['err']}")
+                                            return False
 
                 except Exception as check_error:
                     logger.debug(f"⚠️  Confirmation check error (attempt {attempt + 1}): {check_error}")
@@ -700,7 +728,6 @@ class JupiterSwapExecutor:
                 await asyncio.sleep(retry_delay)
 
             logger.warning(f"⏰ Confirmation timeout after {max_retries * retry_delay}s: {signature}")
-            await client.close()
             return False
 
         except Exception as e:
