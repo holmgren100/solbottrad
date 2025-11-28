@@ -218,7 +218,7 @@ class JupiterSwapExecutor:
         use_jito: bool
     ) -> Dict:
         """
-        Execute a real swap on-chain.
+        Execute a real swap on-chain with automatic retry on blockhash expiration.
 
         Steps:
         1. Get quote from Jupiter
@@ -239,60 +239,84 @@ class JupiterSwapExecutor:
                     'timestamp': datetime.now().isoformat()
                 }
 
-            # Step 1: Get quote from Jupiter
-            logger.info(f"🔍 Getting Jupiter quote for {amount_in} {input_mint[:8]}...")
             amount_lamports = int(amount_in * 1e9)  # Convert to smallest unit
             slippage_bps = int(slippage_percent * 100)  # Convert to basis points
 
-            quote = await self.get_quote(input_mint, output_mint, amount_lamports, slippage_bps)
-            if not quote:
-                logger.error("❌ Failed to get quote from Jupiter")
-                return {
-                    'status': 'error',
-                    'success': False,
-                    'error': 'Failed to get Jupiter quote',
-                    'timestamp': datetime.now().isoformat()
-                }
+            # Retry loop for blockhash expiration
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    # Step 1: Get quote from Jupiter
+                    logger.info(f"🔍 Getting Jupiter quote for {amount_in} {input_mint[:8]}... (attempt {attempt + 1}/{max_retries})")
+                    quote = await self.get_quote(input_mint, output_mint, amount_lamports, slippage_bps)
+                    if not quote:
+                        logger.error("❌ Failed to get quote from Jupiter")
+                        return {
+                            'status': 'error',
+                            'success': False,
+                            'error': 'Failed to get Jupiter quote',
+                            'timestamp': datetime.now().isoformat()
+                        }
 
-            # Step 2: Get swap transaction from Jupiter
-            logger.info("🔨 Building swap transaction...")
-            swap_tx_data = await self._get_swap_transaction(quote)
-            if not swap_tx_data:
-                logger.error("❌ Failed to get swap transaction")
-                return {
-                    'status': 'error',
-                    'success': False,
-                    'error': 'Failed to build swap transaction',
-                    'timestamp': datetime.now().isoformat()
-                }
+                    # Step 2: Get swap transaction from Jupiter
+                    logger.info("🔨 Building swap transaction...")
+                    swap_tx_data = await self._get_swap_transaction(quote)
+                    if not swap_tx_data:
+                        logger.error("❌ Failed to get swap transaction")
+                        return {
+                            'status': 'error',
+                            'success': False,
+                            'error': 'Failed to build swap transaction',
+                            'timestamp': datetime.now().isoformat()
+                        }
 
-            # Step 3: Deserialize and sign transaction
-            logger.info("✍️  Signing transaction...")
-            signed_tx = await self._sign_transaction(swap_tx_data)
-            if not signed_tx:
-                logger.error("❌ Failed to sign transaction")
-                return {
-                    'status': 'error',
-                    'success': False,
-                    'error': 'Transaction signing failed',
-                    'timestamp': datetime.now().isoformat()
-                }
+                    # Step 3: Deserialize and sign transaction
+                    logger.info("✍️  Signing transaction...")
+                    signed_tx = await self._sign_transaction(swap_tx_data)
+                    if not signed_tx:
+                        logger.error("❌ Failed to sign transaction")
+                        return {
+                            'status': 'error',
+                            'success': False,
+                            'error': 'Transaction signing failed',
+                            'timestamp': datetime.now().isoformat()
+                        }
 
-            # Step 4: Send transaction
-            logger.info(f"📤 Sending transaction via {'Jito bundle' if use_jito else 'standard RPC'}...")
-            if use_jito:
-                send_result = await self._send_jito_bundle(signed_tx)
-            else:
-                send_result = await self._send_transaction(signed_tx)
+                    # Step 4: Send transaction
+                    logger.info(f"📤 Sending transaction via {'Jito bundle' if use_jito else 'standard RPC'}...")
+                    if use_jito:
+                        send_result = await self._send_jito_bundle(signed_tx)
+                    else:
+                        send_result = await self._send_transaction(signed_tx)
 
-            if not send_result or not send_result.get('success'):
-                logger.error(f"❌ Transaction send failed: {send_result.get('error', 'Unknown')}")
-                return {
-                    'status': 'error',
-                    'success': False,
-                    'error': send_result.get('error', 'Transaction send failed'),
-                    'timestamp': datetime.now().isoformat()
-                }
+                    if not send_result or not send_result.get('success'):
+                        error_msg = str(send_result.get('error', 'Unknown'))
+
+                        # Check if it's a blockhash error
+                        if 'blockhash' in error_msg.lower() and attempt < max_retries - 1:
+                            logger.warning(f"⚠️  Blockhash expired, retrying with fresh transaction (attempt {attempt + 1}/{max_retries})...")
+                            await asyncio.sleep(0.5)  # Brief delay before retry
+                            continue  # Retry with fresh quote/transaction
+
+                        # Not a blockhash error or out of retries
+                        logger.error(f"❌ Transaction send failed: {error_msg}")
+                        return {
+                            'status': 'error',
+                            'success': False,
+                            'error': send_result.get('error', 'Transaction send failed'),
+                            'timestamp': datetime.now().isoformat()
+                        }
+
+                    # Success! Break out of retry loop
+                    break
+
+                except Exception as retry_error:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️  Attempt {attempt + 1} failed: {retry_error}, retrying...")
+                        await asyncio.sleep(0.5)
+                        continue
+                    else:
+                        raise  # Re-raise on last attempt
 
             signature = send_result.get('signature')
             logger.info(f"✅ Transaction sent: {signature}")
