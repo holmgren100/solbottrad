@@ -503,7 +503,7 @@ class JupiterSwapExecutor:
 
     async def _sign_transaction(self, swap_tx_base64: str) -> Optional[bytes]:
         """
-        Deserialize, update blockhash, and sign a transaction.
+        Sign the transaction from Jupiter without modification.
 
         Args:
             swap_tx_base64: Base64-encoded transaction from Jupiter
@@ -513,7 +513,6 @@ class JupiterSwapExecutor:
         """
         try:
             from solders.transaction import VersionedTransaction
-            from solders.hash import Hash as Blockhash
 
             # Decode base64 transaction
             tx_bytes = base64.b64decode(swap_tx_base64)
@@ -521,30 +520,11 @@ class JupiterSwapExecutor:
             # Deserialize the transaction
             tx = VersionedTransaction.from_bytes(tx_bytes)
 
-            # Get fresh blockhash from RPC
-            logger.debug("🔄 Getting fresh blockhash...")
-            fresh_blockhash = await self._get_latest_blockhash()
+            # Sign directly with keypair - DO NOT modify Jupiter's transaction
+            # Jupiter provides fresh blockhashes, so use as-is
+            signed_tx = VersionedTransaction(tx.message, [self.wallet.keypair])
 
-            if not fresh_blockhash:
-                logger.error("❌ Failed to get fresh blockhash")
-                return None
-
-            # Update the message with fresh blockhash
-            message = tx.message
-
-            # Create new message with updated blockhash
-            updated_message = type(message)(
-                message.header,
-                message.account_keys,
-                fresh_blockhash,
-                message.instructions,
-                message.address_table_lookups if hasattr(message, 'address_table_lookups') else None
-            )
-
-            # Sign directly with keypair instead of going through wallet manager
-            signed_tx = VersionedTransaction(updated_message, [self.wallet.keypair])
-
-            logger.debug("✅ Transaction signed with fresh blockhash")
+            logger.debug("✅ Transaction signed")
             return bytes(signed_tx)
 
         except Exception as e:
