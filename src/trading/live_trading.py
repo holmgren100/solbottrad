@@ -275,6 +275,27 @@ class LiveTradingEngine:
             liquidity = liquidity_data.get(token_address, 0.0)
             self.position_manager.update_position_price(token_address, current_price, liquidity)
 
+        # Check for dead/rugged positions (low liquidity, frozen price, stale data)
+        dead_positions = self.position_manager.get_dead_positions(
+            stale_minutes=10,
+            min_liquidity=8000.0,  # $8k minimum liquidity to sell
+            freeze_minutes=5
+        )
+
+        for token_address in dead_positions:
+            position = self.position_manager.get_position(token_address)
+            if position:
+                # Use current price if available, otherwise assume minimal value
+                exit_price = position.current_price if position.current_price > 0 else 0.00000001
+
+                logger.error(
+                    f"💀 [LIVE] DEAD TOKEN DETECTED: {token_address[:8]}... "
+                    f"Entry: ${position.entry_price:.8f}, "
+                    f"Current: ${position.current_price:.8f}, "
+                    f"Liquidity: ${position.current_liquidity:.0f}"
+                )
+                await self.execute_sell(token_address, exit_price, reason='low_liquidity')
+
         # Check for stop loss/take profit/trailing stop triggers
         for token_address in list(self.position_manager.open_positions.keys()):
             position = self.position_manager.get_position(token_address)
