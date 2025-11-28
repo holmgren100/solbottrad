@@ -610,7 +610,8 @@ class JupiterSwapExecutor:
             tx_base64 = base64.b64encode(signed_tx).decode('utf-8')
 
             # Create RPC request payload
-            # Enable preflight to catch issues before sending
+            # Skip preflight - let network validate blockhash directly
+            # Preflight simulation fails when RPC cache doesn't match Jupiter's blockhash source
             payload = {
                 'jsonrpc': '2.0',
                 'id': 1,
@@ -618,10 +619,9 @@ class JupiterSwapExecutor:
                 'params': [
                     tx_base64,
                     {
-                        'skipPreflight': False,  # Run simulation to catch issues
-                        'maxRetries': 3,
-                        'encoding': 'base64',
-                        'preflightCommitment': 'processed'  # Use 'processed' for faster preflight
+                        'skipPreflight': True,  # Skip simulation - network will validate
+                        'maxRetries': 5,  # Increased retries for network-level validation
+                        'encoding': 'base64'
                     }
                 ]
             }
