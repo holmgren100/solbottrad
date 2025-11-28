@@ -129,6 +129,21 @@ async def main():
             # Calculate position value
             position_value_usd = token_amount * current_price
 
+            # VALIDATION: Check for suspicious prices
+            if position_value_usd > 100000:
+                print(f"     ⚠️  SUSPICIOUS: Position value ${position_value_usd:,.2f} seems too high")
+                print(f"        Price: ${current_price:.8f}, Quantity: {token_amount:,.2f}")
+                print(f"        This might be bad price data - SKIPPING for safety")
+                skipped_count += 1
+                continue
+
+            # VALIDATION: Check for unreasonably high token prices
+            if current_price > 10000:
+                print(f"     ⚠️  SUSPICIOUS: Token price ${current_price:,.2f} seems too high")
+                print(f"        This might be bad data (wrong decimal places) - SKIPPING")
+                skipped_count += 1
+                continue
+
             # Skip very small positions (< $0.10)
             if position_value_usd < 0.10:
                 print(f"     ⚠️  Value too small (${position_value_usd:.4f}) - skipping")
