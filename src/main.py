@@ -591,174 +591,173 @@ class SolanaTradingBot:
 
     async def _monitor_positions_impl(self):
         """Internal implementation of position monitoring."""
-        if settings.is_paper_trading():
-            # Get current prices for all open positions
-            positions = self.trading_engine.position_manager.get_all_positions()
+        # Get current prices for all open positions
+        positions = self.trading_engine.position_manager.get_all_positions()
 
-            if not positions:
-                return  # No positions to monitor
+        if not positions:
+            return  # No positions to monitor
 
-            print(f"📊 Monitoring {len(positions)} open position(s)...")
-            logger.info(f"Monitoring {len(positions)} positions")
+        print(f"📊 Monitoring {len(positions)} open position(s)...")
+        logger.info(f"Monitoring {len(positions)} positions")
 
-            price_updates = {}
-            liquidity_updates = {}  # Track liquidity for rug detection
+        price_updates = {}
+        liquidity_updates = {}  # Track liquidity for rug detection
 
-            for position in positions:
-                try:
-                    # DUAL-SOURCE VALIDATION: Query both DexScreener and Jupiter
-                    dex_profile = await self.dexscreener.get_token_profile(position.token_address)
-                    jupiter_data = await self.jupiter.get_token_price_data(position.token_address)
+        for position in positions:
+            try:
+                # DUAL-SOURCE VALIDATION: Query both DexScreener and Jupiter
+                dex_profile = await self.dexscreener.get_token_profile(position.token_address)
+                jupiter_data = await self.jupiter.get_token_price_data(position.token_address)
 
-                    # Extract data from both sources
-                    dex_price = dex_profile['price_usd'] if dex_profile else None
-                    dex_liquidity = dex_profile.get('liquidity_usd', 0.0) if dex_profile else 0.0
+                # Extract data from both sources
+                dex_price = dex_profile['price_usd'] if dex_profile else None
+                dex_liquidity = dex_profile.get('liquidity_usd', 0.0) if dex_profile else 0.0
 
-                    jupiter_price = jupiter_data['price_usd'] if jupiter_data else None
-                    jupiter_liquidity = jupiter_data.get('liquidity_usd', 0.0) if jupiter_data else 0.0
+                jupiter_price = jupiter_data['price_usd'] if jupiter_data else None
+                jupiter_liquidity = jupiter_data.get('liquidity_usd', 0.0) if jupiter_data else 0.0
 
-                    # Cross-validate and choose best data
-                    current_price = None
-                    liquidity = 0.0
-                    data_source = None
+                # Cross-validate and choose best data
+                current_price = None
+                liquidity = 0.0
+                data_source = None
 
-                    if dex_price and jupiter_price:
-                        # Both sources available - cross-validate
-                        price_diff_pct = abs((dex_price - jupiter_price) / dex_price) * 100
+                if dex_price and jupiter_price:
+                    # Both sources available - cross-validate
+                    price_diff_pct = abs((dex_price - jupiter_price) / dex_price) * 100
 
-                        if price_diff_pct < 10:
-                            # Prices agree (within 10%) - use average
-                            current_price = (dex_price + jupiter_price) / 2
-                            liquidity = max(dex_liquidity, jupiter_liquidity)  # Use higher liquidity
-                            data_source = "✅ DexScreener + Jupiter"
-                            logger.debug(f"Price agreement for {position.token_address[:8]}: Dex ${dex_price:.8f} vs Jup ${jupiter_price:.8f} (diff: {price_diff_pct:.1f}%)")
-                        else:
-                            # Large divergence - flag as suspicious
-                            logger.warning(
-                                f"⚠️  PRICE DIVERGENCE: {position.token_address[:8]}... "
-                                f"DexScreener ${dex_price:.8f} vs Jupiter ${jupiter_price:.8f} ({price_diff_pct:.1f}% diff!)"
-                            )
-                            # Use DexScreener as primary (more reliable for liquidity)
-                            current_price = dex_price
-                            liquidity = dex_liquidity
-                            data_source = "⚠️  DexScreener (divergence)"
-
-                    elif dex_price:
-                        # Only DexScreener available
+                    if price_diff_pct < 10:
+                        # Prices agree (within 10%) - use average
+                        current_price = (dex_price + jupiter_price) / 2
+                        liquidity = max(dex_liquidity, jupiter_liquidity)  # Use higher liquidity
+                        data_source = "✅ DexScreener + Jupiter"
+                        logger.debug(f"Price agreement for {position.token_address[:8]}: Dex ${dex_price:.8f} vs Jup ${jupiter_price:.8f} (diff: {price_diff_pct:.1f}%)")
+                    else:
+                        # Large divergence - flag as suspicious
+                        logger.warning(
+                            f"⚠️  PRICE DIVERGENCE: {position.token_address[:8]}... "
+                            f"DexScreener ${dex_price:.8f} vs Jupiter ${jupiter_price:.8f} ({price_diff_pct:.1f}% diff!)"
+                        )
+                        # Use DexScreener as primary (more reliable for liquidity)
                         current_price = dex_price
                         liquidity = dex_liquidity
-                        data_source = "📊 DexScreener"
+                        data_source = "⚠️  DexScreener (divergence)"
 
-                    elif jupiter_price:
-                        # Only Jupiter available - use as fallback
-                        current_price = jupiter_price
-                        liquidity = jupiter_liquidity
-                        data_source = "🔄 Jupiter (fallback)"
-                        logger.info(f"Using Jupiter fallback for {position.token_address[:8]}...")
+                elif dex_price:
+                    # Only DexScreener available
+                    current_price = dex_price
+                    liquidity = dex_liquidity
+                    data_source = "📊 DexScreener"
 
-                    else:
-                        # No data from either source
-                        logger.error(f"❌ No price data from either source for {position.token_address[:8]}...")
-                        # Mark position as having failed price update
-                        self.trading_engine.position_manager.mark_position_price_failed(position.token_address)
-                        continue
+                elif jupiter_price:
+                    # Only Jupiter available - use as fallback
+                    current_price = jupiter_price
+                    liquidity = jupiter_liquidity
+                    data_source = "🔄 Jupiter (fallback)"
+                    logger.info(f"Using Jupiter fallback for {position.token_address[:8]}...")
 
-                    # Now validate the chosen price
-                    profile = dex_profile or jupiter_data  # Use whichever is available for symbol/name
-
-                    # 🛡️ ENHANCED PRICE VALIDATION - Reject bad data that would cause 100% loss
-                    # Check 1: None or not a number
-                    if current_price is None:
-                        print(f"  ⚠️  Price is None - SKIPPING UPDATE")
-                        logger.warning(f"Price is None for {position.token_address[:8]}")
-                        continue
-
-                    # Check 2: NaN (not a number)
-                    try:
-                        if not isinstance(current_price, (int, float)) or (isinstance(current_price, float) and (current_price != current_price)):  # NaN check
-                            print(f"  ⚠️  Price is NaN - SKIPPING UPDATE")
-                            logger.warning(f"Price is NaN for {position.token_address[:8]}")
-                            continue
-                    except (TypeError, ValueError):
-                        print(f"  ⚠️  Invalid price type - SKIPPING UPDATE")
-                        logger.warning(f"Invalid price type for {position.token_address[:8]}: {type(current_price)}")
-                        continue
-
-                    # Check 3: Infinity
-                    try:
-                        import math
-                        if math.isinf(current_price):
-                            print(f"  ⚠️  Price is Infinity - SKIPPING UPDATE")
-                            logger.warning(f"Price is Infinity for {position.token_address[:8]}")
-                            continue
-                    except:
-                        pass
-
-                    # Check 4: Zero or negative
-                    if current_price <= 0:
-                        print(f"  ⚠️  Bad price data: ${current_price} - SKIPPING UPDATE")
-                        logger.warning(f"Invalid price ${current_price} for {position.token_address[:8]}")
-                        continue
-
-                    # Check 5: Extremely small (effectively zero, < $0.000000001)
-                    if current_price < 1e-9:
-                        print(f"  ⚠️  Price too small: ${current_price} - SKIPPING UPDATE")
-                        logger.warning(f"Price too small ${current_price} for {position.token_address[:8]}")
-                        continue
-
-                    # Check 6: Suspicious price drops (>80% loss in one update)
-                    try:
-                        price_change_pct = ((current_price - position.entry_price) / position.entry_price) * 100
-                    except (ZeroDivisionError, TypeError):
-                        print(f"  ⚠️  Error calculating price change - SKIPPING UPDATE")
-                        logger.error(f"Error calculating price change for {position.token_address[:8]}")
-                        continue
-
-                    if price_change_pct < -80:
-                        print(f"  🚨 SUSPICIOUS: Price dropped {price_change_pct:.1f}% - SKIPPING (likely bad data)")
-                        logger.error(
-                            f"Rejected suspicious price for {position.token_address[:8]}: "
-                            f"${position.entry_price:.8f} → ${current_price:.8f} ({price_change_pct:.1f}%)"
-                        )
-                        continue
-
-                    # Price validated - safe to use
-                    price_updates[position.token_address] = current_price
-                    liquidity_updates[position.token_address] = liquidity
-
-                    # Calculate current P&L
-                    pnl_percent = ((current_price - position.entry_price) / position.entry_price) * 100
-
-                    # Show price update with data source
-                    symbol = profile.get('symbol', position.token_address[:8])
-                    print(f"  💹 {symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%) [{data_source}]")
-
-                    # Check if close to stop loss or take profit/trailing stop
-                    if position.use_trailing_stop:
-                        # Show trailing stop info
-                        print(f"  🔄 Trailing stop: ${position.trailing_stop_price:.8f} ({position.trailing_stop_percent:.0f}% below peak ${position.highest_price:.8f})")
-                        # Warn if close to trailing stop
-                        if current_price <= position.trailing_stop_price * 1.02:  # Within 2% of trailing stop
-                            print(f"  ⚠️  Warning: Close to trailing stop!")
-                    else:
-                        # Fixed stop loss / take profit
-                        sl_distance = ((current_price - position.stop_loss) / position.stop_loss) * 100
-                        tp_distance = ((position.take_profit - current_price) / current_price) * 100
-
-                        if sl_distance < 5:  # Within 5% of stop loss
-                            print(f"  ⚠️  Warning: Close to stop loss (${position.stop_loss:.8f})")
-                        elif tp_distance < 10:  # Within 10% of take profit
-                            print(f"  🎯 Near take profit target (${position.take_profit:.8f})")
-
-                except Exception as e:
-                    logger.error(f"Error getting price for {position.token_address}: {e}")
-                    print(f"  ❌ Error updating price for {position.token_address[:8]}...")
+                else:
+                    # No data from either source
+                    logger.error(f"❌ No price data from either source for {position.token_address[:8]}...")
                     # Mark position as having failed price update
                     self.trading_engine.position_manager.mark_position_price_failed(position.token_address)
+                    continue
 
-            # Update positions (this triggers stop loss/take profit checks AND rug detection)
-            await self.trading_engine.update_prices(price_updates, liquidity_updates)
-            print()
+                # Now validate the chosen price
+                profile = dex_profile or jupiter_data  # Use whichever is available for symbol/name
+
+                # 🛡️ ENHANCED PRICE VALIDATION - Reject bad data that would cause 100% loss
+                # Check 1: None or not a number
+                if current_price is None:
+                    print(f"  ⚠️  Price is None - SKIPPING UPDATE")
+                    logger.warning(f"Price is None for {position.token_address[:8]}")
+                    continue
+
+                # Check 2: NaN (not a number)
+                try:
+                    if not isinstance(current_price, (int, float)) or (isinstance(current_price, float) and (current_price != current_price)):  # NaN check
+                        print(f"  ⚠️  Price is NaN - SKIPPING UPDATE")
+                        logger.warning(f"Price is NaN for {position.token_address[:8]}")
+                        continue
+                except (TypeError, ValueError):
+                    print(f"  ⚠️  Invalid price type - SKIPPING UPDATE")
+                    logger.warning(f"Invalid price type for {position.token_address[:8]}: {type(current_price)}")
+                    continue
+
+                # Check 3: Infinity
+                try:
+                    import math
+                    if math.isinf(current_price):
+                        print(f"  ⚠️  Price is Infinity - SKIPPING UPDATE")
+                        logger.warning(f"Price is Infinity for {position.token_address[:8]}")
+                        continue
+                except:
+                    pass
+
+                # Check 4: Zero or negative
+                if current_price <= 0:
+                    print(f"  ⚠️  Bad price data: ${current_price} - SKIPPING UPDATE")
+                    logger.warning(f"Invalid price ${current_price} for {position.token_address[:8]}")
+                    continue
+
+                # Check 5: Extremely small (effectively zero, < $0.000000001)
+                if current_price < 1e-9:
+                    print(f"  ⚠️  Price too small: ${current_price} - SKIPPING UPDATE")
+                    logger.warning(f"Price too small ${current_price} for {position.token_address[:8]}")
+                    continue
+
+                # Check 6: Suspicious price drops (>80% loss in one update)
+                try:
+                    price_change_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+                except (ZeroDivisionError, TypeError):
+                    print(f"  ⚠️  Error calculating price change - SKIPPING UPDATE")
+                    logger.error(f"Error calculating price change for {position.token_address[:8]}")
+                    continue
+
+                if price_change_pct < -80:
+                    print(f"  🚨 SUSPICIOUS: Price dropped {price_change_pct:.1f}% - SKIPPING (likely bad data)")
+                    logger.error(
+                        f"Rejected suspicious price for {position.token_address[:8]}: "
+                        f"${position.entry_price:.8f} → ${current_price:.8f} ({price_change_pct:.1f}%)"
+                    )
+                    continue
+
+                # Price validated - safe to use
+                price_updates[position.token_address] = current_price
+                liquidity_updates[position.token_address] = liquidity
+
+                # Calculate current P&L
+                pnl_percent = ((current_price - position.entry_price) / position.entry_price) * 100
+
+                # Show price update with data source
+                symbol = profile.get('symbol', position.token_address[:8])
+                print(f"  💹 {symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%) [{data_source}]")
+
+                # Check if close to stop loss or take profit/trailing stop
+                if position.use_trailing_stop:
+                    # Show trailing stop info
+                    print(f"  🔄 Trailing stop: ${position.trailing_stop_price:.8f} ({position.trailing_stop_percent:.0f}% below peak ${position.highest_price:.8f})")
+                    # Warn if close to trailing stop
+                    if current_price <= position.trailing_stop_price * 1.02:  # Within 2% of trailing stop
+                        print(f"  ⚠️  Warning: Close to trailing stop!")
+                else:
+                    # Fixed stop loss / take profit
+                    sl_distance = ((current_price - position.stop_loss) / position.stop_loss) * 100
+                    tp_distance = ((position.take_profit - current_price) / current_price) * 100
+
+                    if sl_distance < 5:  # Within 5% of stop loss
+                        print(f"  ⚠️  Warning: Close to stop loss (${position.stop_loss:.8f})")
+                    elif tp_distance < 10:  # Within 10% of take profit
+                        print(f"  🎯 Near take profit target (${position.take_profit:.8f})")
+
+            except Exception as e:
+                logger.error(f"Error getting price for {position.token_address}: {e}")
+                print(f"  ❌ Error updating price for {position.token_address[:8]}...")
+                # Mark position as having failed price update
+                self.trading_engine.position_manager.mark_position_price_failed(position.token_address)
+
+        # Update positions (this triggers stop loss/take profit checks AND rug detection)
+        await self.trading_engine.update_prices(price_updates, liquidity_updates)
+        print()
 
     async def main_loop(self):
         """Main trading loop."""
