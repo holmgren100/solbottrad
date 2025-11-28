@@ -177,12 +177,22 @@ class JupiterSwapExecutor:
             int(slippage_percent * 100)  # Convert to basis points
         )
 
-        # Calculate fees
-        fees = await self._calculate_fees(amount_in, use_jito)
-
         if quote:
             output_amount = int(quote.get('outAmount', 0)) / 1e9  # Convert back to token units
             price_impact = float(quote.get('priceImpactPct', 0))
+
+            # Calculate fees using SOL amount (not token amount)
+            # If selling tokens → SOL, use output_amount (SOL received)
+            # If buying tokens with SOL, use amount_in (SOL spent)
+            sol_mint = "So11111111111111111111111111111111111111112"
+            if output_mint == sol_mint:
+                # Selling tokens → SOL, use output SOL amount
+                fee_basis_amount = output_amount
+            else:
+                # Buying tokens with SOL, use input SOL amount
+                fee_basis_amount = amount_in
+
+            fees = await self._calculate_fees(fee_basis_amount, use_jito)
 
             logger.info(
                 f"📄 [PAPER] Simulated swap: {amount_in:.4f} → {output_amount:.4f} "
@@ -329,7 +339,19 @@ class JupiterSwapExecutor:
                 # Calculate actual output and fees
                 output_amount = int(quote.get('outAmount', 0)) / 1e9
                 price_impact = float(quote.get('priceImpactPct', 0))
-                fees = await self._calculate_fees(amount_in, use_jito)
+
+                # For fee calculation, use SOL amount (not token amount)
+                # If selling tokens for SOL, use output_amount (SOL received)
+                # If buying tokens with SOL, use amount_in (SOL spent)
+                sol_mint = "So11111111111111111111111111111111111111112"
+                if output_mint == sol_mint:
+                    # Selling tokens → SOL, use output SOL amount
+                    fee_basis_amount = output_amount
+                else:
+                    # Buying tokens with SOL, use input SOL amount
+                    fee_basis_amount = amount_in
+
+                fees = await self._calculate_fees(fee_basis_amount, use_jito)
 
                 logger.info(
                     f"🎉 Swap confirmed! "
