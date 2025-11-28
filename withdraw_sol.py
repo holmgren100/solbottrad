@@ -10,10 +10,11 @@ import asyncio
 import aiohttp
 from dotenv import load_dotenv
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Add project root to path
+project_root = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, project_root)
 
-from blockchain.wallet_manager import WalletManager
+from src.blockchain.wallet_manager import WalletManager
 
 async def get_balance(rpc_url: str, public_key: str) -> float:
     """Get SOL balance from RPC."""
