@@ -764,7 +764,7 @@ class SolanaTradingBot:
         logger.info("Starting main trading loop...")
 
         scan_interval = 120  # 2 minutes (was working between 20:16 and 03:40)
-        monitor_interval = 60  # 1 minute
+        monitor_interval = 20  # 20 seconds - 3x faster rug detection
 
         last_scan = 0
         last_monitor = 0
