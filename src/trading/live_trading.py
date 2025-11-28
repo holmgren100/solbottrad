@@ -4,9 +4,11 @@ Manages real wallet, executes actual trades, tracks on-chain positions.
 """
 
 import asyncio
+import json
+import os
 from typing import Dict, Optional
 from datetime import datetime
-from .position_manager import PositionManager
+from .position_manager import PositionManager, Position, Trade
 from ..blockchain.jupiter_executor import JupiterSwapExecutor
 from ..monitoring.logger import get_logger
 
@@ -24,7 +26,8 @@ class LiveTradingEngine:
         self,
         jupiter_executor: JupiterSwapExecutor,
         position_manager: Optional[PositionManager] = None,
-        max_open_positions: int = 12
+        max_open_positions: int = 12,
+        state_file: str = "live_trading_state.json"
     ):
         """
         Initialize live trading engine.
@@ -33,9 +36,11 @@ class LiveTradingEngine:
             jupiter_executor: Jupiter executor configured with wallet
             position_manager: Optional position manager (creates new if not provided)
             max_open_positions: Maximum simultaneous positions
+            state_file: Path to state file for position persistence
         """
         self.jupiter_executor = jupiter_executor
         self.position_manager = position_manager or PositionManager(max_open_positions)
+        self.state_file = state_file
 
         # Trading state (tracked separately from wallet balance)
         self.starting_balance = 0.0  # Will be set on first balance check
@@ -45,6 +50,9 @@ class LiveTradingEngine:
             f"✅ LiveTradingEngine initialized - "
             f"Wallet: {jupiter_executor.wallet.get_public_key()[:8]}..."
         )
+
+        # Load previous positions if any
+        self.load_state()
 
     async def get_wallet_balance(self) -> float:
         """
@@ -149,6 +157,9 @@ class LiveTradingEngine:
                 f"Signature: {swap_result.get('signature', 'N/A')[:16]}..."
             )
 
+            # Save state after successful buy
+            self.save_state()
+
             return {
                 'status': 'success',
                 'action': 'buy',
@@ -233,6 +244,9 @@ class LiveTradingEngine:
                 f"P&L: ${trade.pnl:.2f} ({trade.pnl_percent:+.1f}%), "
                 f"Signature: {swap_result.get('signature', 'N/A')[:16]}..."
             )
+
+            # Save state after successful sell
+            self.save_state()
 
             return {
                 'status': 'success',
@@ -345,3 +359,129 @@ class LiveTradingEngine:
             'win_rate': stats['win_rate'],
             'timestamp': datetime.now().isoformat()
         }
+
+    def save_state(self):
+        """Save current positions and state to file for persistence."""
+        try:
+            state = {
+                'starting_balance': self.starting_balance,
+                'total_invested': self.total_invested,
+                'positions': {},
+                'trades': []
+            }
+
+            # Save positions
+            for token_addr, pos in self.position_manager.open_positions.items():
+                state['positions'][token_addr] = {
+                    'token_address': pos.token_address,
+                    'entry_price': pos.entry_price,
+                    'current_price': pos.current_price,
+                    'amount_usd': pos.amount_usd,
+                    'quantity': pos.quantity,
+                    'stop_loss': pos.stop_loss,
+                    'take_profit': pos.take_profit,
+                    'entry_time': pos.entry_time.isoformat(),
+                    'use_trailing_stop': pos.use_trailing_stop,
+                    'trailing_stop_percent': pos.trailing_stop_percent,
+                    'highest_price': pos.highest_price,
+                    'trailing_stop_price': pos.trailing_stop_price,
+                    'last_price_update': pos.last_price_update.isoformat(),
+                    'last_price_change': pos.last_price_change.isoformat(),
+                    'last_known_price': pos.last_known_price,
+                    'current_liquidity': pos.current_liquidity,
+                    'price_update_failures': pos.price_update_failures,
+                    'initial_quantity': pos.initial_quantity,
+                    'milestones_hit': list(pos.milestones_hit)
+                }
+
+            # Save recent trades (last 100)
+            for trade in self.position_manager.closed_trades[-100:]:
+                state['trades'].append({
+                    'token_address': trade.token_address,
+                    'action': trade.action,
+                    'price': trade.price,
+                    'amount_usd': trade.amount_usd,
+                    'quantity': trade.quantity,
+                    'pnl': trade.pnl,
+                    'pnl_percent': trade.pnl_percent,
+                    'timestamp': trade.timestamp.isoformat()
+                })
+
+            # Write to file
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f, indent=2)
+
+            logger.info(
+                f"💾 Live trading state saved: "
+                f"{len(self.position_manager.open_positions)} positions → {self.state_file}"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error saving live trading state: {e}", exc_info=True)
+
+    def load_state(self):
+        """Load positions and state from file."""
+        try:
+            if not os.path.exists(self.state_file):
+                logger.info(f"📝 No previous state file, starting fresh")
+                return
+
+            logger.info(f"📂 Loading live trading state from {self.state_file}...")
+
+            with open(self.state_file, 'r') as f:
+                state = json.load(f)
+
+            # Restore trading state
+            self.starting_balance = state.get('starting_balance', 0.0)
+            self.total_invested = state.get('total_invested', 0.0)
+
+            # Restore positions
+            restored_count = 0
+            for token_addr, pos_data in state.get('positions', {}).items():
+                position = Position(
+                    token_address=pos_data['token_address'],
+                    entry_price=pos_data['entry_price'],
+                    current_price=pos_data['current_price'],
+                    amount_usd=pos_data['amount_usd'],
+                    quantity=pos_data['quantity'],
+                    entry_time=datetime.fromisoformat(pos_data['entry_time']),
+                    stop_loss=pos_data['stop_loss'],
+                    take_profit=pos_data['take_profit'],
+                    use_trailing_stop=pos_data.get('use_trailing_stop', True),
+                    trailing_stop_percent=pos_data.get('trailing_stop_percent', 0.10),
+                    highest_price=pos_data.get('highest_price', pos_data['entry_price']),
+                    trailing_stop_price=pos_data.get('trailing_stop_price', pos_data['stop_loss']),
+                    last_price_update=datetime.fromisoformat(pos_data.get('last_price_update', pos_data['entry_time'])),
+                    last_price_change=datetime.fromisoformat(pos_data.get('last_price_change', pos_data['entry_time'])),
+                    last_known_price=pos_data.get('last_known_price', pos_data['entry_price']),
+                    current_liquidity=pos_data.get('current_liquidity', 0.0),
+                    price_update_failures=pos_data.get('price_update_failures', 0),
+                    initial_quantity=pos_data.get('initial_quantity', pos_data['quantity']),
+                    milestones_hit=set(pos_data.get('milestones_hit', []))
+                )
+                self.position_manager.open_positions[token_addr] = position
+                pnl_pct = position.unrealized_pnl_percent
+                restored_count += 1
+                logger.info(f"   ✓ Restored: {token_addr[:8]}... ({pnl_pct:+.2f}%)")
+
+            # Restore trades
+            for trade_data in state.get('trades', []):
+                trade = Trade(
+                    token_address=trade_data['token_address'],
+                    action=trade_data['action'],
+                    price=trade_data['price'],
+                    amount_usd=trade_data['amount_usd'],
+                    quantity=trade_data['quantity'],
+                    timestamp=datetime.fromisoformat(trade_data['timestamp']),
+                    pnl=trade_data.get('pnl', 0.0),
+                    pnl_percent=trade_data.get('pnl_percent', 0.0)
+                )
+                self.position_manager.closed_trades.append(trade)
+
+            logger.info(
+                f"✅ Loaded {restored_count} positions, "
+                f"{len(state.get('trades', []))} trades from {self.state_file}"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error loading live trading state: {e}", exc_info=True)
