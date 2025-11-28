@@ -15,8 +15,8 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_root)
 
 from src.blockchain.wallet_manager import WalletManager
-from src.data.dexscreener import DexScreenerAPI
-from src.data.jupiter import JupiterAPI
+from src.market.dexscreener_client import DexScreenerClient
+from src.market.jupiter_client import JupiterClient
 from src.trading.position_manager import Position
 from src.trading.live_trading import LiveTradingEngine
 from src.blockchain.jupiter_executor import JupiterSwapExecutor
@@ -83,8 +83,8 @@ async def main():
     print()
 
     # Initialize APIs
-    dex_api = DexScreenerAPI()
-    jupiter_api = JupiterAPI()
+    dex_api = DexScreenerClient()
+    jupiter_api = JupiterClient()
 
     # Initialize trading engine to access position manager
     jupiter_executor = JupiterSwapExecutor(rpc_url, use_jito=False, paper_trading=False)
