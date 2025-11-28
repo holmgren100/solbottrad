@@ -417,7 +417,8 @@ class SolanaTradingBot:
         """
         try:
             # Wrap trade execution with timeout
-            async with asyncio.timeout(30):  # 30 second timeout for single trade
+            # Allow 90s for full confirmation process (up to 60s for confirmation + buffer)
+            async with asyncio.timeout(90):
                 return await self._execute_trade_impl(decision)
         except asyncio.TimeoutError:
             logger.error(f"Trade execution timed out for {decision['symbol']}")

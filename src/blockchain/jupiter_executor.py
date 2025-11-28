@@ -586,7 +586,7 @@ class JupiterSwapExecutor:
             tx_base64 = base64.b64encode(signed_tx).decode('utf-8')
 
             # Create RPC request payload
-            # Skip preflight to avoid blockhash expiration issues
+            # Enable preflight to catch issues before sending
             payload = {
                 'jsonrpc': '2.0',
                 'id': 1,
@@ -594,10 +594,10 @@ class JupiterSwapExecutor:
                 'params': [
                     tx_base64,
                     {
-                        'skipPreflight': True,  # Skip simulation to avoid blockhash issues
+                        'skipPreflight': False,  # Run simulation to catch issues
                         'maxRetries': 3,
                         'encoding': 'base64',
-                        'preflightCommitment': 'confirmed'
+                        'preflightCommitment': 'processed'  # Use 'processed' for faster preflight
                     }
                 ]
             }
@@ -712,16 +712,16 @@ class JupiterSwapExecutor:
     async def _wait_for_confirmation(
         self,
         signature: str,
-        max_retries: int = 30,
-        retry_delay: float = 2.0
+        max_retries: int = 40,
+        retry_delay: float = 1.0
     ) -> bool:
         """
         Wait for transaction confirmation using direct aiohttp RPC calls.
 
         Args:
             signature: Transaction signature to track
-            max_retries: Maximum number of confirmation checks
-            retry_delay: Seconds between checks
+            max_retries: Maximum number of confirmation checks (default 40)
+            retry_delay: Seconds between checks (default 1.0s)
 
         Returns:
             True if confirmed, False if timeout
