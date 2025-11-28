@@ -325,10 +325,17 @@ class LiveTradingEngine:
         # Calculate P&L (would need accurate starting balance)
         total_pnl = stats['total_realized_pnl'] + stats['total_unrealized_pnl']
 
+        # Calculate total return percentage
+        total_return_percent = 0.0
+        if self.starting_balance > 0:
+            total_return_percent = ((portfolio_value - self.starting_balance) / self.starting_balance) * 100
+
         return {
             'portfolio_value': portfolio_value,
-            'total_invested': self.total_invested,
+            'current_capital': portfolio_value - self.total_invested,  # Free cash
+            'invested_capital': self.total_invested,  # In positions
             'total_pnl': total_pnl,
+            'total_return_percent': total_return_percent,
             'realized_pnl': stats['total_realized_pnl'],
             'unrealized_pnl': stats['total_unrealized_pnl'],
             'open_positions': stats['open_positions'],
