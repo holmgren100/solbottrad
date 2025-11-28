@@ -66,7 +66,7 @@ async def main():
 
     # Load wallet
     wallet = WalletManager(encryption_key)
-    wallet.load_encrypted_key(encrypted_key)
+    wallet.load_wallet_from_encrypted_key(encrypted_key)
     wallet_pubkey = str(wallet.get_public_key())
 
     print(f"👛 Wallet: {wallet_pubkey[:8]}...")
