@@ -178,7 +178,7 @@ class JupiterSwapExecutor:
         )
 
         # Calculate fees
-        fees = self._calculate_fees(amount_in, use_jito)
+        fees = await self._calculate_fees(amount_in, use_jito)
 
         if quote:
             output_amount = int(quote.get('outAmount', 0)) / 1e9  # Convert back to token units
@@ -329,7 +329,7 @@ class JupiterSwapExecutor:
                 # Calculate actual output and fees
                 output_amount = int(quote.get('outAmount', 0)) / 1e9
                 price_impact = float(quote.get('priceImpactPct', 0))
-                fees = self._calculate_fees(amount_in, use_jito)
+                fees = await self._calculate_fees(amount_in, use_jito)
 
                 logger.info(
                     f"🎉 Swap confirmed! "
@@ -367,17 +367,43 @@ class JupiterSwapExecutor:
                 'timestamp': datetime.now().isoformat()
             }
 
-    def _calculate_fees(self, amount_usd: float, use_jito: bool) -> Dict:
+    async def _get_sol_price(self) -> float:
+        """
+        Get current SOL price from CoinGecko API.
+
+        Returns:
+            Current SOL price in USD, defaults to 200.0 if API fails
+        """
+        try:
+            url = "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        price = data['solana']['usd']
+                        logger.debug(f"💵 Current SOL price: ${price:.2f}")
+                        return price
+            logger.warning("Failed to fetch SOL price, using fallback")
+            return 200.0
+        except Exception as e:
+            logger.warning(f"Error fetching SOL price: {e}, using fallback")
+            return 200.0
+
+    async def _calculate_fees(self, amount_sol: float, use_jito: bool) -> Dict:
         """
         Calculate estimated fees for a swap.
 
         Args:
-            amount_usd: Trade amount in USD
+            amount_sol: Trade amount in SOL
             use_jito: Whether Jito bundle is used
 
         Returns:
             Fee breakdown dictionary
         """
+        # Get current SOL price to convert to USD
+        sol_price = await self._get_sol_price()
+        amount_usd = amount_sol * sol_price
+
         # Jupiter/DEX fee (typically 0.25%)
         dex_fee_pct = 0.0025
         dex_fee_usd = amount_usd * dex_fee_pct
@@ -392,8 +418,10 @@ class JupiterSwapExecutor:
 
             total_usd = dex_fee_usd + network_fee_usd + jito_tip_usd
         else:
-            # Standard priority fee
-            priority_fee_usd = 0.50  # Higher without Jito
+            # Dynamic priority fee: 0.5% of trade value
+            # Min: $0.01 (for very small trades)
+            # Max: $2.00 (cap for large trades)
+            priority_fee_usd = max(0.01, min(2.00, amount_usd * 0.005))
             jito_tip_usd = 0.0
 
             total_usd = dex_fee_usd + network_fee_usd + priority_fee_usd
