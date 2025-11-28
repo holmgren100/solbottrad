@@ -59,12 +59,42 @@ class LiveTradingEngine:
         Get current SOL balance from wallet.
 
         Returns:
-            SOL balance
+            SOL balance in SOL (not lamports)
         """
-        # TODO: Implement RPC call to get wallet balance
-        # For now, return placeholder
-        logger.warning("⚠️  Wallet balance check not yet implemented - using placeholder")
-        return 1.0  # Placeholder
+        try:
+            import aiohttp
+
+            # Get wallet public key
+            wallet_pubkey = str(self.jupiter_executor.wallet.get_public_key())
+
+            # Make RPC call to get balance
+            payload = {
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'getBalance',
+                'params': [wallet_pubkey]
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.jupiter_executor.rpc_url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        if 'result' in result and 'value' in result['result']:
+                            balance_lamports = result['result']['value']
+                            balance_sol = balance_lamports / 1e9  # Convert to SOL
+                            logger.debug(f"💰 Wallet balance: {balance_sol:.6f} SOL")
+                            return balance_sol
+
+            logger.error("Failed to get wallet balance from RPC")
+            return 0.0
+
+        except Exception as e:
+            logger.error(f"Error getting wallet balance: {e}")
+            return 0.0
 
     async def execute_buy(
         self,
