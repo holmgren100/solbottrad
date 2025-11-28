@@ -569,7 +569,7 @@ class JupiterSwapExecutor:
                 'jsonrpc': '2.0',
                 'id': 1,
                 'method': 'getLatestBlockhash',
-                'params': [{'commitment': 'finalized'}]
+                'params': [{'commitment': 'confirmed'}]  # Changed from 'finalized' for +13s validity
             }
 
             async with aiohttp.ClientSession() as session:
@@ -620,6 +620,7 @@ class JupiterSwapExecutor:
                     tx_base64,
                     {
                         'skipPreflight': True,  # Skip simulation - network will validate
+                        'preflightCommitment': 'confirmed',  # Must match blockhash commitment level
                         'maxRetries': 5,  # Increased retries for network-level validation
                         'encoding': 'base64'
                     }
