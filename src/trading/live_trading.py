@@ -4,6 +4,7 @@ Manages real wallet, executes actual trades, tracks on-chain positions.
 """
 
 import asyncio
+import os
 from typing import Dict, Optional
 from datetime import datetime
 from .position_manager import PositionManager
@@ -41,10 +42,34 @@ class LiveTradingEngine:
         self.starting_balance = 0.0  # Will be set on first balance check
         self.total_invested = 0.0  # Currently invested in open positions
 
+        # Partial profit taking settings (from environment)
+        self.partial_profit_enabled = os.getenv('PARTIAL_PROFIT_ENABLED', 'true').lower() == 'true'
+        self.profit_milestone_100 = float(os.getenv('PROFIT_MILESTONE_100', '15'))
+        self.profit_milestone_200 = float(os.getenv('PROFIT_MILESTONE_200', '20'))
+        self.profit_milestone_300 = float(os.getenv('PROFIT_MILESTONE_300', '15'))
+        self.profit_milestone_400 = float(os.getenv('PROFIT_MILESTONE_400', '10'))
+        self.profit_milestone_500 = float(os.getenv('PROFIT_MILESTONE_500', '10'))
+        self.profit_milestone_600 = float(os.getenv('PROFIT_MILESTONE_600', '10'))
+        self.profit_milestone_700 = float(os.getenv('PROFIT_MILESTONE_700', '10'))
+
         logger.info(
             f"✅ LiveTradingEngine initialized - "
             f"Wallet: {jupiter_executor.wallet.get_public_key()[:8]}..."
         )
+
+        if self.partial_profit_enabled:
+            logger.info(
+                f"💰 Partial profit taking ENABLED: "
+                f"+100%={self.profit_milestone_100:.0f}%, "
+                f"+200%={self.profit_milestone_200:.0f}%, "
+                f"+300%={self.profit_milestone_300:.0f}%, "
+                f"+400%={self.profit_milestone_400:.0f}%, "
+                f"+500%={self.profit_milestone_500:.0f}%, "
+                f"+600%={self.profit_milestone_600:.0f}%, "
+                f"+700%={self.profit_milestone_700:.0f}%"
+            )
+        else:
+            logger.info("💰 Partial profit taking DISABLED")
 
     async def get_wallet_balance(self) -> float:
         """
@@ -172,7 +197,8 @@ class LiveTradingEngine:
         self,
         token_address: str,
         price: float,
-        reason: str = 'manual'
+        reason: str = 'manual',
+        amount_tokens: Optional[float] = None
     ) -> Dict:
         """
         Execute a real sell order on-chain.
@@ -181,6 +207,7 @@ class LiveTradingEngine:
             token_address: Token to sell
             price: Current token price
             reason: Reason for selling
+            amount_tokens: Optional - amount of tokens to sell (if None, sells full position)
 
         Returns:
             Execution result dictionary
@@ -195,12 +222,25 @@ class LiveTradingEngine:
                     'reason': 'no_position'
                 }
 
-            logger.info(f"🔴 [LIVE] SELL: {position.quantity:.4f} {token_address[:8]}... @ ${price:.8f} ({reason})")
+            # Determine sell amount
+            if amount_tokens is None:
+                # Full sell
+                sell_quantity = position.quantity
+                is_partial = False
+            else:
+                # Partial sell
+                sell_quantity = min(amount_tokens, position.quantity)
+                is_partial = (sell_quantity < position.quantity)
+
+            logger.info(
+                f"🔴 [LIVE] {'PARTIAL ' if is_partial else ''}SELL: "
+                f"{sell_quantity:.4f} {token_address[:8]}... @ ${price:.8f} ({reason})"
+            )
 
             # Execute real swap via Jupiter
             swap_result = await self.jupiter_executor.sell_token(
                 token_mint=token_address,
-                amount_tokens=position.quantity,
+                amount_tokens=sell_quantity,
                 slippage_percent=5.0
             )
 
@@ -211,22 +251,56 @@ class LiveTradingEngine:
                     'reason': swap_result.get('error', 'swap_failed')
                 }
 
-            # Close position
-            trade = self.position_manager.close_position(
-                token_address=token_address,
-                exit_price=price,
-                reason=reason
-            )
+            # Calculate profit on this sell
+            cost_basis = position.entry_price * sell_quantity
+            sell_value = price * sell_quantity
+            pnl = sell_value - cost_basis
+            pnl_percent = ((price - position.entry_price) / position.entry_price) * 100 if position.entry_price > 0 else 0
 
-            if not trade:
-                logger.error(f"❌ Failed to close position for {token_address[:8]}...")
+            if is_partial:
+                # Partial sell - update position
+                position.quantity -= sell_quantity
+                position.amount_usd = position.quantity * position.entry_price
+                self.total_invested -= cost_basis
+
+                logger.info(
+                    f"✅ [LIVE] PARTIAL SELL CONFIRMED: {sell_quantity:.4f} tokens → {swap_result.get('output_amount', 0):.6f} SOL, "
+                    f"P&L: ${pnl:.2f} ({pnl_percent:+.1f}%), "
+                    f"Remaining: {position.quantity:.4f} tokens, "
+                    f"Signature: {swap_result.get('signature', 'N/A')[:16]}..."
+                )
+
                 return {
-                    'status': 'failed',
-                    'reason': 'position_close_failed'
+                    'status': 'success',
+                    'action': 'partial_sell',
+                    'token_address': token_address,
+                    'price': price,
+                    'quantity': sell_quantity,
+                    'pnl': pnl,
+                    'pnl_percent': pnl_percent,
+                    'signature': swap_result.get('signature'),
+                    'fees': swap_result.get('fees', {}),
+                    'reason': reason,
+                    'remaining_quantity': position.quantity,
+                    'timestamp': datetime.now().isoformat()
                 }
+            else:
+                # Full sell - close position
+                trade = self.position_manager.close_position(
+                    token_address=token_address,
+                    exit_price=price,
+                    reason=reason
+                )
 
-            # Update tracking
-            self.total_invested -= position.amount_usd
+                if not trade:
+                    logger.error(f"❌ Failed to close position for {token_address[:8]}...")
+                    return {
+                        'status': 'failed',
+                        'reason': 'position_close_failed'
+                    }
+
+                # Update tracking
+                self.total_invested -= position.amount_usd
 
             logger.info(
                 f"✅ [LIVE] SELL CONFIRMED: {position.quantity:.4f} tokens → {swap_result.get('output_amount', 0):.6f} SOL, "
@@ -295,6 +369,57 @@ class LiveTradingEngine:
                     f"Liquidity: ${position.current_liquidity:.0f}"
                 )
                 await self.execute_sell(token_address, exit_price, reason='low_liquidity')
+
+        # Check for profit milestones (partial profit-taking)
+        if self.partial_profit_enabled:
+            for token_address in list(self.position_manager.open_positions.keys()):
+                position = self.position_manager.get_position(token_address)
+                if not position or position.initial_quantity == 0:
+                    continue
+
+                # Check if we've hit a new profit milestone
+                milestone = position.check_profit_milestone()
+                if milestone:
+                    # Map milestone to sell percentage
+                    sell_pct = 0
+                    if milestone == 100:
+                        sell_pct = self.profit_milestone_100
+                    elif milestone == 200:
+                        sell_pct = self.profit_milestone_200
+                    elif milestone == 300:
+                        sell_pct = self.profit_milestone_300
+                    elif milestone == 400:
+                        sell_pct = self.profit_milestone_400
+                    elif milestone == 500:
+                        sell_pct = self.profit_milestone_500
+                    elif milestone == 600:
+                        sell_pct = self.profit_milestone_600
+                    elif milestone == 700:
+                        sell_pct = self.profit_milestone_700
+
+                    if sell_pct > 0:
+                        # Calculate quantity to sell (percentage of INITIAL quantity)
+                        sell_quantity = (sell_pct / 100) * position.initial_quantity
+                        sell_quantity = min(sell_quantity, position.quantity)  # Don't sell more than we have
+
+                        if sell_quantity > 0:
+                            sell_value = sell_quantity * position.current_price
+
+                            logger.info(
+                                f"💰 [LIVE] PROFIT MILESTONE +{milestone}%: {token_address[:8]}... "
+                                f"Selling {sell_pct:.0f}% ({sell_quantity:.4f} tokens) = ${sell_value:.2f}"
+                            )
+
+                            # Execute partial sell
+                            await self.execute_sell(
+                                token_address=token_address,
+                                price=position.current_price,
+                                reason=f'milestone_{milestone}',
+                                amount_tokens=sell_quantity
+                            )
+
+                            # Mark milestone as hit
+                            position.milestones_hit.add(milestone)
 
         # Check for stop loss/take profit/trailing stop triggers
         for token_address in list(self.position_manager.open_positions.keys()):
