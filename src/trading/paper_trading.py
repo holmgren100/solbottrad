@@ -74,6 +74,11 @@ class PaperTradingEngine:
         self.min_24h_volume = float(os.getenv('MIN_24H_VOLUME', '50000'))             # $50k daily volume
         self.max_position_vs_liquidity = float(os.getenv('MAX_POSITION_VS_LIQUIDITY', '0.005'))  # Max 0.5% of pool
 
+        # Volume fallback (when liquidity data unavailable but volume is high)
+        self.allow_volume_fallback = os.getenv('ALLOW_VOLUME_FALLBACK', 'true').lower() == 'true'
+        self.min_volume_for_fallback = float(os.getenv('MIN_VOLUME_FOR_FALLBACK', '50000'))  # $50k volume
+        self.volume_fallback_position_multiplier = float(os.getenv('VOLUME_FALLBACK_POSITION_MULTIPLIER', '0.5'))  # 50% position
+
         # Track rejected trades for analysis
         self.rejected_trades = {
             'low_entry_liquidity': 0,
@@ -81,6 +86,7 @@ class PaperTradingEngine:
             'position_too_large': 0,
             'low_exit_liquidity': 0
         }
+        self.volume_fallback_trades = 0  # Track risky volume-based trades
 
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
@@ -167,6 +173,18 @@ class PaperTradingEngine:
             f"   Min 24h Volume: ${self.min_24h_volume:,.0f}\n"
             f"   Max Position vs Liquidity: {self.max_position_vs_liquidity*100:.1f}%"
         )
+
+        # Log volume fallback settings
+        if self.allow_volume_fallback:
+            logger.info(
+                f"⚠️  VOLUME FALLBACK ENABLED (risky but allows data collection):\n"
+                f"   Min Volume for Fallback: ${self.min_volume_for_fallback:,.0f}\n"
+                f"   Position Size Multiplier: {self.volume_fallback_position_multiplier*100:.0f}%\n"
+                f"   → If liquidity data missing but volume >${self.min_volume_for_fallback:,.0f}, "
+                f"trade with {self.volume_fallback_position_multiplier*100:.0f}% position size"
+            )
+        else:
+            logger.info("🔒 Volume fallback DISABLED (strict liquidity requirement)")
 
     def store_trade_context(self, token_address: str, analysis_data: Dict):
         """
@@ -365,17 +383,33 @@ class PaperTradingEngine:
 
             # Check minimum entry liquidity
             if liquidity < self.min_entry_liquidity:
-                self.rejected_trades['low_entry_liquidity'] += 1
-                logger.warning(
-                    f"❌ REJECTED {token_address[:8]}... - Low liquidity: "
-                    f"${liquidity:,.0f} < ${self.min_entry_liquidity:,.0f}"
-                )
-                return {
-                    'status': 'failed',
-                    'reason': 'low_entry_liquidity',
-                    'liquidity': liquidity,
-                    'min_required': self.min_entry_liquidity
-                }
+                # VOLUME FALLBACK: If liquidity data missing but high volume, allow with reduced position
+                if self.allow_volume_fallback and volume_24h >= self.min_volume_for_fallback:
+                    # Reduce position size for this risky trade (50% by default)
+                    original_amount = amount_usd
+                    amount_usd = amount_usd * self.volume_fallback_position_multiplier
+                    self.volume_fallback_trades += 1
+                    logger.warning(
+                        f"⚠️  VOLUME FALLBACK {token_address[:8]}... - No liquidity data but HIGH volume!\n"
+                        f"   Liquidity: ${liquidity:,.0f} (missing/low)\n"
+                        f"   Volume 24h: ${volume_24h:,.0f} ✅\n"
+                        f"   Position reduced: ${original_amount:.2f} → ${amount_usd:.2f} "
+                        f"({self.volume_fallback_position_multiplier*100:.0f}% - SAFER)\n"
+                        f"   ⚠️  RISKY: Monitoring will exit if liquidity actually dried up"
+                    )
+                else:
+                    # No volume fallback or volume too low - reject trade
+                    self.rejected_trades['low_entry_liquidity'] += 1
+                    logger.warning(
+                        f"❌ REJECTED {token_address[:8]}... - Low liquidity: "
+                        f"${liquidity:,.0f} < ${self.min_entry_liquidity:,.0f}"
+                    )
+                    return {
+                        'status': 'failed',
+                        'reason': 'low_entry_liquidity',
+                        'liquidity': liquidity,
+                        'min_required': self.min_entry_liquidity
+                    }
 
             # Check minimum 24h volume
             if volume_24h < self.min_24h_volume:
