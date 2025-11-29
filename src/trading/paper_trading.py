@@ -358,8 +358,10 @@ class PaperTradingEngine:
 
         # REALISTIC LIQUIDITY & VOLUME FILTERS (prevents 29% of unsellable trades)
         if analysis_data:
-            liquidity = analysis_data.get('liquidity_usd', 0)
-            volume_24h = analysis_data.get('volume_24h', 0)
+            # Extract liquidity/volume from nested profile (analysis_data contains the full analysis)
+            profile = analysis_data.get('profile', {})
+            liquidity = profile.get('liquidity_usd', 0)
+            volume_24h = profile.get('volume_24h', 0)
 
             # Check minimum entry liquidity
             if liquidity < self.min_entry_liquidity:
