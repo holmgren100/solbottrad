@@ -829,6 +829,10 @@ class PaperTradingEngine:
                     initial_quantity=pos_data.get('initial_quantity', pos_data['quantity']),  # Partial profit tracking
                     milestones_hit=set(pos_data.get('milestones_hit', []))  # Convert list back to set
                 )
+
+                # CRITICAL: Recalculate P&L after restoration (update_price wasn't called)
+                position.update_price(position.current_price, position.current_liquidity)
+
                 self.position_manager.open_positions[token_addr] = position
                 pnl_pct = position.unrealized_pnl_percent
                 mode = "🔄 trailing" if position.use_trailing_stop else "🎯 fixed TP"
