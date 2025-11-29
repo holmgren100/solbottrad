@@ -67,6 +67,21 @@ class PaperTradingEngine:
         self.total_fees_paid = 0.0
         self.total_slippage_cost = 0.0
 
+        # Realistic liquidity and volume filters (based on 530-trade analysis)
+        # Analysis showed 29.4% trades had ZERO liquidity - this prevents those
+        self.min_entry_liquidity = float(os.getenv('MIN_ENTRY_LIQUIDITY', '100000'))  # $100k minimum at entry
+        self.min_exit_liquidity = float(os.getenv('MIN_EXIT_LIQUIDITY', '50000'))     # $50k minimum at exit
+        self.min_24h_volume = float(os.getenv('MIN_24H_VOLUME', '50000'))             # $50k daily volume
+        self.max_position_vs_liquidity = float(os.getenv('MAX_POSITION_VS_LIQUIDITY', '0.005'))  # Max 0.5% of pool
+
+        # Track rejected trades for analysis
+        self.rejected_trades = {
+            'low_entry_liquidity': 0,
+            'low_volume': 0,
+            'position_too_large': 0,
+            'low_exit_liquidity': 0
+        }
+
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
         # Read max positions from .env (was hardcoded to 5)
@@ -143,6 +158,15 @@ class PaperTradingEngine:
             )
         else:
             logger.info("💸 Fee/Slippage simulation DISABLED (unrealistic profits!)")
+
+        # Log realistic liquidity/volume filters
+        logger.info(
+            f"🔒 REALISTIC FILTERS ENABLED (prevents 29% of unsellable trades):\n"
+            f"   Min Entry Liquidity: ${self.min_entry_liquidity:,.0f}\n"
+            f"   Min Exit Liquidity: ${self.min_exit_liquidity:,.0f}\n"
+            f"   Min 24h Volume: ${self.min_24h_volume:,.0f}\n"
+            f"   Max Position vs Liquidity: {self.max_position_vs_liquidity*100:.1f}%"
+        )
 
     def store_trade_context(self, token_address: str, analysis_data: Dict):
         """
@@ -321,6 +345,7 @@ class PaperTradingEngine:
             take_profit: Take profit price (ignored if using trailing stop)
             use_trailing_stop: Whether to use trailing stop (reads from .env if None)
             trailing_stop_percent: Percent to trail below peak (reads from .env if None)
+            analysis_data: Token analysis data (should include liquidity_usd, volume_24h)
 
         Returns:
             Execution result dictionary
@@ -330,6 +355,57 @@ class PaperTradingEngine:
             use_trailing_stop = self.use_trailing_stop
         if trailing_stop_percent is None:
             trailing_stop_percent = self.trailing_stop_percent
+
+        # REALISTIC LIQUIDITY & VOLUME FILTERS (prevents 29% of unsellable trades)
+        if analysis_data:
+            liquidity = analysis_data.get('liquidity_usd', 0)
+            volume_24h = analysis_data.get('volume_24h', 0)
+
+            # Check minimum entry liquidity
+            if liquidity < self.min_entry_liquidity:
+                self.rejected_trades['low_entry_liquidity'] += 1
+                logger.warning(
+                    f"❌ REJECTED {token_address[:8]}... - Low liquidity: "
+                    f"${liquidity:,.0f} < ${self.min_entry_liquidity:,.0f}"
+                )
+                return {
+                    'status': 'failed',
+                    'reason': 'low_entry_liquidity',
+                    'liquidity': liquidity,
+                    'min_required': self.min_entry_liquidity
+                }
+
+            # Check minimum 24h volume
+            if volume_24h < self.min_24h_volume:
+                self.rejected_trades['low_volume'] += 1
+                logger.warning(
+                    f"❌ REJECTED {token_address[:8]}... - Low volume: "
+                    f"${volume_24h:,.0f} < ${self.min_24h_volume:,.0f}"
+                )
+                return {
+                    'status': 'failed',
+                    'reason': 'low_volume',
+                    'volume_24h': volume_24h,
+                    'min_required': self.min_24h_volume
+                }
+
+            # Check position size vs liquidity (prevent price impact >0.5%)
+            if amount_usd > liquidity * self.max_position_vs_liquidity:
+                self.rejected_trades['position_too_large'] += 1
+                max_safe_position = liquidity * self.max_position_vs_liquidity
+                logger.warning(
+                    f"❌ REJECTED {token_address[:8]}... - Position too large: "
+                    f"${amount_usd:.0f} > ${max_safe_position:.0f} "
+                    f"({self.max_position_vs_liquidity*100:.1f}% of ${liquidity:,.0f} liquidity)"
+                )
+                return {
+                    'status': 'failed',
+                    'reason': 'position_too_large',
+                    'amount_usd': amount_usd,
+                    'max_safe_position': max_safe_position,
+                    'liquidity': liquidity
+                }
+
         # Check if we have enough capital
         if amount_usd > self.current_capital:
             logger.warning(
@@ -427,7 +503,9 @@ class PaperTradingEngine:
         self,
         token_address: str,
         price: float,
-        reason: str = 'manual'
+        reason: str = 'manual',
+        current_liquidity: float = 0.0,
+        volume_24h: float = 0.0
     ) -> Dict:
         """
         Execute a simulated sell order.
@@ -436,6 +514,8 @@ class PaperTradingEngine:
             token_address: Token contract address
             price: Current token price
             reason: Reason for selling
+            current_liquidity: Current liquidity in USD (for realistic exit checks)
+            volume_24h: Current 24h volume in USD (for realistic exit checks)
 
         Returns:
             Execution result dictionary
@@ -448,6 +528,36 @@ class PaperTradingEngine:
                 'status': 'failed',
                 'reason': 'no_position'
             }
+
+        # REALISTIC EXIT LIQUIDITY CHECK (prevents selling tokens with zero liquidity)
+        # Analysis showed 29.4% of trades had ZERO liquidity at exit
+        if current_liquidity > 0 and current_liquidity < self.min_exit_liquidity:
+            self.rejected_trades['low_exit_liquidity'] += 1
+            position_value = position.quantity * price
+            logger.error(
+                f"🚫 CANNOT SELL {token_address[:8]}... - Liquidity too low!\n"
+                f"   Exit Liquidity: ${current_liquidity:,.0f} < ${self.min_exit_liquidity:,.0f}\n"
+                f"   Position Value: ${position_value:,.2f}\n"
+                f"   In live trading, you'd be STUCK with this token!"
+            )
+            return {
+                'status': 'failed',
+                'reason': 'insufficient_exit_liquidity',
+                'current_liquidity': current_liquidity,
+                'min_required': self.min_exit_liquidity,
+                'position_value': position_value
+            }
+
+        # Warn if position is large relative to liquidity (high price impact expected)
+        if current_liquidity > 0:
+            position_value = position.quantity * price
+            position_vs_liquidity = position_value / current_liquidity
+            if position_vs_liquidity > 0.05:  # >5% of liquidity
+                logger.warning(
+                    f"⚠️  HIGH PRICE IMPACT: {token_address[:8]}... position is "
+                    f"{position_vs_liquidity*100:.1f}% of liquidity "
+                    f"(${position_value:.0f} vs ${current_liquidity:,.0f})"
+                )
 
         # Apply sell fees and slippage if enabled
         actual_exit_price = price
