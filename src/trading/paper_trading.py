@@ -56,6 +56,17 @@ class PaperTradingEngine:
         self.profit_milestone_600 = float(os.getenv('PROFIT_MILESTONE_600', '10'))
         self.profit_milestone_700 = float(os.getenv('PROFIT_MILESTONE_700', '10'))
 
+        # Fee and slippage simulation (realistic trading costs)
+        self.simulate_fees = os.getenv('SIMULATE_FEES', 'true').lower() == 'true'
+        self.buy_fee_percent = float(os.getenv('BUY_FEE_PERCENT', '0.3'))      # Jupiter + network fees
+        self.sell_fee_percent = float(os.getenv('SELL_FEE_PERCENT', '0.3'))    # Jupiter + network fees
+        self.buy_slippage_percent = float(os.getenv('BUY_SLIPPAGE_PERCENT', '0.5'))    # Entry slippage
+        self.sell_slippage_percent = float(os.getenv('SELL_SLIPPAGE_PERCENT', '1.0'))  # Exit slippage (worse)
+
+        # Track total fees paid for performance analysis
+        self.total_fees_paid = 0.0
+        self.total_slippage_cost = 0.0
+
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
         # Read max positions from .env (was hardcoded to 5)
@@ -120,6 +131,18 @@ class PaperTradingEngine:
             )
         else:
             logger.info("💰 Partial profit taking DISABLED")
+
+        # Log fee/slippage simulation settings
+        if self.simulate_fees:
+            total_round_trip_cost = self.buy_fee_percent + self.sell_fee_percent + self.buy_slippage_percent + self.sell_slippage_percent
+            logger.info(
+                f"💸 Fee/Slippage simulation ENABLED: "
+                f"Buy: {self.buy_fee_percent}% fee + {self.buy_slippage_percent}% slippage, "
+                f"Sell: {self.sell_fee_percent}% fee + {self.sell_slippage_percent}% slippage "
+                f"(~{total_round_trip_cost:.1f}% total cost per round trip)"
+            )
+        else:
+            logger.info("💸 Fee/Slippage simulation DISABLED (unrealistic profits!)")
 
     def store_trade_context(self, token_address: str, analysis_data: Dict):
         """
@@ -330,11 +353,35 @@ class PaperTradingEngine:
         if analysis_data:
             self.store_trade_context(token_address, analysis_data)
 
-        # Open position
+        # Apply buy fees and slippage if enabled
+        actual_entry_price = price
+        buy_fee = 0.0
+        buy_slippage_cost = 0.0
+
+        if self.simulate_fees:
+            # Fee reduces the amount we get (deducted from position size)
+            buy_fee = amount_usd * (self.buy_fee_percent / 100)
+
+            # Slippage means we pay a worse price
+            slippage_multiplier = 1 + (self.buy_slippage_percent / 100)
+            actual_entry_price = price * slippage_multiplier
+            buy_slippage_cost = amount_usd * (self.buy_slippage_percent / 100)
+
+            # Track total costs
+            self.total_fees_paid += buy_fee
+            self.total_slippage_cost += buy_slippage_cost
+
+            logger.debug(
+                f"💸 Buy costs: Fee ${buy_fee:.2f} ({self.buy_fee_percent}%), "
+                f"Slippage ${buy_slippage_cost:.2f} ({self.buy_slippage_percent}%), "
+                f"Entry ${price:.8f} → ${actual_entry_price:.8f}"
+            )
+
+        # Open position with actual entry price (after slippage)
         position = self.position_manager.open_position(
             token_address=token_address,
-            entry_price=price,
-            amount_usd=amount_usd,
+            entry_price=actual_entry_price,
+            amount_usd=amount_usd - buy_fee,  # Reduce position by fee
             stop_loss=stop_loss,
             take_profit=take_profit,
             use_trailing_stop=use_trailing_stop,
@@ -347,7 +394,7 @@ class PaperTradingEngine:
                 'reason': 'position_creation_failed'
             }
 
-        # Deduct from capital
+        # Deduct from capital (full amount including fees)
         self.current_capital -= amount_usd
         self.total_invested += amount_usd
 
@@ -402,6 +449,31 @@ class PaperTradingEngine:
                 'reason': 'no_position'
             }
 
+        # Apply sell fees and slippage if enabled
+        actual_exit_price = price
+        sell_fee = 0.0
+        sell_slippage_cost = 0.0
+        gross_proceeds = position.quantity * price
+
+        if self.simulate_fees:
+            # Slippage means we get a worse price
+            slippage_multiplier = 1 - (self.sell_slippage_percent / 100)
+            actual_exit_price = price * slippage_multiplier
+            sell_slippage_cost = gross_proceeds * (self.sell_slippage_percent / 100)
+
+            # Fee is deducted from proceeds
+            sell_fee = gross_proceeds * (self.sell_fee_percent / 100)
+
+            # Track total costs
+            self.total_fees_paid += sell_fee
+            self.total_slippage_cost += sell_slippage_cost
+
+            logger.debug(
+                f"💸 Sell costs: Fee ${sell_fee:.2f} ({self.sell_fee_percent}%), "
+                f"Slippage ${sell_slippage_cost:.2f} ({self.sell_slippage_percent}%), "
+                f"Exit ${price:.8f} → ${actual_exit_price:.8f}"
+            )
+
         # Record position state before closing (for ML)
         position_snapshot = Position(
             token_address=position.token_address,
@@ -424,10 +496,10 @@ class PaperTradingEngine:
             symbol=position.symbol
         )
 
-        # Close position
+        # Close position with actual exit price (after slippage)
         trade = self.position_manager.close_position(
             token_address=token_address,
-            exit_price=price,
+            exit_price=actual_exit_price,
             reason=reason
         )
 
@@ -440,15 +512,15 @@ class PaperTradingEngine:
         # Record trade for ML training
         self._record_ml_trade(trade, position_snapshot, reason)
 
-        # Add proceeds to capital
-        proceeds = trade.amount_usd
+        # Add proceeds to capital (after fees)
+        net_proceeds = trade.amount_usd - sell_fee
         capital_before = self.current_capital
-        self.current_capital += proceeds
+        self.current_capital += net_proceeds
         self.total_invested -= position.amount_usd
 
         logger.info(
             f"[PAPER] SELL {token_address[:8]}... "
-            f"@ ${price:.8f}, proceeds: ${proceeds:.2f}, "
+            f"@ ${actual_exit_price:.8f}, proceeds: ${net_proceeds:.2f}, "
             f"capital: ${capital_before:.2f} → ${self.current_capital:.2f}, "
             f"PnL: ${trade.pnl:.2f} ({trade.pnl_percent:+.1f}%)"
         )

@@ -216,7 +216,15 @@ class PositionManager:
             logger.warning(f"Position already exists for {token_address}")
             return None
 
-        quantity = amount_usd / entry_price if entry_price > 0 else 0
+        # Validate entry price (critical bug fix)
+        if entry_price <= 0:
+            logger.error(
+                f"❌ Invalid entry price ${entry_price} for {token_address[:8]}... "
+                f"- cannot open position"
+            )
+            return None
+
+        quantity = amount_usd / entry_price
 
         position = Position(
             token_address=token_address,
@@ -647,6 +655,7 @@ class PositionManager:
                 writer.writerow({
                     'Date': trade.timestamp.strftime('%Y-%m-%d'),
                     'Time': trade.timestamp.strftime('%H:%M:%S'),
+                    'Token Address': trade.token_address,  # Full address for verification
                     'Token': trade.token_address[:16] + '...',  # Shortened for readability
                     'Symbol': trade.symbol or trade.token_address[:8],
                     'Entry Price': f"${trade.entry_price:.8f}",
