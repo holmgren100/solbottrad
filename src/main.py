@@ -200,8 +200,9 @@ class SolanaTradingBot:
                 }
                 logger.info(f"✅ Using Jupiter discovery data for {token_address[:12]}... (price: ${profile['price_usd']:.8f}, liq: ${profile['liquidity_usd']:,.0f})")
 
-            # Fallback: Try fetching from APIs if Jupiter discovery data insufficient
-            if not profile or profile['price_usd'] == 0:
+            # ALWAYS fetch DexScreener data if liquidity or volume is missing
+            # Jupiter discovery often has price but missing/zero liquidity and volume
+            if not profile or profile['price_usd'] == 0 or profile.get('liquidity_usd', 0) == 0 or profile.get('volume_24h', 0) == 0:
                 dex_profile = await self.dexscreener.get_token_profile(token_address)
                 jupiter_data = await self.jupiter.get_token_price_data(token_address)
 
@@ -210,10 +211,12 @@ class SolanaTradingBot:
                     logger.warning(f"No market data from either source for {token_address}")
                     return None
 
-                # Use DexScreener as primary (most reliable), fallback to Jupiter
-                # Note: Removed price divergence check - it was blocking legit volatile tokens
-                # With partial profit-taking + trailing stops, we can handle data variance
+                # Use DexScreener as primary (has liquidity + volume), fallback to Jupiter
+                # DexScreener is most reliable for liquidity and volume data
                 profile = dex_profile if dex_profile else jupiter_data
+
+                if profile:
+                    logger.info(f"📊 Enriched with real data: {token_address[:12]}... (liq: ${profile.get('liquidity_usd', 0):,.0f}, vol: ${profile.get('volume_24h', 0):,.0f})")
 
             # 2. Get security data
             security_data = await self.solsniffer.analyze_token(token_address)
