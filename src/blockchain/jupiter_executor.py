@@ -672,48 +672,58 @@ class JupiterSwapExecutor:
     async def _wait_for_confirmation(
         self,
         signature: str,
-        max_retries: int = 30,
-        retry_delay: float = 2.0
+        max_retries: int = 40,
+        retry_delay: float = 1.0
     ) -> bool:
         """
-        Wait for transaction confirmation.
+        Wait for transaction confirmation using direct aiohttp RPC calls.
 
         Args:
             signature: Transaction signature to track
-            max_retries: Maximum number of confirmation checks
-            retry_delay: Seconds between checks
+            max_retries: Maximum number of confirmation checks (default 40)
+            retry_delay: Seconds between checks (default 1.0s)
 
         Returns:
             True if confirmed, False if timeout
         """
         try:
-            client = AsyncClient(self.rpc_url)
-
             for attempt in range(max_retries):
                 try:
-                    # Check transaction status
-                    response = await client.get_signature_statuses([signature])
+                    # Create RPC request to get signature statuses
+                    payload = {
+                        'jsonrpc': '2.0',
+                        'id': 1,
+                        'method': 'getSignatureStatuses',
+                        'params': [[signature]]
+                    }
 
-                    if response.value and len(response.value) > 0:
-                        status = response.value[0]
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            self.rpc_url,
+                            json=payload,
+                            headers={'Content-Type': 'application/json'},
+                            timeout=aiohttp.ClientTimeout(total=10)
+                        ) as response:
+                            if response.status == 200:
+                                data = await response.json()
 
-                        if status:
-                            # Check confirmation status
-                            if status.confirmation_status:
-                                confirmation_level = str(status.confirmation_status)
+                                if 'result' in data and data['result']['value']:
+                                    status = data['result']['value'][0]
 
-                                if confirmation_level in ['confirmed', 'finalized']:
-                                    logger.info(f"✅ Transaction confirmed ({confirmation_level}): {signature}")
-                                    await client.close()
-                                    return True
+                                    if status:
+                                        # Check confirmation status
+                                        confirmation_status = status.get('confirmationStatus')
 
-                                logger.debug(f"⏳ Confirmation status: {confirmation_level} (attempt {attempt + 1}/{max_retries})")
+                                        if confirmation_status in ['confirmed', 'finalized']:
+                                            logger.info(f"✅ Transaction confirmed ({confirmation_status}): {signature}")
+                                            return True
 
-                            # Check for errors
-                            if status.err:
-                                logger.error(f"❌ Transaction failed: {status.err}")
-                                await client.close()
-                                return False
+                                        logger.debug(f"⏳ Confirmation status: {confirmation_status} (attempt {attempt + 1}/{max_retries})")
+
+                                        # Check for errors
+                                        if status.get('err'):
+                                            logger.error(f"❌ Transaction failed: {status['err']}")
+                                            return False
 
                 except Exception as check_error:
                     logger.debug(f"⚠️  Confirmation check error (attempt {attempt + 1}): {check_error}")
@@ -722,7 +732,6 @@ class JupiterSwapExecutor:
                 await asyncio.sleep(retry_delay)
 
             logger.warning(f"⏰ Confirmation timeout after {max_retries * retry_delay}s: {signature}")
-            await client.close()
             return False
 
         except Exception as e:
