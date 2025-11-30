@@ -293,6 +293,100 @@ class TelegramCommandHandler:
             logger.error(f"Error in /closeall command: {e}")
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
+    async def cmd_cleanup(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Cleanup stuck positions (zero liquidity, frozen, too old).
+        Frees up position slots for new trades.
+        """
+        if not self.is_authorized(update):
+            await update.message.reply_text("⛔ Unauthorized")
+            return
+
+        try:
+            # Get stuck position management settings
+            stuck_liquidity = self.bot.trading_engine.stuck_liquidity_threshold
+            stuck_hours = self.bot.trading_engine.stuck_time_hours
+            max_age_hours = self.bot.trading_engine.max_position_age_hours
+
+            # Find stuck positions
+            stuck_positions = self.bot.trading_engine.position_manager.get_stuck_positions(
+                min_liquidity=stuck_liquidity,
+                stuck_hours=stuck_hours
+            )
+
+            # Find old positions
+            old_positions = []
+            for token_address, position in self.bot.trading_engine.position_manager.open_positions.items():
+                age_hours = (datetime.now() - position.entry_time).total_seconds() / 3600
+                if age_hours > max_age_hours:
+                    old_positions.append(token_address)
+
+            # Combine unique positions to cleanup
+            to_cleanup = list(set(stuck_positions + old_positions))
+
+            if not to_cleanup:
+                await update.message.reply_text("✅ No stuck positions found!\n"
+                                              "All positions are healthy.")
+                return
+
+            await update.message.reply_text(
+                f"🗑️  Found {len(to_cleanup)} stuck position(s):\n"
+                f"   Stuck (low liquidity): {len(stuck_positions)}\n"
+                f"   Too old (>{max_age_hours:.0f}h): {len(old_positions)}\n\n"
+                f"Forcing cleanup..."
+            )
+
+            # Force close all stuck positions
+            cleaned = 0
+            total_loss = 0.0
+            results = []
+
+            for token_address in to_cleanup:
+                position = self.bot.trading_engine.position_manager.get_position(token_address)
+                if not position:
+                    continue
+
+                # Determine reason
+                age_hours = (datetime.now() - position.entry_time).total_seconds() / 3600
+                is_stuck = token_address in stuck_positions
+                is_old = token_address in old_positions
+
+                if is_stuck and is_old:
+                    reason = f"stuck+old ({age_hours:.1f}h)"
+                elif is_stuck:
+                    reason = f"stuck (liq: ${position.current_liquidity:.0f})"
+                else:
+                    reason = f"too old ({age_hours:.1f}h)"
+
+                # Force close
+                trade = self.bot.trading_engine.position_manager.force_close_position(
+                    token_address,
+                    reason='manual_cleanup'
+                )
+
+                if trade:
+                    cleaned += 1
+                    total_loss += abs(trade.pnl)
+                    results.append(f"🗑️  {token_address[:8]}: {reason}")
+
+            # Send summary
+            open_slots = self.bot.trading_engine.position_manager.max_open_positions - len(self.bot.trading_engine.position_manager.open_positions)
+            message = f"✅ Cleanup Complete!\n\n"
+            message += f"Positions cleaned: {cleaned}\n"
+            message += f"Total write-off: ${total_loss:.2f}\n"
+            message += f"Slots freed: {cleaned}\n"
+            message += f"Available slots: {open_slots}\n\n"
+            message += "Cleaned:\n" + "\n".join(results[:10])  # Show first 10
+            if len(results) > 10:
+                message += f"\n... and {len(results) - 10} more"
+
+            await update.message.reply_text(message)
+            logger.info(f"Manual cleanup via /cleanup: {cleaned} positions, ${total_loss:.2f} write-off")
+
+        except Exception as e:
+            logger.error(f"Error in /cleanup command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
     async def cmd_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Export trade history to CSV file."""
         if not self.is_authorized(update):
@@ -386,6 +480,7 @@ class TelegramCommandHandler:
 /resume - Resume trading
 /close <token> - Close a position
 /closeall - Close ALL positions at current prices
+/cleanup - Force cleanup stuck positions (zero liquidity)
 
 *Settings*
 /stop_loss <pct> - Set stop loss %
@@ -415,6 +510,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("take_profit", self.cmd_take_profit))
         self.application.add_handler(CommandHandler("close", self.cmd_close))
         self.application.add_handler(CommandHandler("closeall", self.cmd_closeall))
+        self.application.add_handler(CommandHandler("cleanup", self.cmd_cleanup))
         self.application.add_handler(CommandHandler("export", self.cmd_export))
         self.application.add_handler(CommandHandler("pause", self.cmd_pause))
         self.application.add_handler(CommandHandler("resume", self.cmd_resume))

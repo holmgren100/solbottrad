@@ -331,6 +331,70 @@ class PositionManager:
 
         return sell_trade
 
+    def force_close_position(
+        self,
+        token_address: str,
+        reason: str = 'forced_cleanup'
+    ) -> Optional[Trade]:
+        """
+        Force close a position even if can't sell on market.
+        Accepts the loss to free up position slot.
+
+        Use cases:
+        - Stuck with zero liquidity
+        - Rugged token can't be sold
+        - Position too old (>48h)
+        - Manual cleanup needed
+
+        Args:
+            token_address: Token contract address
+            reason: Reason for forced closure
+
+        Returns:
+            Trade object if successful, None otherwise
+        """
+        if token_address not in self.open_positions:
+            logger.warning(f"No open position for {token_address}")
+            return None
+
+        position = self.open_positions[token_address]
+
+        # Calculate loss (assume position is worthless or write it off)
+        pnl = -position.amount_usd  # Total loss
+        pnl_percent = -100.0
+
+        # Create sell trade (even though we couldn't actually sell)
+        sell_trade = Trade(
+            token_address=token_address,
+            action='sell',
+            price=0.0,  # Worthless
+            amount_usd=0.0,  # Got nothing
+            quantity=position.quantity,
+            timestamp=datetime.now(),
+            pnl=pnl,
+            pnl_percent=pnl_percent,
+            reason=reason,  # 'forced_cleanup', 'stuck_position', etc.
+            symbol=getattr(position, 'symbol', token_address[:8]),
+            entry_price=position.entry_price,
+            entry_time=position.entry_time,
+            volume_fallback=position.volume_fallback
+        )
+
+        self.closed_trades.append(sell_trade)
+        self.daily_trades.append(sell_trade)
+
+        # Remove from open positions
+        del self.open_positions[token_address]
+
+        logger.warning(
+            f"🗑️  FORCED CLEANUP {token_address[:8]}... - Position written off:\n"
+            f"   Reason: {reason}\n"
+            f"   Loss: ${position.amount_usd:.2f}\n"
+            f"   Position slot freed for new trades"
+        )
+
+        return sell_trade
+
     def update_position_price(self, token_address: str, current_price: float, liquidity: float = 0.0):
         """
         Update position with current price and liquidity.
@@ -489,6 +553,117 @@ class PositionManager:
                     dead_positions.append(token_address)
 
         return dead_positions
+
+    def is_position_stuck(
+        self,
+        token_address: str,
+        min_liquidity: float = 1000.0,
+        stuck_hours: float = 6.0
+    ) -> bool:
+        """
+        Detect if position is stuck (can't be sold).
+
+        Criteria:
+        - Zero or very low liquidity (<$1k)
+        - No price movement for >6 hours
+        - Failed sell attempts
+
+        Args:
+            token_address: Token contract address
+            min_liquidity: Minimum liquidity threshold (default $1k)
+            stuck_hours: Hours to consider stuck (default 6h)
+
+        Returns:
+            True if position is stuck
+        """
+        if token_address not in self.open_positions:
+            return False
+
+        position = self.open_positions[token_address]
+        age_hours = (datetime.now() - position.entry_time).total_seconds() / 3600
+
+        # Stuck if very low liquidity AND been stuck for >6 hours
+        if position.current_liquidity < min_liquidity and age_hours > stuck_hours:
+            return True
+
+        # Or price frozen for >12 hours (even if liquidity shows)
+        if position.is_price_frozen(freeze_minutes=int(stuck_hours * 2 * 60)):
+            return True
+
+        return False
+
+    def get_stuck_positions(
+        self,
+        min_liquidity: float = 1000.0,
+        stuck_hours: float = 6.0
+    ) -> List[str]:
+        """
+        Get all stuck positions.
+
+        Args:
+            min_liquidity: Minimum liquidity threshold
+            stuck_hours: Hours to consider stuck
+
+        Returns:
+            List of stuck position token addresses
+        """
+        stuck = []
+        for token_address in self.open_positions:
+            if self.is_position_stuck(token_address, min_liquidity, stuck_hours):
+                stuck.append(token_address)
+        return stuck
+
+    def cleanup_old_positions(self, max_age_hours: float = 48.0) -> List[Trade]:
+        """
+        Force close positions older than max age.
+
+        Args:
+            max_age_hours: Maximum position age in hours (default 48h)
+
+        Returns:
+            List of closed trades
+        """
+        closed_trades = []
+
+        for token_address, position in list(self.open_positions.items()):
+            age_hours = (datetime.now() - position.entry_time).total_seconds() / 3600
+
+            if age_hours > max_age_hours:
+                logger.warning(
+                    f"⏰ Position {token_address[:8]}... is {age_hours:.1f}h old "
+                    f"(max {max_age_hours}h) - FORCING CLEANUP"
+                )
+                trade = self.force_close_position(token_address, reason='max_age_exceeded')
+                if trade:
+                    closed_trades.append(trade)
+
+        return closed_trades
+
+    def cleanup_stuck_positions(
+        self,
+        min_liquidity: float = 1000.0,
+        stuck_hours: float = 6.0
+    ) -> List[Trade]:
+        """
+        Force close all stuck positions.
+
+        Args:
+            min_liquidity: Minimum liquidity threshold
+            stuck_hours: Hours to consider stuck
+
+        Returns:
+            List of closed trades
+        """
+        stuck_positions = self.get_stuck_positions(min_liquidity, stuck_hours)
+        closed_trades = []
+
+        for token_address in stuck_positions:
+            logger.warning(f"🚫 STUCK POSITION detected: {token_address[:8]}... - Forcing cleanup")
+            trade = self.force_close_position(token_address, reason='stuck_position')
+            if trade:
+                closed_trades.append(trade)
+
+        return closed_trades
 
     def get_position(self, token_address: str) -> Optional[Position]:
         """

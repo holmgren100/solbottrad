@@ -84,6 +84,13 @@ class PaperTradingEngine:
         self.min_volume_for_fallback = float(os.getenv('MIN_VOLUME_FOR_FALLBACK', '50000'))  # $50k volume
         self.volume_fallback_position_multiplier = float(os.getenv('VOLUME_FALLBACK_POSITION_MULTIPLIER', '0.5'))  # 50% position
 
+        # Stuck position management (prevents position slots from being blocked)
+        self.auto_cleanup_enabled = os.getenv('AUTO_CLEANUP_ENABLED', 'true').lower() == 'true'
+        self.max_position_age_hours = float(os.getenv('MAX_POSITION_AGE_HOURS', '48'))  # 48 hours default
+        self.stuck_liquidity_threshold = float(os.getenv('STUCK_LIQUIDITY_THRESHOLD', '1000'))  # $1k
+        self.stuck_time_hours = float(os.getenv('STUCK_TIME_HOURS', '6'))  # 6 hours
+        self.force_close_on_rug = os.getenv('FORCE_CLOSE_ON_RUG', 'true').lower() == 'true'
+
         # Track rejected trades for analysis
         self.rejected_trades = {
             'low_entry_liquidity': 0,
@@ -92,7 +99,8 @@ class PaperTradingEngine:
             'low_exit_liquidity': 0,
             'price_too_low': 0,           # NEW: Ultra-cheap tokens rejected
             'high_volume_risk': 0,        # NEW: Too many tokens per dollar
-            'volume_fallback_unsafe': 0   # NEW: Volume fallback blocked by price/tokens checks
+            'volume_fallback_unsafe': 0,   # NEW: Volume fallback blocked by price/tokens checks
+            'forced_cleanup': 0           # NEW: Stuck positions force-closed
         }
         self.volume_fallback_trades = 0  # Track risky volume-based trades
 
@@ -201,6 +209,19 @@ class PaperTradingEngine:
             )
         else:
             logger.info("🔒 Volume fallback DISABLED (strict liquidity requirement)")
+
+        # Log stuck position management settings
+        if self.auto_cleanup_enabled:
+            logger.info(
+                f"🗑️  AUTO CLEANUP ENABLED (prevents stuck positions from blocking slots!):\n"
+                f"   Max Position Age: {self.max_position_age_hours:.0f} hours\n"
+                f"   Stuck Liquidity Threshold: ${self.stuck_liquidity_threshold:,.0f}\n"
+                f"   Stuck Time: {self.stuck_time_hours:.0f} hours\n"
+                f"   Force Close on Rug: {'YES' if self.force_close_on_rug else 'NO'}\n"
+                f"   → Positions stuck >6h or >48h old will be force-closed to free slots"
+            )
+        else:
+            logger.warning("⚠️  Auto cleanup DISABLED - stuck positions may block trading slots!")
 
     def store_trade_context(self, token_address: str, analysis_data: Dict):
         """
@@ -668,19 +689,47 @@ class PaperTradingEngine:
         if current_liquidity > 0 and current_liquidity < self.min_exit_liquidity:
             self.rejected_trades['low_exit_liquidity'] += 1
             position_value = position.quantity * price
-            logger.error(
-                f"🚫 CANNOT SELL {token_address[:8]}... - Liquidity too low!\n"
-                f"   Exit Liquidity: ${current_liquidity:,.0f} < ${self.min_exit_liquidity:,.0f}\n"
-                f"   Position Value: ${position_value:,.2f}\n"
-                f"   In live trading, you'd be STUCK with this token!"
-            )
-            return {
-                'status': 'failed',
-                'reason': 'insufficient_exit_liquidity',
-                'current_liquidity': current_liquidity,
-                'min_required': self.min_exit_liquidity,
-                'position_value': position_value
-            }
+
+            # FORCE CLOSE if enabled (for live trading - better to accept loss than block slot)
+            if self.force_close_on_rug:
+                logger.error(
+                    f"🚫 CANNOT SELL {token_address[:8]}... - Insufficient liquidity!\n"
+                    f"   Exit Liquidity: ${current_liquidity:,.0f} < ${self.min_exit_liquidity:,.0f}\n"
+                    f"   Position Value: ${position_value:,.2f}\n"
+                    f"   ⚠️  FORCING POSITION CLOSURE (write-off to free slot)"
+                )
+
+                # Force close the position
+                self.rejected_trades['forced_cleanup'] += 1
+                trade = self.position_manager.force_close_position(
+                    token_address,
+                    reason='insufficient_exit_liquidity'
+                )
+
+                # Save state
+                self.save_state()
+
+                return {
+                    'status': 'forced_close',
+                    'reason': 'insufficient_exit_liquidity',
+                    'current_liquidity': current_liquidity,
+                    'loss': position.amount_usd
+                }
+            else:
+                # Just log and return failure (paper trading mode)
+                logger.error(
+                    f"🚫 CANNOT SELL {token_address[:8]}... - Liquidity too low!\n"
+                    f"   Exit Liquidity: ${current_liquidity:,.0f} < ${self.min_exit_liquidity:,.0f}\n"
+                    f"   Position Value: ${position_value:,.2f}\n"
+                    f"   In live trading, you'd be STUCK with this token!"
+                )
+                return {
+                    'status': 'failed',
+                    'reason': 'insufficient_exit_liquidity',
+                    'current_liquidity': current_liquidity,
+                    'min_required': self.min_exit_liquidity,
+                    'position_value': position_value
+                }
 
         # Warn if position is large relative to liquidity (high price impact expected)
         if current_liquidity > 0:
