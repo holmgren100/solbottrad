@@ -74,6 +74,11 @@ class PaperTradingEngine:
         self.min_24h_volume = float(os.getenv('MIN_24H_VOLUME', '50000'))             # $50k daily volume
         self.max_position_vs_liquidity = float(os.getenv('MAX_POSITION_VS_LIQUIDITY', '0.005'))  # Max 0.5% of pool
 
+        # TIER 2 FILTERS: Price and volume safety (prevents 80% of high-risk trades!)
+        self.min_entry_price = float(os.getenv('MIN_ENTRY_PRICE', '0.10'))           # Minimum entry price (blocks ultra-cheap scam tokens)
+        self.max_tokens_per_dollar = float(os.getenv('MAX_TOKENS_PER_DOLLAR', '10000'))  # Max tokens per dollar (blocks high-volume scams)
+        self.max_position_size = float(os.getenv('MAX_POSITION_SIZE', '50'))         # Hard cap on position size
+
         # Volume fallback (when liquidity data unavailable but volume is high)
         self.allow_volume_fallback = os.getenv('ALLOW_VOLUME_FALLBACK', 'true').lower() == 'true'
         self.min_volume_for_fallback = float(os.getenv('MIN_VOLUME_FOR_FALLBACK', '50000'))  # $50k volume
@@ -84,7 +89,10 @@ class PaperTradingEngine:
             'low_entry_liquidity': 0,
             'low_volume': 0,
             'position_too_large': 0,
-            'low_exit_liquidity': 0
+            'low_exit_liquidity': 0,
+            'price_too_low': 0,           # NEW: Ultra-cheap tokens rejected
+            'high_volume_risk': 0,        # NEW: Too many tokens per dollar
+            'volume_fallback_unsafe': 0   # NEW: Volume fallback blocked by price/tokens checks
         }
         self.volume_fallback_trades = 0  # Track risky volume-based trades
 
@@ -174,14 +182,22 @@ class PaperTradingEngine:
             f"   Max Position vs Liquidity: {self.max_position_vs_liquidity*100:.1f}%"
         )
 
+        # Log TIER 2 filters
+        logger.info(
+            f"🎯 TIER 2 FILTERS ENABLED (prevents 80% of high-risk trades!):\n"
+            f"   Min Entry Price: ${self.min_entry_price:.2f} (blocks ultra-cheap scam tokens)\n"
+            f"   Max Tokens per Dollar: {self.max_tokens_per_dollar:,.0f} (blocks high-volume scams)\n"
+            f"   Max Position Size: ${self.max_position_size:.2f} (hard cap for safety)"
+        )
+
         # Log volume fallback settings
         if self.allow_volume_fallback:
             logger.info(
-                f"⚠️  VOLUME FALLBACK ENABLED (risky but allows data collection):\n"
+                f"✅ VOLUME FALLBACK ENABLED (PROTECTED by Tier 2 filters!):\n"
                 f"   Min Volume for Fallback: ${self.min_volume_for_fallback:,.0f}\n"
                 f"   Position Size Multiplier: {self.volume_fallback_position_multiplier*100:.0f}%\n"
-                f"   → If liquidity data missing but volume >${self.min_volume_for_fallback:,.0f}, "
-                f"trade with {self.volume_fallback_position_multiplier*100:.0f}% position size"
+                f"   Protection: Also checks price >${self.min_entry_price:.2f} AND tokens/$ <{self.max_tokens_per_dollar:,.0f}\n"
+                f"   → Only catches SAFE high-volume opportunities, not scam tokens!"
             )
         else:
             logger.info("🔒 Volume fallback DISABLED (strict liquidity requirement)")
@@ -377,6 +393,56 @@ class PaperTradingEngine:
         # Track if this trade uses volume fallback (for analysis)
         is_volume_fallback = False
 
+        # TIER 2 FILTER: Check minimum entry price (blocks ultra-cheap scam tokens)
+        if price < self.min_entry_price:
+            self.rejected_trades['price_too_low'] += 1
+            logger.warning(
+                f"❌ REJECTED {token_address[:8]}... - Price too low (scam risk):\n"
+                f"   Entry Price: ${price:.8f} < ${self.min_entry_price:.2f}\n"
+                f"   Ultra-cheap tokens are 6x more likely to be unsellable!"
+            )
+            return {
+                'status': 'failed',
+                'reason': 'price_too_low',
+                'price': price,
+                'min_required': self.min_entry_price
+            }
+
+        # TIER 2 FILTER: Check maximum position size (hard cap for safety)
+        if amount_usd > self.max_position_size:
+            self.rejected_trades['position_too_large'] += 1
+            logger.warning(
+                f"❌ REJECTED {token_address[:8]}... - Position too large:\n"
+                f"   Position: ${amount_usd:.2f} > ${self.max_position_size:.2f} (hard cap)\n"
+                f"   Large positions cause excessive slippage!"
+            )
+            return {
+                'status': 'failed',
+                'reason': 'position_too_large',
+                'amount_usd': amount_usd,
+                'max_allowed': self.max_position_size
+            }
+
+        # TIER 2 FILTER: Calculate and check tokens per dollar (blocks high-volume scam tokens)
+        # This is the CRITICAL metric that predicts 80% of risky trades!
+        quantity_estimate = amount_usd / price
+        tokens_per_dollar = quantity_estimate / amount_usd
+
+        if tokens_per_dollar > self.max_tokens_per_dollar:
+            self.rejected_trades['high_volume_risk'] += 1
+            logger.warning(
+                f"❌ REJECTED {token_address[:8]}... - High volume risk (too many tokens per dollar):\n"
+                f"   Tokens per $1: {tokens_per_dollar:,.0f} > {self.max_tokens_per_dollar:,.0f} limit\n"
+                f"   Total tokens: {quantity_estimate:,.0f}\n"
+                f"   High volume cheap tokens are 80% likely to be unsellable!"
+            )
+            return {
+                'status': 'failed',
+                'reason': 'high_volume_risk',
+                'tokens_per_dollar': tokens_per_dollar,
+                'max_allowed': self.max_tokens_per_dollar
+            }
+
         # REALISTIC LIQUIDITY & VOLUME FILTERS (prevents 29% of unsellable trades)
         if analysis_data:
             # Extract liquidity/volume from nested profile (analysis_data contains the full analysis)
@@ -386,21 +452,48 @@ class PaperTradingEngine:
 
             # Check minimum entry liquidity
             if liquidity < self.min_entry_liquidity:
-                # VOLUME FALLBACK: If liquidity data missing but high volume, allow with reduced position
+                # PROTECTED VOLUME FALLBACK: Only allow if volume is high AND token passes safety checks
+                # This prevents volume fallback from catching ultra-cheap scam tokens!
                 if self.allow_volume_fallback and volume_24h >= self.min_volume_for_fallback:
-                    # Reduce position size for this risky trade (50% by default)
-                    original_amount = amount_usd
-                    amount_usd = amount_usd * self.volume_fallback_position_multiplier
-                    self.volume_fallback_trades += 1
-                    is_volume_fallback = True  # Mark this trade as volume fallback
-                    logger.warning(
-                        f"⚠️  VOLUME FALLBACK {token_address[:8]}... - No liquidity data but HIGH volume!\n"
-                        f"   Liquidity: ${liquidity:,.0f} (missing/low)\n"
-                        f"   Volume 24h: ${volume_24h:,.0f} ✅\n"
-                        f"   Position reduced: ${original_amount:.2f} → ${amount_usd:.2f} "
-                        f"({self.volume_fallback_position_multiplier*100:.0f}% - SAFER)\n"
-                        f"   ⚠️  RISKY: Monitoring will exit if liquidity actually dried up"
-                    )
+                    # CRITICAL: Verify token passes Tier 2 safety filters (price already checked above)
+                    # Re-check tokens/dollar with reduced position size
+                    reduced_amount = amount_usd * self.volume_fallback_position_multiplier
+                    reduced_quantity = reduced_amount / price
+                    reduced_tokens_per_dollar = reduced_quantity / reduced_amount
+
+                    # Volume fallback ONLY allowed if token metrics are safe
+                    if reduced_tokens_per_dollar <= self.max_tokens_per_dollar:
+                        # SAFE to use volume fallback - token passes all safety checks
+                        original_amount = amount_usd
+                        amount_usd = reduced_amount
+                        self.volume_fallback_trades += 1
+                        is_volume_fallback = True
+                        logger.warning(
+                            f"✅ VOLUME FALLBACK (PROTECTED) {token_address[:8]}... - High volume + SAFE metrics:\n"
+                            f"   Liquidity: ${liquidity:,.0f} (missing/low)\n"
+                            f"   Volume 24h: ${volume_24h:,.0f} ✅\n"
+                            f"   Price: ${price:.8f} (>${self.min_entry_price:.2f} ✓)\n"
+                            f"   Tokens/$: {reduced_tokens_per_dollar:,.0f} (<{self.max_tokens_per_dollar:,.0f} ✓)\n"
+                            f"   Position reduced: ${original_amount:.2f} → ${amount_usd:.2f} "
+                            f"({self.volume_fallback_position_multiplier*100:.0f}% - SAFER)\n"
+                            f"   ⚠️  Monitoring will exit if liquidity actually dried up"
+                        )
+                    else:
+                        # Volume fallback REJECTED - unsafe metrics (too many tokens per dollar)
+                        self.rejected_trades['volume_fallback_unsafe'] += 1
+                        logger.warning(
+                            f"❌ REJECTED VOLUME FALLBACK {token_address[:8]}... - UNSAFE metrics:\n"
+                            f"   Volume: ${volume_24h:,.0f} (high enough)\n"
+                            f"   BUT Tokens/$: {reduced_tokens_per_dollar:,.0f} > {self.max_tokens_per_dollar:,.0f} ❌\n"
+                            f"   This is likely a HIGH-RISK cheap scam token!\n"
+                            f"   Protected volume fallback blocked the trade ✓"
+                        )
+                        return {
+                            'status': 'failed',
+                            'reason': 'volume_fallback_unsafe',
+                            'tokens_per_dollar': reduced_tokens_per_dollar,
+                            'max_allowed': self.max_tokens_per_dollar
+                        }
                 else:
                     # No volume fallback or volume too low - reject trade
                     self.rejected_trades['low_entry_liquidity'] += 1

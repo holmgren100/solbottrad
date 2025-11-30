@@ -623,6 +623,8 @@ class PositionManager:
             'Entry Price',
             'Exit Price',
             'Position Size ($)',
+            'Quantity',             # NEW - Total tokens bought
+            'Tokens per Dollar',    # NEW - Critical risk metric!
             'PnL ($)',
             'PnL (%)',
             'Win/Loss',
@@ -660,6 +662,15 @@ class PositionManager:
                 }
                 close_reason = reason_map.get(trade.reason, trade.reason or 'Unknown')
 
+                # Calculate tokens per dollar (critical risk metric)
+                # Use entry price and quantity to calculate how many tokens per dollar
+                if trade.entry_price > 0 and trade.quantity > 0:
+                    # Calculate original position size (before any sells)
+                    original_position_usd = trade.quantity * trade.entry_price
+                    tokens_per_dollar = trade.quantity / original_position_usd if original_position_usd > 0 else 0
+                else:
+                    tokens_per_dollar = 0
+
                 # Write row
                 writer.writerow({
                     'Date': trade.timestamp.strftime('%Y-%m-%d'),
@@ -670,6 +681,8 @@ class PositionManager:
                     'Entry Price': f"${trade.entry_price:.8f}",
                     'Exit Price': f"${trade.price:.8f}",
                     'Position Size ($)': f"${trade.amount_usd:.2f}",
+                    'Quantity': f"{trade.quantity:,.0f}",
+                    'Tokens per Dollar': f"{tokens_per_dollar:,.0f}",
                     'PnL ($)': f"${trade.pnl:.2f}",
                     'PnL (%)': f"{trade.pnl_percent:+.2f}%",
                     'Win/Loss': win_loss,
