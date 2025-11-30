@@ -512,18 +512,19 @@ class JupiterSwapExecutor:
             Signed transaction bytes or None
         """
         try:
+            from solders.transaction import VersionedTransaction
+
             # Decode base64 transaction
             tx_bytes = base64.b64decode(swap_tx_base64)
 
-            # Sign the transaction with wallet
-            signature = self.wallet.sign_transaction(tx_bytes)
+            # Deserialize the versioned transaction
+            tx = VersionedTransaction.from_bytes(tx_bytes)
 
-            if signature:
-                logger.debug("✅ Transaction signed successfully")
-                return tx_bytes  # Return the transaction bytes (signature is embedded)
-            else:
-                logger.error("❌ Failed to sign transaction")
-                return None
+            # Sign with keypair - create new VersionedTransaction with signature
+            signed_tx = VersionedTransaction(tx.message, [self.wallet.keypair])
+
+            logger.debug("✅ Transaction signed successfully")
+            return bytes(signed_tx)
 
         except Exception as e:
             logger.error(f"❌ Error signing transaction: {e}")
