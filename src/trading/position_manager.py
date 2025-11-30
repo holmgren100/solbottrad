@@ -40,6 +40,8 @@ class Position:
     # Partial profit taking fields
     initial_quantity: float = 0.0  # Track original quantity for partial sells
     milestones_hit: set = field(default_factory=set)  # Track which profit milestones have been taken (100, 200, 300, 500)
+    # Volume fallback flag (high risk trade with reduced position size)
+    volume_fallback: bool = False  # True if entered with volume fallback (missing liquidity data)
 
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
@@ -156,6 +158,7 @@ class Trade:
     symbol: str = ''  # Token symbol for readability
     entry_price: float = 0.0  # Entry price (for sell trades)
     entry_time: datetime = None  # Entry time (for calculating duration)
+    volume_fallback: bool = False  # True if entered with volume fallback (high risk/reduced size)
 
 
 class PositionManager:
@@ -191,7 +194,8 @@ class PositionManager:
         stop_loss: float,
         take_profit: float,
         use_trailing_stop: bool = True,
-        trailing_stop_percent: float = 15.0
+        trailing_stop_percent: float = 15.0,
+        volume_fallback: bool = False
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -204,6 +208,7 @@ class PositionManager:
             take_profit: Take profit price (ignored if using trailing stop)
             use_trailing_stop: Whether to use trailing stop instead of fixed take profit
             trailing_stop_percent: Percent to trail below peak (default 15%)
+            volume_fallback: Whether this trade used volume fallback (high risk/reduced size)
 
         Returns:
             Position object if successful, None otherwise
@@ -240,7 +245,8 @@ class PositionManager:
             highest_price=entry_price,  # Initialize with entry price
             trailing_stop_price=stop_loss,  # Start with regular stop loss
             initial_quantity=quantity,  # Track original quantity for partial profit taking
-            last_known_price=entry_price  # Initialize for frozen price detection
+            last_known_price=entry_price,  # Initialize for frozen price detection
+            volume_fallback=volume_fallback  # Track if this is a high-risk volume fallback trade
         )
 
         self.open_positions[token_address] = position
@@ -252,7 +258,8 @@ class PositionManager:
             price=entry_price,
             amount_usd=amount_usd,
             quantity=quantity,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            volume_fallback=volume_fallback
         )
         self.daily_trades.append(buy_trade)
 
@@ -305,7 +312,8 @@ class PositionManager:
             reason=reason,  # Store close reason
             symbol=getattr(position, 'symbol', token_address[:8]),  # Token symbol or short address
             entry_price=position.entry_price,  # Store entry price for reference
-            entry_time=position.entry_time  # Store entry time for duration calculation
+            entry_time=position.entry_time,  # Store entry time for duration calculation
+            volume_fallback=position.volume_fallback  # Preserve volume fallback flag from position
         )
 
         self.closed_trades.append(sell_trade)
@@ -619,7 +627,8 @@ class PositionManager:
             'PnL (%)',
             'Win/Loss',
             'Duration',
-            'Close Reason'
+            'Close Reason',
+            'Volume Fallback'
         ]
 
         # Write to CSV
@@ -665,7 +674,8 @@ class PositionManager:
                     'PnL (%)': f"{trade.pnl_percent:+.2f}%",
                     'Win/Loss': win_loss,
                     'Duration': duration_str,
-                    'Close Reason': close_reason
+                    'Close Reason': close_reason,
+                    'Volume Fallback': 'YES' if trade.volume_fallback else 'NO'
                 })
 
         logger.info(f"Exported {len(sell_trades)} trades to {filepath}")

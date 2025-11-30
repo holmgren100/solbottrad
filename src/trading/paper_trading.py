@@ -374,6 +374,9 @@ class PaperTradingEngine:
         if trailing_stop_percent is None:
             trailing_stop_percent = self.trailing_stop_percent
 
+        # Track if this trade uses volume fallback (for analysis)
+        is_volume_fallback = False
+
         # REALISTIC LIQUIDITY & VOLUME FILTERS (prevents 29% of unsellable trades)
         if analysis_data:
             # Extract liquidity/volume from nested profile (analysis_data contains the full analysis)
@@ -389,6 +392,7 @@ class PaperTradingEngine:
                     original_amount = amount_usd
                     amount_usd = amount_usd * self.volume_fallback_position_multiplier
                     self.volume_fallback_trades += 1
+                    is_volume_fallback = True  # Mark this trade as volume fallback
                     logger.warning(
                         f"⚠️  VOLUME FALLBACK {token_address[:8]}... - No liquidity data but HIGH volume!\n"
                         f"   Liquidity: ${liquidity:,.0f} (missing/low)\n"
@@ -497,7 +501,8 @@ class PaperTradingEngine:
             stop_loss=stop_loss,
             take_profit=take_profit,
             use_trailing_stop=use_trailing_stop,
-            trailing_stop_percent=trailing_stop_percent
+            trailing_stop_percent=trailing_stop_percent,
+            volume_fallback=is_volume_fallback  # Mark volume fallback trades for analysis
         )
 
         if not position:
