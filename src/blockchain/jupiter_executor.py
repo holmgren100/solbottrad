@@ -532,7 +532,7 @@ class JupiterSwapExecutor:
 
     async def _send_transaction(self, signed_tx: bytes) -> Dict:
         """
-        Send transaction via standard Solana RPC.
+        Send transaction via standard Solana RPC using direct aiohttp calls.
 
         Args:
             signed_tx: Signed transaction bytes
@@ -541,32 +541,59 @@ class JupiterSwapExecutor:
             Result dictionary with signature and success status
         """
         try:
-            client = AsyncClient(self.rpc_url)
+            # Encode transaction to base64
+            tx_base64 = base64.b64encode(signed_tx).decode('utf-8')
 
-            # Deserialize the versioned transaction
-            versioned_tx = VersionedTransaction.from_bytes(signed_tx)
+            # Create RPC request payload
+            # Skip preflight - let network validate blockhash directly
+            # Preflight simulation fails when RPC cache doesn't match Jupiter's blockhash source
+            payload = {
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'sendTransaction',
+                'params': [
+                    tx_base64,
+                    {
+                        'skipPreflight': True,  # Skip simulation - network will validate
+                        'preflightCommitment': 'confirmed',  # Must match blockhash commitment level
+                        'maxRetries': 5,  # Increased retries for network-level validation
+                        'encoding': 'base64'
+                    }
+                ]
+            }
 
-            # Send transaction
-            response = await client.send_raw_transaction(
-                signed_tx,
-                opts={'skipPreflight': False, 'maxRetries': 3}
-            )
+            # Send via aiohttp to avoid solana-py AsyncClient httpx proxy bug
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.rpc_url,
+                    json=payload,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
 
-            await client.close()
-
-            if response.value:
-                signature = str(response.value)
-                logger.info(f"✅ Transaction sent via RPC: {signature}")
-                return {
-                    'success': True,
-                    'signature': signature
-                }
-            else:
-                logger.error(f"❌ Failed to send transaction: {response}")
-                return {
-                    'success': False,
-                    'error': 'Transaction send failed (no signature returned)'
-                }
+                        if 'result' in data:
+                            signature = data['result']
+                            logger.info(f"✅ Transaction sent via RPC: {signature}")
+                            return {
+                                'success': True,
+                                'signature': signature
+                            }
+                        elif 'error' in data:
+                            error = data['error']
+                            logger.error(f"❌ RPC error: {error}")
+                            return {
+                                'success': False,
+                                'error': str(error)
+                            }
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ HTTP {response.status}: {error_text}")
+                        return {
+                            'success': False,
+                            'error': f'HTTP {response.status}: {error_text}'
+                        }
 
         except Exception as e:
             logger.error(f"❌ Error sending transaction: {e}")
