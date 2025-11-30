@@ -41,39 +41,40 @@ class TelegramCommandHandler:
             return
 
         try:
-            if self.bot.settings.is_paper_trading():
-                engine = self.bot.trading_engine
-                positions = engine.position_manager.get_all_positions()
-                stats = engine.get_performance_summary()
+            # Works for both paper and live trading
+            engine = self.bot.trading_engine
+            positions = engine.position_manager.get_all_positions()
+            stats = engine.get_performance_summary()
 
-                message = "📊 *Trading Bot Status*\n\n"
-                message += f"💰 *Portfolio*\n"
-                message += f"Total Value: ${stats['portfolio_value']:.2f}\n"
-                message += f"Cash: ${stats['current_capital']:.2f}\n"
-                message += f"Invested: ${stats['invested_capital']:.2f}\n"
-                message += f"P&L: ${stats['total_pnl']:.2f} ({stats['total_return_percent']:+.2f}%)\n\n"
+            mode_emoji = "📄" if self.bot.settings.is_paper_trading() else "💰"
+            mode_text = "Paper" if self.bot.settings.is_paper_trading() else "LIVE"
 
-                if positions:
-                    message += f"📈 *Open Positions ({len(positions)})*\n"
-                    for pos in positions:
-                        pnl_pct = pos.unrealized_pnl_percent
-                        emoji = "🟢" if pnl_pct > 0 else "🔴" if pnl_pct < 0 else "⚪"
-                        message += f"{emoji} {pos.token_address[:8]}...\n"
-                        message += f"   Entry: ${pos.entry_price:.8f}\n"
-                        message += f"   Current: ${pos.current_price:.8f}\n"
-                        message += f"   P&L: {pnl_pct:+.2f}%\n"
-                        message += f"   Size: ${pos.amount_usd:.2f}\n\n"
-                else:
-                    message += "📭 No open positions\n\n"
+            message = f"📊 *Trading Bot Status* ({mode_emoji} {mode_text})\n\n"
+            message += f"💰 *Portfolio*\n"
+            message += f"Total Value: ${stats['portfolio_value']:.2f}\n"
+            message += f"Cash: ${stats['current_capital']:.2f}\n"
+            message += f"Invested: ${stats['invested_capital']:.2f}\n"
+            message += f"P&L: ${stats['total_pnl']:.2f} ({stats['total_return_percent']:+.2f}%)\n\n"
 
-                message += f"📊 *Statistics*\n"
-                message += f"Total Trades: {stats['total_trades']}\n"
-                message += f"Win Rate: {stats['win_rate']*100:.1f}%\n"
-                message += f"Wins/Losses: {stats['winning_trades']}/{stats['losing_trades']}\n"
-
-                await update.message.reply_text(message, parse_mode='Markdown')
+            if positions:
+                message += f"📈 *Open Positions ({len(positions)})*\n"
+                for pos in positions:
+                    pnl_pct = pos.unrealized_pnl_percent
+                    emoji = "🟢" if pnl_pct > 0 else "🔴" if pnl_pct < 0 else "⚪"
+                    message += f"{emoji} {pos.token_address[:8]}...\n"
+                    message += f"   Entry: ${pos.entry_price:.8f}\n"
+                    message += f"   Current: ${pos.current_price:.8f}\n"
+                    message += f"   P&L: {pnl_pct:+.2f}%\n"
+                    message += f"   Size: ${pos.amount_usd:.2f}\n\n"
             else:
-                await update.message.reply_text("❌ Live trading not yet implemented")
+                message += "📭 No open positions\n\n"
+
+            message += f"📊 *Statistics*\n"
+            message += f"Total Trades: {stats['total_trades']}\n"
+            message += f"Win Rate: {stats['win_rate']*100:.1f}%\n"
+            message += f"Wins/Losses: {stats['winning_trades']}/{stats['losing_trades']}\n"
+
+            await update.message.reply_text(message, parse_mode='Markdown')
 
         except Exception as e:
             logger.error(f"Error in /status command: {e}")
