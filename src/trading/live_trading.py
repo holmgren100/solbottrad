@@ -6,9 +6,9 @@ Manages real wallet, executes actual trades, tracks on-chain positions.
 import asyncio
 import os
 import json
+import httpx
 from typing import Dict, Optional
 from datetime import datetime
-from solana.rpc.async_api import AsyncClient
 from .position_manager import PositionManager, Position, Trade
 from ..blockchain.jupiter_executor import JupiterSwapExecutor
 from ..monitoring.logger import get_logger
@@ -43,8 +43,9 @@ class LiveTradingEngine:
         self.position_manager = position_manager or PositionManager(max_open_positions)
         self.state_file = state_file
 
-        # Create RPC client for reading wallet balance
-        self.rpc_client = AsyncClient(jupiter_executor.rpc_url)
+        # Store RPC URL for direct HTTP requests
+        # (Workaround for httpx 0.28+ compatibility with solana library)
+        self.rpc_url = jupiter_executor.rpc_url
 
         # Trading state (tracked separately from wallet balance)
         self.starting_balance = 0.0  # Will be set from actual wallet on first check
@@ -93,6 +94,7 @@ class LiveTradingEngine:
     async def get_wallet_balance(self) -> float:
         """
         Get current SOL balance from wallet by reading from blockchain.
+        Uses direct HTTP RPC call to avoid httpx compatibility issues.
 
         Returns:
             SOL balance in SOL (not lamports)
@@ -105,22 +107,34 @@ class LiveTradingEngine:
             # Get wallet public key
             pubkey_str = self.jupiter_executor.wallet.get_public_key()
 
-            # Read balance from blockchain via RPC
-            from solders.pubkey import Pubkey
-            pubkey = Pubkey.from_string(pubkey_str)
+            # Make direct RPC call using httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getBalance",
+                    "params": [pubkey_str]
+                }
 
-            response = await self.rpc_client.get_balance(pubkey)
+                response = await client.post(self.rpc_url, json=payload)
+                response.raise_for_status()
 
-            if response.value is None:
-                logger.error(f"❌ Failed to get balance for wallet {pubkey_str[:8]}...")
-                return 0.0
+                data = response.json()
 
-            # Convert lamports to SOL (1 SOL = 1e9 lamports)
-            balance_lamports = response.value
-            balance_sol = balance_lamports / 1e9
+                if "error" in data:
+                    logger.error(f"❌ RPC error getting balance: {data['error']}")
+                    return 0.0
 
-            logger.info(f"💰 Wallet balance: {balance_sol:.4f} SOL ({balance_lamports:,} lamports)")
-            return balance_sol
+                if "result" not in data or "value" not in data["result"]:
+                    logger.error(f"❌ Invalid RPC response format: {data}")
+                    return 0.0
+
+                # Convert lamports to SOL (1 SOL = 1e9 lamports)
+                balance_lamports = data["result"]["value"]
+                balance_sol = balance_lamports / 1e9
+
+                logger.info(f"💰 Wallet balance: {balance_sol:.4f} SOL ({balance_lamports:,} lamports)")
+                return balance_sol
 
         except Exception as e:
             logger.error(f"❌ Error getting wallet balance: {e}", exc_info=True)
