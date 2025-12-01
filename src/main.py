@@ -13,7 +13,7 @@ from typing import Optional
 from .config import settings
 from .monitoring import setup_logger, get_logger, TelegramNotifier, HealthChecker
 from .monitoring.telegram_commands import TelegramCommandHandler
-from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker
+from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker, RugCheckClient
 from .blockchain.jupiter_executor import JupiterSwapExecutor
 from .blockchain.wallet_manager import WalletManager
 from .market import DexScreenerClient, MarketAnalyzer, JupiterClient
@@ -68,6 +68,7 @@ class SolanaTradingBot:
         self.metrics.register_api('dexscreener')
         self.metrics.register_api('twitter')
         self.metrics.register_api('solsniffer')
+        self.metrics.register_api('rugcheck')
 
         # Set up default alert rules
         alert_config = {
@@ -81,6 +82,7 @@ class SolanaTradingBot:
         # Blockchain
         self.alchemy = AlchemyClient(settings.api.alchemy_api_key)
         self.solsniffer = SolSnifferClient(settings.api.solsniffer_api_key)
+        self.rugcheck = RugCheckClient(settings.api.rugcheck_api_key)
         self.wallet_tracker = WalletTracker()
 
         # Market
@@ -207,6 +209,43 @@ class SolanaTradingBot:
         logger.info(f"Analyzing token: {token_address}")
 
         try:
+            # 0. EARLY FILTER: RugCheck risk assessment (fast, saves expensive API calls)
+            import time
+            rug_start = time.time()
+            rug_check = await self.rugcheck.quick_check(token_address)
+            rug_time_ms = (time.time() - rug_start) * 1000
+            self.metrics.record_api_call('rugcheck', success=True, response_time_ms=rug_time_ms)
+
+            # Block high-risk tokens immediately (if strict mode enabled)
+            if self.settings.trading.rugcheck_strict_mode:
+                if rug_check['risk_level'] in ['critical', 'high'] and not rug_check['is_safe']:
+                    logger.warning(
+                        f"🚫 Token {token_address[:8]}... REJECTED by RugCheck: "
+                        f"Risk={rug_check['risk_level']}, Score={rug_check['risk_score']}, "
+                        f"Risks={rug_check['risks']}"
+                    )
+                    await self.notifier.send_message(
+                        f"🚫 **RugCheck Alert**\n"
+                        f"Token: `{token_address[:8]}...`\n"
+                        f"Risk Level: **{rug_check['risk_level'].upper()}**\n"
+                        f"Score: {rug_check['risk_score']}/100\n"
+                        f"Risks: {', '.join(rug_check['risks'][:3])}"
+                    )
+                    return None
+
+                # Also check minimum score threshold
+                if rug_check['risk_score'] < self.settings.trading.rugcheck_min_score:
+                    logger.warning(
+                        f"🚫 Token {token_address[:8]}... REJECTED: "
+                        f"RugCheck score {rug_check['risk_score']} < minimum {self.settings.trading.rugcheck_min_score}"
+                    )
+                    return None
+
+            logger.info(
+                f"✅ RugCheck passed: {token_address[:8]}... "
+                f"(Risk: {rug_check['risk_level']}, Score: {rug_check['risk_score']})"
+            )
+
             # 1. Get market data - prioritize Jupiter discovery data if available
             profile = None
 
@@ -323,6 +362,7 @@ class SolanaTradingBot:
                 'symbol': token_symbol,
                 'profile': profile,
                 'security': security_data,
+                'rug_check': rug_check,
                 'market_signal': market_signal,
                 'sentiment_score': sentiment_score,
                 'price_prediction': price_prediction,
@@ -332,6 +372,7 @@ class SolanaTradingBot:
 
             logger.info(
                 f"Analysis complete for {token_symbol}: "
+                f"RugCheck={rug_check['risk_score']}/100, "
                 f"Market={market_signal.signal_type}, "
                 f"Sentiment={sentiment_score.recommendation}, "
                 f"Risk={risk_assessment.overall_risk}"

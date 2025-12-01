@@ -22,6 +22,8 @@ class TradingConfig:
     min_confidence_score: float
     paper_trading_mode: bool
     priority_fee: float
+    rugcheck_strict_mode: bool
+    rugcheck_min_score: int
 
 
 @dataclass
@@ -41,6 +43,7 @@ class APIConfig:
     solsniffer_api_key: Optional[str]
     dexscreener_api_key: Optional[str]
     twitter_bearer_token: Optional[str]
+    rugcheck_api_key: Optional[str]
     telegram_bot_token: str
     telegram_chat_id: str
     gmgn_telegram_bot: str
@@ -58,7 +61,9 @@ class Settings:
             max_slippage_percent=float(os.getenv('MAX_SLIPPAGE_PERCENT', '5')),
             min_confidence_score=float(os.getenv('MIN_CONFIDENCE_SCORE', '0.7')),
             paper_trading_mode=os.getenv('PAPER_TRADING_MODE', 'true').lower() == 'true',
-            priority_fee=float(os.getenv('PRIORITY_FEE', '0.001'))
+            priority_fee=float(os.getenv('PRIORITY_FEE', '0.001')),
+            rugcheck_strict_mode=os.getenv('RUGCHECK_STRICT_MODE', 'true').lower() == 'true',
+            rugcheck_min_score=int(os.getenv('RUGCHECK_MIN_SCORE', '50'))
         )
 
         self.risk = RiskConfig(
@@ -74,6 +79,7 @@ class Settings:
             solsniffer_api_key=os.getenv('SOLSNIFFER_API_KEY'),
             dexscreener_api_key=os.getenv('DEXSCREENER_API_KEY'),
             twitter_bearer_token=os.getenv('TWITTER_BEARER_TOKEN'),
+            rugcheck_api_key=os.getenv('RUGCHECK_API_KEY'),
             telegram_bot_token=os.getenv('TELEGRAM_BOT_TOKEN', ''),
             telegram_chat_id=os.getenv('TELEGRAM_CHAT_ID', ''),
             gmgn_telegram_bot=os.getenv('GMGN_TELEGRAM_BOT', '@gmgnsolbot')
