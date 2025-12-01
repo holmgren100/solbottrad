@@ -126,16 +126,21 @@ class SolanaTradingBot:
             logger.info(f"✅ Jupiter executor initialized (Jito: {use_jito})")
 
             # Initialize live trading engine
+            # Get absolute path for state file (in project root)
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            state_file = os.path.join(project_root, 'live_trading_state.json')
+
             self.position_manager = PositionManager(
                 max_open_positions=settings.risk.max_open_positions
             )
             self.trading_engine = LiveTradingEngine(
                 jupiter_executor=jupiter_executor,
                 position_manager=self.position_manager,
-                max_open_positions=settings.risk.max_open_positions
+                max_open_positions=settings.risk.max_open_positions,
+                state_file=state_file
             )
 
-            logger.info("✅ Live trading engine ready")
+            logger.info(f"✅ Live trading engine ready (state: {state_file})")
             logger.warning("⚠️  Start with SMALL position sizes for testing!")
 
         # ML Data Collection

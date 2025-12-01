@@ -516,6 +516,9 @@ class LiveTradingEngine:
     def save_state(self):
         """Save current state to file for persistence."""
         try:
+            abs_path = os.path.abspath(self.state_file)
+            logger.info(f"💾 [LIVE] Saving state to {abs_path}...")
+
             state = {
                 'starting_balance': self.starting_balance,
                 'total_invested': self.total_invested,
@@ -565,21 +568,29 @@ class LiveTradingEngine:
                 json.dump(state, f, indent=2)
 
             logger.info(
-                f"💾 [LIVE] State saved: ${self.total_invested:.2f} invested, "
-                f"{len(self.position_manager.open_positions)} positions → {self.state_file}"
+                f"✅ [LIVE] State saved successfully: ${self.total_invested:.2f} invested, "
+                f"{len(self.position_manager.open_positions)} position(s), "
+                f"{len(state['trades'])} trade(s)"
             )
+            if len(self.position_manager.open_positions) > 0:
+                logger.info(f"📊 [LIVE] Saved positions: {list(self.position_manager.open_positions.keys())}")
 
         except Exception as e:
-            logger.error(f"❌ Error saving state to {self.state_file}: {e}", exc_info=True)
+            logger.error(f"❌ [LIVE] Error saving state to {abs_path}: {e}", exc_info=True)
 
     def load_state(self):
         """Load state from file."""
         try:
+            # Log absolute path for debugging
+            abs_path = os.path.abspath(self.state_file)
+            logger.info(f"🔍 [LIVE] Checking for state file at: {abs_path}")
+
             if not os.path.exists(self.state_file):
-                logger.info(f"📝 No previous live trading state found at {self.state_file}, starting fresh")
+                logger.warning(f"📝 No previous live trading state found at {abs_path}")
+                logger.warning("🆕 Starting fresh - no positions to restore")
                 return
 
-            logger.info(f"📂 Loading live trading state from {self.state_file}...")
+            logger.info(f"📂 [LIVE] Loading live trading state from {abs_path}...")
 
             with open(self.state_file, 'r') as f:
                 state = json.load(f)
@@ -587,6 +598,8 @@ class LiveTradingEngine:
             # Restore balances
             self.starting_balance = state.get('starting_balance', 0.0)
             self.total_invested = state.get('total_invested', 0.0)
+
+            logger.info(f"💰 [LIVE] Restoring balances: starting=${self.starting_balance:.2f}, invested=${self.total_invested:.2f}")
 
             # Restore positions
             loaded_positions = 0
@@ -638,11 +651,15 @@ class LiveTradingEngine:
                 self.position_manager.closed_trades.append(trade)
                 loaded_trades += 1
 
-            logger.info(
-                f"✅ [LIVE] State loaded: ${self.total_invested:.2f} invested, "
-                f"{loaded_positions} positions, {loaded_trades} trades"
-            )
+            if loaded_positions > 0:
+                logger.info(
+                    f"✅ [LIVE] State loaded successfully: ${self.total_invested:.2f} invested, "
+                    f"{loaded_positions} position(s), {loaded_trades} trade(s)"
+                )
+                logger.info(f"📊 [LIVE] Restored positions: {list(self.position_manager.open_positions.keys())}")
+            else:
+                logger.warning("⚠️  [LIVE] State file loaded but NO positions found")
 
         except Exception as e:
             logger.error(f"❌ Error loading state from {self.state_file}: {e}", exc_info=True)
-            logger.info("Starting with fresh state")
+            logger.error("Starting with fresh state due to error")
