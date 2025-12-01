@@ -305,7 +305,19 @@ class JupiterSwapExecutor:
                 # Calculate actual output and fees
                 output_amount = int(quote.get('outAmount', 0)) / 1e9
                 price_impact = float(quote.get('priceImpactPct', 0))
-                fees = self._calculate_fees(amount_in, use_jito)
+
+                # FIX: For fee calculation, we need USD value not token quantity
+                # For sells: output is SOL, convert to USD (~$240/SOL)
+                # For buys: input is SOL, already in correct units
+                sol_price_usd = 240.0  # Approximate SOL price
+                if output_mint == "So11111111111111111111111111111111111111112":
+                    # Selling token for SOL - use output amount
+                    trade_value_usd = output_amount * sol_price_usd
+                else:
+                    # Buying token with SOL - use input amount
+                    trade_value_usd = amount_in * sol_price_usd
+
+                fees = self._calculate_fees(trade_value_usd, use_jito)
 
                 logger.info(
                     f"🎉 Swap confirmed! "

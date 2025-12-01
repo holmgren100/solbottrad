@@ -542,17 +542,19 @@ class LiveTradingEngine:
 
     def get_portfolio_value(self) -> float:
         """
-        Get total portfolio value (wallet balance + position values).
+        Get total portfolio value based on starting balance and P&L.
 
         Returns:
             Total portfolio value in USD
         """
-        # TODO: Implement real wallet balance check
-        # For now, calculate from positions
-        wallet_balance_usd = 200.0  # Placeholder (1 SOL @ $200)
-        positions_value_usd = self.position_manager.get_total_exposure()
+        # Calculate from starting balance + realized/unrealized P&L
+        stats = self.position_manager.get_statistics()
+        total_pnl = stats['total_realized_pnl'] + stats['total_unrealized_pnl']
 
-        return wallet_balance_usd + positions_value_usd
+        # Portfolio value = starting capital + all profits/losses
+        portfolio_value = self.starting_balance + total_pnl
+
+        return max(portfolio_value, 0.0)  # Never negative
 
     def get_performance_summary(self) -> Dict:
         """
