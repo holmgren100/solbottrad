@@ -8,6 +8,7 @@ import os
 import json
 from typing import Dict, Optional
 from datetime import datetime
+from solana.rpc.async_api import AsyncClient
 from .position_manager import PositionManager, Position, Trade
 from ..blockchain.jupiter_executor import JupiterSwapExecutor
 from ..monitoring.logger import get_logger
@@ -42,8 +43,11 @@ class LiveTradingEngine:
         self.position_manager = position_manager or PositionManager(max_open_positions)
         self.state_file = state_file
 
+        # Create RPC client for reading wallet balance
+        self.rpc_client = AsyncClient(jupiter_executor.rpc_url)
+
         # Trading state (tracked separately from wallet balance)
-        self.starting_balance = 0.0  # Will be set on first balance check
+        self.starting_balance = 0.0  # Will be set from actual wallet on first check
         self.total_invested = 0.0  # Currently invested in open positions
 
         # Partial profit taking settings (from environment)
@@ -88,15 +92,91 @@ class LiveTradingEngine:
 
     async def get_wallet_balance(self) -> float:
         """
-        Get current SOL balance from wallet.
+        Get current SOL balance from wallet by reading from blockchain.
 
         Returns:
-            SOL balance
+            SOL balance in SOL (not lamports)
         """
-        # TODO: Implement RPC call to get wallet balance
-        # For now, return placeholder
-        logger.warning("⚠️  Wallet balance check not yet implemented - using placeholder")
-        return 1.0  # Placeholder
+        try:
+            if not self.jupiter_executor.wallet:
+                logger.error("❌ No wallet loaded - cannot get balance")
+                return 0.0
+
+            # Get wallet public key
+            pubkey_str = self.jupiter_executor.wallet.get_public_key()
+
+            # Read balance from blockchain via RPC
+            from solders.pubkey import Pubkey
+            pubkey = Pubkey.from_string(pubkey_str)
+
+            response = await self.rpc_client.get_balance(pubkey)
+
+            if response.value is None:
+                logger.error(f"❌ Failed to get balance for wallet {pubkey_str[:8]}...")
+                return 0.0
+
+            # Convert lamports to SOL (1 SOL = 1e9 lamports)
+            balance_lamports = response.value
+            balance_sol = balance_lamports / 1e9
+
+            logger.info(f"💰 Wallet balance: {balance_sol:.4f} SOL ({balance_lamports:,} lamports)")
+            return balance_sol
+
+        except Exception as e:
+            logger.error(f"❌ Error getting wallet balance: {e}", exc_info=True)
+            return 0.0
+
+    async def init_wallet_balance(self, sol_price_usd: float = 240.0):
+        """
+        Initialize starting balance from actual wallet.
+        Should be called ONCE after engine creation, before trading starts.
+
+        Args:
+            sol_price_usd: Current SOL price in USD (for conversion)
+        """
+        try:
+            # Get actual wallet balance from blockchain
+            balance_sol = await self.get_wallet_balance()
+
+            if balance_sol <= 0:
+                logger.error("❌ Wallet has zero or negative balance - cannot trade!")
+                return
+
+            # Convert to USD
+            balance_usd = balance_sol * sol_price_usd
+
+            # Set as starting balance ONLY if not already set
+            if self.starting_balance == 0.0:
+                self.starting_balance = balance_usd
+                logger.info(
+                    f"✅ Starting balance initialized from wallet: "
+                    f"{balance_sol:.4f} SOL = ${balance_usd:.2f} USD (@ ${sol_price_usd}/SOL)"
+                )
+            else:
+                # Already set (from state file or previous call)
+                current_balance = balance_usd
+                logger.info(
+                    f"📊 Current wallet: {balance_sol:.4f} SOL = ${current_balance:.2f} USD"
+                )
+                logger.info(
+                    f"📊 Starting balance (from state): ${self.starting_balance:.2f} USD"
+                )
+
+                # Warn if current balance is very different from starting balance
+                # (user may have added/removed SOL)
+                difference = abs(current_balance - self.starting_balance)
+                if difference > self.starting_balance * 0.5:  # >50% difference
+                    logger.warning(
+                        f"⚠️  Large wallet balance difference detected!\n"
+                        f"   Starting: ${self.starting_balance:.2f}\n"
+                        f"   Current:  ${current_balance:.2f}\n"
+                        f"   Diff:     ${difference:.2f}\n"
+                        f"   → User may have added/removed SOL from wallet\n"
+                        f"   → P&L calculations will be based on starting balance"
+                    )
+
+        except Exception as e:
+            logger.error(f"❌ Error initializing wallet balance: {e}", exc_info=True)
 
     async def execute_buy(
         self,
@@ -662,7 +742,13 @@ class LiveTradingEngine:
             logger.error(f"❌ [LIVE] Error saving state to {abs_path}: {e}", exc_info=True)
 
     def load_state(self):
-        """Load state from file."""
+        """
+        Load state from file.
+
+        IMPORTANT: This runs during __init__ (before async context), so we can't
+        call async get_wallet_balance() here. Starting balance will be set to 0
+        and should be updated by calling init_wallet_balance() after engine is created.
+        """
         try:
             # Log absolute path for debugging
             abs_path = os.path.abspath(self.state_file)
@@ -671,6 +757,7 @@ class LiveTradingEngine:
             if not os.path.exists(self.state_file):
                 logger.warning(f"📝 No previous live trading state found at {abs_path}")
                 logger.warning("🆕 Starting fresh - no positions to restore")
+                logger.warning("⚠️  Call init_wallet_balance() after engine creation to set starting balance")
                 return
 
             logger.info(f"📂 [LIVE] Loading live trading state from {abs_path}...")
@@ -678,11 +765,13 @@ class LiveTradingEngine:
             with open(self.state_file, 'r') as f:
                 state = json.load(f)
 
-            # Restore balances
-            self.starting_balance = state.get('starting_balance', 0.0)
+            # Restore invested amount (safe to trust this)
             self.total_invested = state.get('total_invested', 0.0)
 
-            logger.info(f"💰 [LIVE] Restoring balances: starting=${self.starting_balance:.2f}, invested=${self.total_invested:.2f}")
+            # DON'T restore starting_balance from file - it will be set from actual wallet
+            # after calling init_wallet_balance()
+            logger.info(f"💰 [LIVE] Restored: invested=${self.total_invested:.2f}")
+            logger.warning(f"⚠️  Starting balance will be set from actual wallet - call init_wallet_balance()")
 
             # Restore positions
             loaded_positions = 0

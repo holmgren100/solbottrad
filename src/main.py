@@ -803,6 +803,11 @@ class SolanaTradingBot:
         logger.info("Starting Solana Trading Bot...")
         self.running = True
 
+        # Initialize wallet balance for live trading
+        if not settings.is_paper_trading():
+            logger.info("💰 Initializing wallet balance from blockchain...")
+            await self.trading_engine.init_wallet_balance(sol_price_usd=240.0)
+
         # Send startup notification
         await self.notifier.send_startup_message()
 
