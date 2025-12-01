@@ -795,6 +795,7 @@ class PositionManager:
         fieldnames = [
             'Date',
             'Time',
+            'Token Address',
             'Token',
             'Symbol',
             'Entry Price',
