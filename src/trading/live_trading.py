@@ -56,6 +56,14 @@ class LiveTradingEngine:
         self.profit_milestone_600 = float(os.getenv('PROFIT_MILESTONE_600', '10'))
         self.profit_milestone_700 = float(os.getenv('PROFIT_MILESTONE_700', '10'))
 
+        # Stuck position management settings (for /cleanup command)
+        self.auto_cleanup_enabled = os.getenv('AUTO_CLEANUP_ENABLED', 'true').lower() == 'true'
+        self.max_position_age_hours = float(os.getenv('MAX_POSITION_AGE_HOURS', '48'))
+        self.stuck_liquidity_threshold = float(os.getenv('STUCK_LIQUIDITY_THRESHOLD', '1000'))
+        self.stuck_time_hours = float(os.getenv('STUCK_TIME_HOURS', '6'))
+        self.force_close_on_rug = os.getenv('FORCE_CLOSE_ON_RUG', 'true').lower() == 'true'
+        self.min_exit_liquidity = float(os.getenv('MIN_EXIT_LIQUIDITY', '15000'))
+
         logger.info(
             f"✅ LiveTradingEngine initialized - "
             f"Wallet: {jupiter_executor.wallet.get_public_key()[:8]}..."
