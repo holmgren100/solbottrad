@@ -10,6 +10,7 @@ import httpx
 from typing import Dict, Optional
 from datetime import datetime
 from .position_manager import PositionManager, Position, Trade
+from .strategy_config import StrategySelector, StrategyProfile
 from ..blockchain.jupiter_executor import JupiterSwapExecutor
 from ..monitoring.logger import get_logger
 
@@ -51,11 +52,14 @@ class LiveTradingEngine:
         self.starting_balance = 0.0  # Will be set from actual wallet on first check
         self.total_invested = 0.0  # Currently invested in open positions
 
-        # Trailing stop settings (from environment)
+        # Strategy selector for age-based profit strategies
+        self.strategy_selector = StrategySelector()
+
+        # Trailing stop settings (from environment) - used as fallback
         self.use_trailing_stop = os.getenv('USE_TRAILING_STOP', 'true').lower() == 'true'
         self.trailing_stop_percent = float(os.getenv('TRAILING_STOP_PERCENT', '10.0'))
 
-        # Partial profit taking settings (from environment)
+        # Partial profit taking settings (from environment) - used as fallback
         self.partial_profit_enabled = os.getenv('PARTIAL_PROFIT_ENABLED', 'true').lower() == 'true'
         self.profit_milestone_100 = float(os.getenv('PROFIT_MILESTONE_100', '15'))
         self.profit_milestone_200 = float(os.getenv('PROFIT_MILESTONE_200', '20'))
@@ -203,7 +207,8 @@ class LiveTradingEngine:
         price: float,
         stop_loss: float,
         take_profit: float,
-        analysis_data: Optional[Dict] = None
+        analysis_data: Optional[Dict] = None,
+        pair_created_at: Optional[int] = None
     ) -> Dict:
         """
         Execute a real buy order on-chain.
@@ -215,6 +220,7 @@ class LiveTradingEngine:
             stop_loss: Stop loss price
             take_profit: Take profit price
             analysis_data: Optional analysis data for ML
+            pair_created_at: Unix timestamp when pair was created (for age-based strategy)
 
         Returns:
             Execution result dictionary
@@ -261,15 +267,34 @@ class LiveTradingEngine:
             actual_tokens_received = swap_result.get('output_amount', 0)
             actual_sol_spent = swap_result.get('input_amount', amount_sol)
 
+            # Select strategy based on token age
+            strategy = None
+            if pair_created_at and pair_created_at > 0:
+                strategy = self.strategy_selector.select_strategy(pair_created_at)
+                # Apply strategy-specific position size multiplier
+                adjusted_amount = actual_sol_spent * sol_price_usd * strategy.position_size_multiplier
+                logger.info(
+                    f"📊 Using strategy: {strategy.name} | "
+                    f"Trailing: {strategy.trailing_stop_percent}% | "
+                    f"Position multiplier: {strategy.position_size_multiplier}x"
+                )
+            else:
+                # No age data, use default established strategy
+                strategy = self.strategy_selector.established
+                adjusted_amount = actual_sol_spent * sol_price_usd
+                logger.info("📊 Using default strategy: established (no age data)")
+
             # Open position in position manager
             position = self.position_manager.open_position(
                 token_address=token_address,
                 entry_price=price,
-                amount_usd=actual_sol_spent * sol_price_usd,  # Actual USD spent
+                amount_usd=adjusted_amount,  # Strategy-adjusted amount
                 stop_loss=stop_loss,
                 take_profit=take_profit,
                 use_trailing_stop=self.use_trailing_stop,
-                trailing_stop_percent=self.trailing_stop_percent
+                trailing_stop_percent=strategy.trailing_stop_percent,  # Strategy-specific
+                strategy_name=strategy.name,
+                pair_created_at=pair_created_at or 0
             )
 
             if not position:
@@ -607,25 +632,14 @@ class LiveTradingEngine:
                 if not position or position.initial_quantity == 0:
                     continue
 
-                # Check if we've hit a new profit milestone
-                milestone = position.check_profit_milestone()
+                # Get strategy profile for this position
+                strategy = self.strategy_selector.get_strategy_by_name(position.strategy_name)
+
+                # Check if we've hit a new profit milestone (using strategy-specific milestones)
+                milestone = position.check_profit_milestone(strategy)
                 if milestone:
-                    # Map milestone to sell percentage
-                    sell_pct = 0
-                    if milestone == 100:
-                        sell_pct = self.profit_milestone_100
-                    elif milestone == 200:
-                        sell_pct = self.profit_milestone_200
-                    elif milestone == 300:
-                        sell_pct = self.profit_milestone_300
-                    elif milestone == 400:
-                        sell_pct = self.profit_milestone_400
-                    elif milestone == 500:
-                        sell_pct = self.profit_milestone_500
-                    elif milestone == 600:
-                        sell_pct = self.profit_milestone_600
-                    elif milestone == 700:
-                        sell_pct = self.profit_milestone_700
+                    # Get sell percentage from strategy
+                    sell_pct = strategy.get_milestone_percentage(milestone)
 
                     if sell_pct > 0:
                         # Calculate quantity to sell (percentage of INITIAL quantity)
@@ -636,7 +650,7 @@ class LiveTradingEngine:
                             sell_value = sell_quantity * position.current_price
 
                             logger.info(
-                                f"💰 [LIVE] PROFIT MILESTONE +{milestone}%: {token_address[:8]}... "
+                                f"💰 [LIVE] PROFIT MILESTONE +{milestone}% ({strategy.name}): {token_address[:8]}... "
                                 f"Selling {sell_pct:.0f}% ({sell_quantity:.4f} tokens) = ${sell_value:.2f}"
                             )
 

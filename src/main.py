@@ -477,13 +477,19 @@ class SolanaTradingBot:
 
             print(f"      💰 Calling trading engine...")
             if decision['action'] == 'buy':
+                # Extract pair_created_at from analysis data for age-based strategy
+                analysis_data = decision.get('analysis_data', {})
+                profile = analysis_data.get('profile', {}) if analysis_data else {}
+                pair_created_at = profile.get('pair_created_at', 0)
+
                 result = await self.trading_engine.execute_buy(
                     token_address=decision['token_address'],
                     amount_usd=decision['position_size'],
                     price=decision['entry_price'],
                     stop_loss=decision['stop_loss'],
                     take_profit=decision['take_profit'],
-                    analysis_data=decision.get('analysis_data')  # Pass analysis for ML collection
+                    analysis_data=analysis_data,
+                    pair_created_at=pair_created_at  # Pass for age-based strategy selection
                 )
                 print(f"      ✅ Trade result: {result}")
             else:
