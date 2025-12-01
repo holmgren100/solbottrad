@@ -194,29 +194,24 @@ class RiskAssessor:
         Liquidity is critical - can't sell tokens with no liquidity!
         Rug detection will auto-exit if liquidity drops below $8k.
 
-        LIVE TRADING: Tightened thresholds after 80-90% token death rate.
-        Need higher liquidity to ensure we can actually exit positions.
-
         Args:
             liquidity: Liquidity in USD
 
         Returns:
             Risk score (0-1)
         """
-        if liquidity >= 150000:
+        if liquidity >= 100000:
             return 0.1
-        elif liquidity >= 100000:
-            return 0.2
-        elif liquidity >= 75000:
-            return 0.3
         elif liquidity >= 50000:
-            return 0.4
-        elif liquidity >= 30000:
-            return 0.6
+            return 0.2
         elif liquidity >= 20000:
-            return 0.8
+            return 0.3
+        elif liquidity >= 10000:
+            return 0.5
+        elif liquidity >= 5000:
+            return 0.7
         else:
-            return 1.0  # Below $20k = too risky, tokens die too fast
+            return 1.0  # Below $5k = too risky, can't exit
 
     def _assess_security_risk(self, security_data: Dict) -> float:
         """
@@ -378,13 +373,12 @@ class RiskAssessor:
             True if should trade, False otherwise
         """
         # Don't trade if risk is extreme
-        # Tightened to 0.6 for live trading - only accept medium risk or lower
-        # With 80-90% of tokens dying, we need stricter filters
-        if risk_score > 0.6:
+        # Raised to 0.8 since we de-weighted volatility/age and have good exit protections
+        if risk_score > 0.8:
             return False
 
-        # Don't trade if position size is too small (0.15 for live trading quality)
-        if recommended_position < 0.15:
+        # Don't trade if position size is too small (lowered to 0.05 for testing)
+        if recommended_position < 0.05:
             return False
 
         # Don't trade if there are critical warnings
