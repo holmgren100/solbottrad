@@ -510,6 +510,42 @@ class LiveTradingEngine:
             liquidity = liquidity_data.get(token_address, 0.0)
             self.position_manager.update_position_price(token_address, current_price, liquidity)
 
+        # TIERED EXIT SYSTEM: Check liquidity degradation vs entry thresholds
+        # Entry requirement: MIN_ENTRY_LIQUIDITY = $40k
+        # This catches deteriorating tokens BEFORE they become completely dead
+        MIN_ENTRY_LIQUIDITY = 40000.0  # Match the entry filter
+        WARNING_THRESHOLD = MIN_ENTRY_LIQUIDITY * 0.7  # 30% drop = $28k
+        DANGER_THRESHOLD = MIN_ENTRY_LIQUIDITY * 0.5   # 50% drop = $20k
+        CRITICAL_THRESHOLD = 1000.0  # Absolute minimum to attempt sell
+        MIN_VOLUME_TO_SELL = 5000.0  # Need at least $5k volume to try selling
+
+        for token_address in list(self.position_manager.open_positions.keys()):
+            position = self.position_manager.get_position(token_address)
+            if not position:
+                continue
+
+            current_liq = position.current_liquidity
+
+            # DANGER ZONE: 50% drop from entry minimum
+            if current_liq < DANGER_THRESHOLD and current_liq >= CRITICAL_THRESHOLD:
+                logger.warning(
+                    f"⚠️  DANGER: {token_address[:8]}... liquidity at ${current_liq:,.0f} "
+                    f"(below ${DANGER_THRESHOLD:,.0f} = 50% of entry min)"
+                )
+                # Try to sell if there's enough volume
+                # Volume check would go here if we had volume data
+                # For now, try to sell cautiously
+                exit_price = position.current_price if position.current_price > 0 else 0.00000001
+                await self.execute_sell(token_address, exit_price, reason='degraded_liquidity')
+                continue
+
+            # WARNING ZONE: 30% drop from entry minimum
+            elif current_liq < WARNING_THRESHOLD:
+                logger.warning(
+                    f"⚠️  WARNING: {token_address[:8]}... liquidity degrading "
+                    f"(${current_liq:,.0f} < ${WARNING_THRESHOLD:,.0f}, 70% of entry min) - monitoring closely"
+                )
+
         # Check for dead/rugged positions (low liquidity, frozen price, stale data)
         dead_positions = self.position_manager.get_dead_positions(
             stale_minutes=10,
