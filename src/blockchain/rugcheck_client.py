@@ -20,15 +20,13 @@ class RugCheckClient:
         Initialize RugCheck client.
 
         Args:
-            api_key: RugCheck API key
+            api_key: RugCheck API key (optional - for authenticated endpoints)
         """
         self.api_key = api_key
-        self.base_url = "https://api.rugcheck.xyz"
-        self.chain = "solana"  # RugCheck supports multiple chains
+        self.base_url = "https://api.rugcheck.xyz/v1"  # Correct base URL with /v1
         self.session: Optional[aiohttp.ClientSession] = None
-        # Enable client even without key (RugCheck API may be public)
-        # API key provides higher rate limits if available
-        self._enabled = True  # Always enabled, key is optional
+        # Enable client even without key (some endpoints may be public)
+        self._enabled = True
 
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
@@ -49,10 +47,7 @@ class RugCheckClient:
     async def get_token_report(self, token_address: str) -> Optional[Dict]:
         """
         Get detailed security report for a token.
-        Uses the official RugCheck API endpoint: /tokens/scan/{chain}/{address}
-
-        Note: RugCheck API is FREE and may work without an API key.
-        Providing an API key may increase rate limits.
+        Official endpoint: GET /v1/tokens/{id}/report
 
         Args:
             token_address: Token mint address
@@ -63,8 +58,8 @@ class RugCheckClient:
         await self._ensure_session()
 
         try:
-            # Official RugCheck API endpoint format
-            url = f"{self.base_url}/tokens/scan/{self.chain}/{token_address}"
+            # Official Swagger endpoint: /v1/tokens/{id}/report
+            url = f"{self.base_url}/tokens/{token_address}/report"
 
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
@@ -231,12 +226,10 @@ class RugCheckClient:
             'checked_at': datetime.now().isoformat()
         }
 
-    async def get_trending_tokens(self, chain: Optional[str] = None) -> list:
+    async def get_trending_tokens(self) -> list:
         """
         Get trending tokens from RugCheck.
-
-        Args:
-            chain: Blockchain name (default: solana)
+        Official endpoint: GET /v1/stats/trending (assumed)
 
         Returns:
             List of trending token data
@@ -246,11 +239,8 @@ class RugCheckClient:
 
         await self._ensure_session()
 
-        chain = chain or self.chain
-
         try:
-            # Stats endpoints may use /stats/trending/{chain} format
-            url = f"{self.base_url}/stats/trending/{chain}"
+            url = f"{self.base_url}/stats/trending"
 
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
@@ -266,12 +256,10 @@ class RugCheckClient:
             logger.debug(f"Error fetching trending tokens: {e}")
             return []
 
-    async def get_new_tokens(self, chain: Optional[str] = None) -> list:
+    async def get_new_tokens(self) -> list:
         """
         Get newly detected tokens from RugCheck.
-
-        Args:
-            chain: Blockchain name (default: solana)
+        Official endpoint: GET /v1/stats/new_tokens
 
         Returns:
             List of new token data
@@ -281,11 +269,9 @@ class RugCheckClient:
 
         await self._ensure_session()
 
-        chain = chain or self.chain
-
         try:
-            # Stats endpoints may use /stats/new/{chain} format
-            url = f"{self.base_url}/stats/new/{chain}"
+            # Official Swagger endpoint: /v1/stats/new_tokens
+            url = f"{self.base_url}/stats/new_tokens"
 
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
@@ -309,13 +295,13 @@ class RugCheckClient:
             True if healthy, False otherwise
         """
         if not self._enabled:
-            return True  # Consider it healthy if not configured
+            return True
 
         await self._ensure_session()
 
         try:
-            # Try to get trending tokens as health check
-            url = f"{self.base_url}/stats/trending/{self.chain}"
+            # Try to get new tokens as health check
+            url = f"{self.base_url}/stats/new_tokens"
 
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 return response.status in [200, 429]  # 429 means rate limited but API is working
