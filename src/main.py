@@ -56,6 +56,28 @@ class SolanaTradingBot:
             bot_instance=self
         )
 
+        # Enhanced Monitoring System
+        from .monitoring import MetricsCollector, AlertManager, Dashboard
+        self.metrics = MetricsCollector()
+        self.alert_manager = AlertManager(self.notifier)
+        self.dashboard = Dashboard(self.metrics)
+
+        # Register APIs for monitoring
+        self.metrics.register_api('alchemy')
+        self.metrics.register_api('jupiter')
+        self.metrics.register_api('dexscreener')
+        self.metrics.register_api('twitter')
+        self.metrics.register_api('solsniffer')
+
+        # Set up default alert rules
+        alert_config = {
+            'ALERT_API_DOWN_COOLDOWN': int(os.getenv('ALERT_API_DOWN_MINUTES', '5')),
+            'ALERT_ERROR_RATE_PER_HOUR': int(os.getenv('ALERT_ERROR_RATE_PER_HOUR', '10')),
+            'ALERT_NO_TOKENS_COOLDOWN': int(os.getenv('ALERT_NO_TOKENS_MINUTES', '30')),
+            'ALERT_COOLDOWN_MINUTES': int(os.getenv('ALERT_COOLDOWN_MINUTES', '15'))
+        }
+        self.alert_manager.setup_default_rules(alert_config)
+
         # Blockchain
         self.alchemy = AlchemyClient(settings.api.alchemy_api_key)
         self.solsniffer = SolSnifferClient(settings.api.solsniffer_api_key)
