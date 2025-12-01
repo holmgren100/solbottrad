@@ -662,27 +662,67 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # Get trending tokens (they have market data!) or fallback to recent
-            print("  📡 Fetching trending tokens from Jupiter...")
-            new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
+            # PRIMARY: Try DexScreener trending (has liquidity/volume built-in!)
+            print("  📡 Fetching trending tokens from DexScreener...")
+            new_tokens = []
+            dex_trending = await self.dexscreener.get_trending_tokens(chain='solana', limit=30)
 
-            if not new_tokens:
-                print("  ⚠️  No trending tokens, trying recent...")
-                new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+            if dex_trending:
+                # Filter DexScreener trending for quality tokens
+                min_liquidity = 50000  # $50k minimum
+                min_volume = 100000    # $100k minimum daily volume
 
-            if not new_tokens:
-                print("  ⚠️  No tokens from Jupiter, using fallback")
-                logger.warning("Jupiter returned no tokens, using fallback")
-                # Fallback to popular tokens as last resort
-                new_tokens = [
-                    {'address': 'So11111111111111111111111111111111111111112'},  # SOL
-                    {'address': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},  # USDC
-                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
-                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
-                ]
+                for token_data in dex_trending:
+                    # Extract token info from DexScreener format
+                    liquidity = token_data.get('liquidity', {}).get('usd', 0)
+                    volume_24h = token_data.get('volume', {}).get('h24', 0)
+                    token_address = token_data.get('baseToken', {}).get('address')
+
+                    if not token_address:
+                        continue
+
+                    # Only include tokens with sufficient liquidity AND volume
+                    if liquidity >= min_liquidity and volume_24h >= min_volume:
+                        new_tokens.append({
+                            'address': token_address,
+                            'symbol': token_data.get('baseToken', {}).get('symbol', 'UNKNOWN'),
+                            'name': token_data.get('baseToken', {}).get('name', 'Unknown'),
+                            'liquidity_usd': liquidity,
+                            'volume_24h': volume_24h
+                        })
+
+                if new_tokens:
+                    # Sort by volume (highest first) - these are the WINNERS
+                    new_tokens.sort(key=lambda x: x.get('volume_24h', 0), reverse=True)
+                    print(f"  ✅ Found {len(new_tokens)} high-quality tokens (>${min_liquidity/1000:.0f}k liq, >${min_volume/1000:.0f}k vol)")
+                    logger.info(f"Retrieved {len(new_tokens)} filtered trending tokens from DexScreener")
+                else:
+                    print(f"  ⚠️  DexScreener returned {len(dex_trending)} tokens but none met quality filters")
+                    logger.warning("No DexScreener tokens passed liquidity/volume filters")
             else:
-                print(f"  ✅ Found {len(new_tokens)} tokens!")
-                logger.info(f"Retrieved {len(new_tokens)} tokens from Jupiter")
+                print("  ⚠️  DexScreener trending unavailable (may require premium)")
+                logger.warning("DexScreener trending returned no tokens")
+
+            # FALLBACK: Try Jupiter if DexScreener failed
+            if not new_tokens:
+                print("  📡 Falling back to Jupiter trending...")
+                new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
+
+                if not new_tokens:
+                    print("  ⚠️  No trending tokens, trying recent...")
+                    new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+
+                if not new_tokens:
+                    print("  ⚠️  No tokens from Jupiter, using safe fallback")
+                    logger.warning("All token sources failed, using safe fallback")
+                    # Fallback to established tokens as last resort
+                    new_tokens = [
+                        {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
+                        {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
+                    ]
+                else:
+                    print(f"  ✅ Found {len(new_tokens)} tokens from Jupiter (fallback)")
+                    logger.info(f"Retrieved {len(new_tokens)} tokens from Jupiter fallback")
 
             # Get currently open positions
             if settings.is_paper_trading():
