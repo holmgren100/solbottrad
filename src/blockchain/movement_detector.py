@@ -21,11 +21,12 @@ class MovementDetector:
         Initialize movement detector.
 
         Args:
-            solscan_api_key: Optional Solscan API key
+            solscan_api_key: Solscan Pro API key (v2.0)
         """
         self.solscan_api_key = solscan_api_key
-        self.base_url = "https://public-api.solscan.io"
+        self.base_url = "https://pro-api.solscan.io/v2.0"  # Official v2.0 API
         self.session: Optional[aiohttp.ClientSession] = None
+        self._enabled = solscan_api_key is not None  # v2.0 requires API key
 
         # Pattern detection thresholds
         self.rapid_transfer_threshold = 10  # 10+ transfers in 5 min = suspicious
@@ -37,7 +38,10 @@ class MovementDetector:
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
         if self.session is None or self.session.closed:
-            headers = {}
+            headers = {
+                'Accept': 'application/json'
+            }
+            # Solscan Pro API v2.0 requires API key via 'token' header
             if self.solscan_api_key:
                 headers['token'] = self.solscan_api_key
             self.session = aiohttp.ClientSession(headers=headers)
@@ -53,7 +57,8 @@ class MovementDetector:
         limit: int = 50
     ) -> Optional[List[Dict]]:
         """
-        Get recent token transfers.
+        Get recent token transfers from Solscan v2.0 API.
+        Official endpoint: GET /v2.0/token/transfer
 
         Args:
             token_address: Token mint address
@@ -62,14 +67,19 @@ class MovementDetector:
         Returns:
             List of transfer dictionaries or None if failed
         """
+        if not self._enabled:
+            logger.debug("Movement detector disabled (no Solscan API key)")
+            return None
+
         await self._ensure_session()
 
         try:
+            # Official Solscan v2.0 endpoint
             url = f"{self.base_url}/token/transfer"
             params = {
                 'address': token_address,
-                'offset': 0,
-                'limit': min(limit, 50)
+                'page': 1,
+                'page_size': min(limit, 50)  # v2.0 uses page_size
             }
 
             async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
@@ -80,6 +90,9 @@ class MovementDetector:
                     return transfers
                 elif response.status == 429:
                     logger.warning("Solscan API rate limit reached")
+                    return None
+                elif response.status == 401:
+                    logger.error("Solscan API authentication failed (check API key)")
                     return None
                 else:
                     logger.debug(f"Solscan transfer API returned {response.status}")
@@ -355,13 +368,16 @@ class MovementDetector:
         Returns:
             True if healthy, False otherwise
         """
+        if not self._enabled:
+            return True  # Consider healthy if not configured
+
         await self._ensure_session()
 
         try:
             url = f"{self.base_url}/chaininfo"
 
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                return response.status in [200, 429]
+                return response.status in [200, 429]  # 429 = rate limited but working
 
         except Exception as e:
             logger.error(f"Movement detector health check failed: {e}")

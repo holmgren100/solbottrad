@@ -20,11 +20,12 @@ class WhaleAnalyzer:
         Initialize whale analyzer.
 
         Args:
-            solscan_api_key: Optional Solscan API key for enhanced limits
+            solscan_api_key: Solscan Pro API key (v2.0)
         """
         self.solscan_api_key = solscan_api_key
-        self.base_url = "https://public-api.solscan.io"
+        self.base_url = "https://pro-api.solscan.io/v2.0"  # Official v2.0 API
         self.session: Optional[aiohttp.ClientSession] = None
+        self._enabled = solscan_api_key is not None  # v2.0 requires API key
 
         # Whale thresholds
         self.whale_threshold_percent = 5.0  # >5% of supply = whale
@@ -33,7 +34,10 @@ class WhaleAnalyzer:
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
         if self.session is None or self.session.closed:
-            headers = {}
+            headers = {
+                'Accept': 'application/json'
+            }
+            # Solscan Pro API v2.0 requires API key via 'token' header
             if self.solscan_api_key:
                 headers['token'] = self.solscan_api_key
             self.session = aiohttp.ClientSession(headers=headers)
@@ -45,7 +49,8 @@ class WhaleAnalyzer:
 
     async def get_token_holders(self, token_address: str, limit: int = 20) -> Optional[List[Dict]]:
         """
-        Get top token holders from Solscan.
+        Get top token holders from Solscan v2.0 API.
+        Official endpoint: GET /v2.0/token/holders
 
         Args:
             token_address: Token mint address
@@ -54,14 +59,19 @@ class WhaleAnalyzer:
         Returns:
             List of holder dictionaries or None if failed
         """
+        if not self._enabled:
+            logger.debug("Whale analyzer disabled (no Solscan API key)")
+            return None
+
         await self._ensure_session()
 
         try:
+            # Official Solscan v2.0 endpoint
             url = f"{self.base_url}/token/holders"
             params = {
-                'tokenAddress': token_address,
-                'offset': 0,
-                'limit': min(limit, 50)  # API max is usually 50
+                'address': token_address,  # Changed from 'tokenAddress' to 'address'
+                'page': 1,
+                'page_size': min(limit, 50)  # v2.0 uses page_size instead of limit
             }
 
             async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
@@ -72,6 +82,9 @@ class WhaleAnalyzer:
                     return holders
                 elif response.status == 429:
                     logger.warning("Solscan API rate limit reached")
+                    return None
+                elif response.status == 401:
+                    logger.error("Solscan API authentication failed (check API key)")
                     return None
                 else:
                     logger.error(f"Solscan API error: {response.status}")
@@ -360,14 +373,17 @@ class WhaleAnalyzer:
         Returns:
             True if healthy, False otherwise
         """
+        if not self._enabled:
+            return True  # Consider healthy if not configured
+
         await self._ensure_session()
 
         try:
-            # Try a simple API call
+            # Try a simple API call to check health
             url = f"{self.base_url}/chaininfo"
 
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                return response.status in [200, 429]  # 429 means rate limited but API is working
+                return response.status in [200, 429]  # 429 = rate limited but working
 
         except Exception as e:
             logger.error(f"Whale analyzer health check failed: {e}")
