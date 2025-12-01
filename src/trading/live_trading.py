@@ -51,6 +51,10 @@ class LiveTradingEngine:
         self.starting_balance = 0.0  # Will be set from actual wallet on first check
         self.total_invested = 0.0  # Currently invested in open positions
 
+        # Trailing stop settings (from environment)
+        self.use_trailing_stop = os.getenv('USE_TRAILING_STOP', 'true').lower() == 'true'
+        self.trailing_stop_percent = float(os.getenv('TRAILING_STOP_PERCENT', '10.0'))
+
         # Partial profit taking settings (from environment)
         self.partial_profit_enabled = os.getenv('PARTIAL_PROFIT_ENABLED', 'true').lower() == 'true'
         self.profit_milestone_100 = float(os.getenv('PROFIT_MILESTONE_100', '15'))
@@ -264,8 +268,8 @@ class LiveTradingEngine:
                 amount_usd=actual_sol_spent * sol_price_usd,  # Actual USD spent
                 stop_loss=stop_loss,
                 take_profit=take_profit,
-                use_trailing_stop=True,
-                trailing_stop_percent=10.0
+                use_trailing_stop=self.use_trailing_stop,
+                trailing_stop_percent=self.trailing_stop_percent
             )
 
             if not position:
