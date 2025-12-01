@@ -13,10 +13,10 @@ from typing import Optional
 from .config import settings
 from .monitoring import setup_logger, get_logger, TelegramNotifier, HealthChecker
 from .monitoring.telegram_commands import TelegramCommandHandler
-from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker, RugCheckClient
+from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker, RugCheckClient, WhaleAnalyzer, MovementDetector
 from .blockchain.jupiter_executor import JupiterSwapExecutor
 from .blockchain.wallet_manager import WalletManager
-from .market import DexScreenerClient, MarketAnalyzer, JupiterClient
+from .market import DexScreenerClient, MarketAnalyzer, JupiterClient, VolumeAnalyzer
 from .social import TwitterClient, SentimentAnalyzer
 from .ai import SentimentModel, PricePredictor, RiskAssessor
 from .trading import TelegramExecutor, PositionManager, PaperTradingEngine
@@ -69,6 +69,8 @@ class SolanaTradingBot:
         self.metrics.register_api('twitter')
         self.metrics.register_api('solsniffer')
         self.metrics.register_api('rugcheck')
+        self.metrics.register_api('whale_analyzer')
+        self.metrics.register_api('movement_detector')
 
         # Set up default alert rules
         alert_config = {
@@ -83,6 +85,8 @@ class SolanaTradingBot:
         self.alchemy = AlchemyClient(settings.api.alchemy_api_key)
         self.solsniffer = SolSnifferClient(settings.api.solsniffer_api_key)
         self.rugcheck = RugCheckClient(settings.api.rugcheck_api_key)
+        self.whale_analyzer = WhaleAnalyzer(settings.api.solscan_api_key)
+        self.movement_detector = MovementDetector(settings.api.solscan_api_key)
         self.wallet_tracker = WalletTracker()
 
         # Market
@@ -91,6 +95,7 @@ class SolanaTradingBot:
             min_liquidity_usd=settings.trading.min_liquidity_usd,
             min_volume_24h=settings.trading.min_volume_24h
         )
+        self.volume_analyzer = VolumeAnalyzer()
 
         # Token Discovery
         self.jupiter = JupiterClient()
@@ -285,6 +290,76 @@ class SolanaTradingBot:
                 if profile:
                     logger.info(f"📊 Enriched with real data: {token_address[:12]}... (liq: ${profile.get('liquidity_usd', 0):,.0f}, vol: ${profile.get('volume_24h', 0):,.0f})")
 
+            # 1.5. MULTI-LAYER SCREENING (Phase 3) - Additional smart money & risk filters
+            volume_analysis = None
+            whale_analysis = None
+            movement_analysis = None
+
+            # Volume breakout detection (smart money tracking)
+            if self.settings.trading.enable_volume_breakout and profile:
+                try:
+                    volume_analysis = self.volume_analyzer.detect_smart_money_accumulation(
+                        token_address=token_address,
+                        current_volume=profile.get('volume_24h', 0),
+                        liquidity_usd=profile.get('liquidity_usd', 0)
+                    )
+                    logger.info(
+                        f"📈 Volume: {volume_analysis['signal']} | "
+                        f"Score: {volume_analysis['smart_money_score']:.2f} | "
+                        f"Indicators: {', '.join(volume_analysis['indicators'][:2])}"
+                    )
+                except Exception as e:
+                    logger.debug(f"Volume analysis skipped: {e}")
+
+            # Whale concentration analysis
+            if self.settings.trading.enable_whale_tracking:
+                try:
+                    whale_start = time.time()
+                    token_supply = profile.get('fdv', 0) / profile.get('price_usd', 1) if profile.get('price_usd', 0) > 0 else None
+                    whale_analysis = await self.whale_analyzer.quick_whale_check(token_address, token_supply)
+                    whale_time_ms = (time.time() - whale_start) * 1000
+                    self.metrics.record_api_call('whale_analyzer', success=True, response_time_ms=whale_time_ms)
+
+                    if not whale_analysis['is_safe']:
+                        logger.warning(
+                            f"⚠️  Whale risk detected: {whale_analysis['whale_risk']} | "
+                            f"Top holder: {whale_analysis.get('top_holder_percent', 0):.1f}% | "
+                            f"Warnings: {', '.join(whale_analysis['warnings'][:2])}"
+                        )
+                    else:
+                        logger.info(f"✅ Whale check passed: {whale_analysis['whale_risk']} risk")
+                except Exception as e:
+                    logger.debug(f"Whale analysis skipped: {e}")
+
+            # Unusual movement detection
+            if self.settings.trading.enable_movement_detection:
+                try:
+                    movement_start = time.time()
+                    movement_analysis = await self.movement_detector.quick_movement_check(token_address)
+                    movement_time_ms = (time.time() - movement_start) * 1000
+                    self.metrics.record_api_call('movement_detector', success=True, response_time_ms=movement_time_ms)
+
+                    if not movement_analysis['is_safe']:
+                        logger.warning(
+                            f"🚨 Unusual movement: {movement_analysis['movement_risk']} | "
+                            f"Pattern: {movement_analysis['pattern']} | "
+                            f"Flags: {', '.join(movement_analysis['warnings'][:2])}"
+                        )
+
+                        # Block critical rug signals
+                        if movement_analysis['rug_risk'] == 'critical':
+                            logger.error(f"🚫 Token REJECTED: Critical rug signals detected")
+                            await self.notifier.send_message(
+                                f"🚨 **Critical Rug Signals**\n"
+                                f"Token: `{token_address[:8]}...`\n"
+                                f"Signals: {', '.join(movement_analysis['rug_signals'])}"
+                            )
+                            return None
+                    else:
+                        logger.info(f"✅ Movement check passed: {movement_analysis['movement_risk']} risk")
+                except Exception as e:
+                    logger.debug(f"Movement analysis skipped: {e}")
+
             # 2. Get security data
             security_data = await self.solsniffer.analyze_token(token_address)
 
@@ -363,6 +438,9 @@ class SolanaTradingBot:
                 'profile': profile,
                 'security': security_data,
                 'rug_check': rug_check,
+                'volume_analysis': volume_analysis,
+                'whale_analysis': whale_analysis,
+                'movement_analysis': movement_analysis,
                 'market_signal': market_signal,
                 'sentiment_score': sentiment_score,
                 'price_prediction': price_prediction,
