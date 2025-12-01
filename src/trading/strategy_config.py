@@ -131,15 +131,38 @@ class StrategySelector:
         Select appropriate strategy based on token age.
 
         Args:
-            pair_created_at: Unix timestamp when pair was created
+            pair_created_at: Unix timestamp when pair was created (seconds or milliseconds)
 
         Returns:
             StrategyProfile for this token
         """
+        # Handle invalid timestamps
+        if pair_created_at <= 0:
+            logger.warning(f"⚠️ Invalid timestamp {pair_created_at}, using established strategy")
+            return self.established
+
         # Calculate token age in hours
         current_time = int(datetime.now().timestamp())
-        age_seconds = current_time - pair_created_at
+
+        # DexScreener returns timestamps in milliseconds, convert to seconds if needed
+        # Unix timestamp in seconds is ~1.7 billion (10 digits)
+        # Unix timestamp in milliseconds is ~1.7 trillion (13 digits)
+        if pair_created_at > 10000000000:  # More than 10 digits = milliseconds
+            pair_created_at_seconds = pair_created_at // 1000
+            logger.debug(f"Converted timestamp from ms to seconds: {pair_created_at} -> {pair_created_at_seconds}")
+        else:
+            pair_created_at_seconds = pair_created_at
+
+        age_seconds = current_time - pair_created_at_seconds
         age_hours = age_seconds / 3600
+
+        # Sanity check: age should be positive and reasonable (< 1 year)
+        if age_hours < 0 or age_hours > 8760:  # 8760 hours = 1 year
+            logger.warning(
+                f"⚠️ Unrealistic token age {age_hours:.1f}h "
+                f"(created_at: {pair_created_at}, current: {current_time}), using established strategy"
+            )
+            return self.established
 
         # Select strategy based on age
         for strategy in self.strategies:
@@ -151,7 +174,7 @@ class StrategySelector:
                 )
                 return strategy
 
-        # Default to established if something goes wrong
+        # Default to established if no match
         logger.warning(f"⚠️ Could not determine strategy for age {age_hours:.1f}h, using established")
         return self.established
 
