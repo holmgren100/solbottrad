@@ -818,10 +818,17 @@ class LiveTradingEngine:
             # Restore invested amount (safe to trust this)
             self.total_invested = state.get('total_invested', 0.0)
 
-            # DON'T restore starting_balance from file - it will be set from actual wallet
-            # after calling init_wallet_balance()
-            logger.info(f"💰 [LIVE] Restored: invested=${self.total_invested:.2f}")
-            logger.warning(f"⚠️  Starting balance will be set from actual wallet - call init_wallet_balance()")
+            # Restore starting_balance from state file
+            # This is CRITICAL for accurate P&L tracking across restarts
+            # Without this, we'd double-count realized profits from previous sessions
+            saved_starting_balance = state.get('starting_balance', 0.0)
+            if saved_starting_balance > 0:
+                self.starting_balance = saved_starting_balance
+                logger.info(f"💰 [LIVE] Restored starting balance: ${self.starting_balance:.2f}")
+            else:
+                logger.warning(f"⚠️  No starting balance in state file - will be set from actual wallet")
+
+            logger.info(f"💰 [LIVE] Restored: starting=${self.starting_balance:.2f}, invested=${self.total_invested:.2f}")
 
             # Restore positions
             loaded_positions = 0
