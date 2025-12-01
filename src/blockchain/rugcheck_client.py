@@ -26,18 +26,19 @@ class RugCheckClient:
         self.base_url = "https://api.rugcheck.xyz"
         self.chain = "solana"  # RugCheck supports multiple chains
         self.session: Optional[aiohttp.ClientSession] = None
-        self._enabled = api_key is not None and api_key != "your_actual_key_here"
+        # Enable client even without key (RugCheck API may be public)
+        # API key provides higher rate limits if available
+        self._enabled = True  # Always enabled, key is optional
 
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
-        if not self._enabled:
-            return
-
         if self.session is None or self.session.closed:
             headers = {
-                'X-API-KEY': self.api_key,
                 'Content-Type': 'application/json'
             }
+            # Only add API key if provided (some endpoints may be public)
+            if self._enabled and self.api_key:
+                headers['X-API-KEY'] = self.api_key
             self.session = aiohttp.ClientSession(headers=headers)
 
     async def close(self):
@@ -50,16 +51,15 @@ class RugCheckClient:
         Get detailed security report for a token.
         Uses the official RugCheck API endpoint: /tokens/scan/{chain}/{address}
 
+        Note: RugCheck API is FREE and may work without an API key.
+        Providing an API key may increase rate limits.
+
         Args:
             token_address: Token mint address
 
         Returns:
             Token report dictionary or None if failed
         """
-        if not self._enabled:
-            logger.debug("RugCheck client not enabled (no API key)")
-            return None
-
         await self._ensure_session()
 
         try:
