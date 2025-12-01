@@ -9,6 +9,7 @@ import json
 import os
 import uuid
 from .position_manager import PositionManager, Trade, Position
+from .strategy_config import StrategySelector, StrategyProfile
 from ..blockchain.jupiter_executor import JupiterSwapExecutor
 from ..monitoring.logger import get_logger
 
@@ -128,6 +129,9 @@ class PaperTradingEngine:
             paper_trading=True  # Always True in paper trading mode
         )
         logger.info(f"✅ Jupiter executor initialized (Paper Mode, Jito: {use_jito})")
+
+        # Initialize strategy selector for age-based profit strategies
+        self.strategy_selector = StrategySelector()
 
         # Load previous state if exists
         self.load_state()
@@ -387,7 +391,8 @@ class PaperTradingEngine:
         take_profit: float,
         use_trailing_stop: Optional[bool] = None,
         trailing_stop_percent: Optional[float] = None,
-        analysis_data: Optional[Dict] = None
+        analysis_data: Optional[Dict] = None,
+        pair_created_at: Optional[int] = None
     ) -> Dict:
         """
         Execute a simulated buy order.
@@ -401,6 +406,7 @@ class PaperTradingEngine:
             use_trailing_stop: Whether to use trailing stop (reads from .env if None)
             trailing_stop_percent: Percent to trail below peak (reads from .env if None)
             analysis_data: Token analysis data (should include liquidity_usd, volume_24h)
+            pair_created_at: Unix timestamp when pair was created (for age-based strategy)
 
         Returns:
             Execution result dictionary
@@ -410,6 +416,22 @@ class PaperTradingEngine:
             use_trailing_stop = self.use_trailing_stop
         if trailing_stop_percent is None:
             trailing_stop_percent = self.trailing_stop_percent
+
+        # Select strategy based on token age (if provided)
+        strategy = None
+        if pair_created_at and pair_created_at > 0:
+            strategy = self.strategy_selector.select_strategy(pair_created_at)
+            # Apply strategy-specific adjustments
+            amount_usd = amount_usd * strategy.position_size_multiplier
+            trailing_stop_percent = strategy.trailing_stop_percent
+            logger.info(
+                f"📊 Using strategy: {strategy.name} | "
+                f"Trailing: {strategy.trailing_stop_percent}% | "
+                f"Position multiplier: {strategy.position_size_multiplier}x"
+            )
+        else:
+            # No age data, use default settings from .env
+            logger.debug(f"No token age data, using default .env settings")
 
         # Track if this trade uses volume fallback (for analysis)
         is_volume_fallback = False
