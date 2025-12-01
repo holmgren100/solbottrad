@@ -426,16 +426,45 @@ class LiveTradingEngine:
         for token_address in dead_positions:
             position = self.position_manager.get_position(token_address)
             if position:
-                # Use current price if available, otherwise assume minimal value
-                exit_price = position.current_price if position.current_price > 0 else 0.00000001
-
                 logger.error(
                     f"💀 [LIVE] DEAD TOKEN DETECTED: {token_address[:8]}... "
                     f"Entry: ${position.entry_price:.8f}, "
                     f"Current: ${position.current_price:.8f}, "
                     f"Liquidity: ${position.current_liquidity:.0f}"
                 )
-                await self.execute_sell(token_address, exit_price, reason='low_liquidity')
+
+                # CRITICAL: Don't try to sell tokens with very low/zero liquidity!
+                # Attempting to sell can result in catastrophic fees (>$900)
+                # Better to write off the position than pay more in fees than it's worth
+                if position.current_liquidity < self.min_exit_liquidity:
+                    logger.error(
+                        f"🚫 [LIVE] INSUFFICIENT LIQUIDITY to sell safely!\n"
+                        f"   Position Value: ${position.amount_usd:.2f}\n"
+                        f"   Liquidity: ${position.current_liquidity:.0f} < ${self.min_exit_liquidity:.0f}\n"
+                        f"   ⚠️  FORCE CLOSING (write-off) to avoid catastrophic fees"
+                    )
+
+                    # Force close WITHOUT attempting to sell
+                    trade = self.position_manager.force_close_position(
+                        token_address,
+                        reason='insufficient_liquidity'
+                    )
+
+                    if trade:
+                        # Update tracking
+                        self.total_invested -= position.amount_usd
+
+                        # Save state after force close
+                        self.save_state()
+
+                        logger.warning(
+                            f"✅ [LIVE] DEAD POSITION CLOSED: {token_address[:8]}... "
+                            f"Written off ${position.amount_usd:.2f} to avoid fee disaster"
+                        )
+                else:
+                    # Liquidity is low but above minimum - attempt cautious sell
+                    exit_price = position.current_price if position.current_price > 0 else 0.00000001
+                    await self.execute_sell(token_address, exit_price, reason='low_liquidity')
 
         # Check for profit milestones (partial profit-taking)
         if self.partial_profit_enabled:

@@ -4,6 +4,7 @@ Allows users to check status, modify settings, and control the bot via Telegram.
 """
 
 import asyncio
+from datetime import datetime
 from typing import Optional, Callable
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
