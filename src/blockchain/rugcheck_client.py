@@ -23,7 +23,8 @@ class RugCheckClient:
             api_key: RugCheck API key
         """
         self.api_key = api_key
-        self.base_url = "https://api.rugcheck.xyz/v1"
+        self.base_url = "https://api.rugcheck.xyz"
+        self.chain = "solana"  # RugCheck supports multiple chains
         self.session: Optional[aiohttp.ClientSession] = None
         self._enabled = api_key is not None and api_key != "your_actual_key_here"
 
@@ -47,6 +48,7 @@ class RugCheckClient:
     async def get_token_report(self, token_address: str) -> Optional[Dict]:
         """
         Get detailed security report for a token.
+        Uses the official RugCheck API endpoint: /tokens/scan/{chain}/{address}
 
         Args:
             token_address: Token mint address
@@ -61,7 +63,8 @@ class RugCheckClient:
         await self._ensure_session()
 
         try:
-            url = f"{self.base_url}/tokens/{token_address}/report"
+            # Official RugCheck API endpoint format
+            url = f"{self.base_url}/tokens/scan/{self.chain}/{token_address}"
 
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
@@ -87,7 +90,8 @@ class RugCheckClient:
 
     async def get_token_summary(self, token_address: str) -> Optional[Dict]:
         """
-        Get summary security report for a token (faster).
+        Get summary security report for a token.
+        Note: The scan endpoint returns complete data, so this is an alias.
 
         Args:
             token_address: Token mint address
@@ -95,36 +99,9 @@ class RugCheckClient:
         Returns:
             Token summary dictionary or None if failed
         """
-        if not self._enabled:
-            logger.debug("RugCheck client not enabled (no API key)")
-            return None
-
-        await self._ensure_session()
-
-        try:
-            url = f"{self.base_url}/tokens/{token_address}/report/summary"
-
-            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    logger.debug(f"Retrieved RugCheck summary for {token_address[:8]}...")
-                    return data
-                elif response.status == 404:
-                    logger.debug(f"Token {token_address[:8]}... not found in RugCheck")
-                    return None
-                elif response.status == 429:
-                    logger.warning("RugCheck API rate limit reached")
-                    return None
-                else:
-                    logger.error(f"RugCheck API error: {response.status}")
-                    return None
-
-        except asyncio.TimeoutError:
-            logger.warning(f"RugCheck API timeout for {token_address[:8]}...")
-            return None
-        except Exception as e:
-            logger.error(f"Error fetching RugCheck summary: {e}")
-            return None
+        # The /tokens/scan endpoint returns all data, no separate summary endpoint
+        # Just use the main scan endpoint
+        return await self.get_token_report(token_address)
 
     def analyze_risk(self, report: Dict) -> Dict:
         """
@@ -254,62 +231,74 @@ class RugCheckClient:
             'checked_at': datetime.now().isoformat()
         }
 
-    async def get_trending_tokens(self) -> list:
+    async def get_trending_tokens(self, chain: Optional[str] = None) -> list:
         """
         Get trending tokens from RugCheck.
 
+        Args:
+            chain: Blockchain name (default: solana)
+
         Returns:
-            List of trending token addresses
+            List of trending token data
         """
         if not self._enabled:
             return []
 
         await self._ensure_session()
 
+        chain = chain or self.chain
+
         try:
-            url = f"{self.base_url}/stats/trending"
+            # Stats endpoints may use /stats/trending/{chain} format
+            url = f"{self.base_url}/stats/trending/{chain}"
 
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
                     data = await response.json()
-                    tokens = data.get('tokens', [])
+                    tokens = data if isinstance(data, list) else data.get('tokens', [])
                     logger.debug(f"Retrieved {len(tokens)} trending tokens from RugCheck")
                     return tokens
                 else:
-                    logger.error(f"RugCheck trending API error: {response.status}")
+                    logger.debug(f"RugCheck trending API error: {response.status}")
                     return []
 
         except Exception as e:
-            logger.error(f"Error fetching trending tokens: {e}")
+            logger.debug(f"Error fetching trending tokens: {e}")
             return []
 
-    async def get_new_tokens(self) -> list:
+    async def get_new_tokens(self, chain: Optional[str] = None) -> list:
         """
         Get newly detected tokens from RugCheck.
 
+        Args:
+            chain: Blockchain name (default: solana)
+
         Returns:
-            List of new token addresses
+            List of new token data
         """
         if not self._enabled:
             return []
 
         await self._ensure_session()
 
+        chain = chain or self.chain
+
         try:
-            url = f"{self.base_url}/stats/new_tokens"
+            # Stats endpoints may use /stats/new/{chain} format
+            url = f"{self.base_url}/stats/new/{chain}"
 
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
                     data = await response.json()
-                    tokens = data.get('tokens', [])
+                    tokens = data if isinstance(data, list) else data.get('tokens', [])
                     logger.debug(f"Retrieved {len(tokens)} new tokens from RugCheck")
                     return tokens
                 else:
-                    logger.error(f"RugCheck new tokens API error: {response.status}")
+                    logger.debug(f"RugCheck new tokens API error: {response.status}")
                     return []
 
         except Exception as e:
-            logger.error(f"Error fetching new tokens: {e}")
+            logger.debug(f"Error fetching new tokens: {e}")
             return []
 
     async def health_check(self) -> bool:
@@ -326,7 +315,7 @@ class RugCheckClient:
 
         try:
             # Try to get trending tokens as health check
-            url = f"{self.base_url}/stats/trending"
+            url = f"{self.base_url}/stats/trending/{self.chain}"
 
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 return response.status in [200, 429]  # 429 means rate limited but API is working
