@@ -256,10 +256,53 @@ class LiveTradingEngine:
 
             if not swap_result.get('success'):
                 logger.error(f"❌ Sell swap failed: {swap_result.get('error', 'Unknown')}")
+
+                # Track failed sell attempts for stuck position detection
+                position.failed_sell_attempts += 1
+
+                # Force close after 20 failed attempts (~7 minutes of trying every 20 seconds)
+                if position.failed_sell_attempts >= 20:
+                    logger.error(
+                        f"🚫 [LIVE] STUCK POSITION - Failed to sell {position.failed_sell_attempts} times!\n"
+                        f"   Token: {token_address[:8]}...\n"
+                        f"   Entry: ${position.entry_price:.8f}, Value: ${position.amount_usd:.2f}\n"
+                        f"   Liquidity: ${position.current_liquidity:.0f}\n"
+                        f"   ⚠️  FORCE CLOSING to free position slot (writing off loss)"
+                    )
+
+                    # Force close the position
+                    trade = self.position_manager.force_close_position(
+                        token_address,
+                        reason='stuck_no_route'
+                    )
+
+                    if trade:
+                        # Update tracking
+                        self.total_invested -= position.amount_usd
+
+                        # Save state after force close
+                        self.save_state()
+
+                        logger.warning(
+                            f"✅ [LIVE] STUCK POSITION CLOSED: {token_address[:8]}... "
+                            f"Written off ${position.amount_usd:.2f} to free slot"
+                        )
+
+                        return {
+                            'status': 'force_closed',
+                            'reason': 'stuck_no_route',
+                            'token_address': token_address,
+                            'loss': position.amount_usd
+                        }
+
                 return {
                     'status': 'failed',
-                    'reason': swap_result.get('error', 'swap_failed')
+                    'reason': swap_result.get('error', 'swap_failed'),
+                    'failed_attempts': position.failed_sell_attempts
                 }
+
+            # Reset failed sell attempts on successful sell
+            position.failed_sell_attempts = 0
 
             # Calculate profit on this sell
             cost_basis = position.entry_price * sell_quantity
@@ -547,7 +590,8 @@ class LiveTradingEngine:
                     'current_liquidity': pos.current_liquidity,
                     'price_update_failures': pos.price_update_failures,
                     'initial_quantity': pos.initial_quantity,
-                    'milestones_hit': list(pos.milestones_hit)
+                    'milestones_hit': list(pos.milestones_hit),
+                    'failed_sell_attempts': pos.failed_sell_attempts
                 }
 
             # Save recent trades (last 100)
@@ -631,6 +675,9 @@ class LiveTradingEngine:
                 # Restore partial profit data
                 position.initial_quantity = pos_data.get('initial_quantity', pos_data['quantity'])
                 position.milestones_hit = set(pos_data.get('milestones_hit', []))
+
+                # Restore stuck position tracking
+                position.failed_sell_attempts = pos_data.get('failed_sell_attempts', 0)
 
                 self.position_manager.open_positions[token_addr] = position
                 loaded_positions += 1

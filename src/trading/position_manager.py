@@ -42,6 +42,8 @@ class Position:
     milestones_hit: set = field(default_factory=set)  # Track which profit milestones have been taken (100, 200, 300, 500)
     # Volume fallback flag (high risk trade with reduced position size)
     volume_fallback: bool = False  # True if entered with volume fallback (missing liquidity data)
+    # Stuck position detection
+    failed_sell_attempts: int = 0  # Track consecutive failed sell attempts (for force close)
 
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
