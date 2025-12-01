@@ -44,6 +44,9 @@ class Position:
     volume_fallback: bool = False  # True if entered with volume fallback (missing liquidity data)
     # Stuck position detection
     failed_sell_attempts: int = 0  # Track consecutive failed sell attempts (for force close)
+    # Strategy tracking (for age-based profit strategies)
+    strategy_name: str = 'established'  # Which strategy is this position using
+    pair_created_at: int = 0  # Unix timestamp when pair was created (for age tracking)
 
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
@@ -79,19 +82,31 @@ class Position:
                     f"Peak ${self.highest_price:.8f} → Stop ${self.trailing_stop_price:.8f}"
                 )
 
-    def check_profit_milestone(self) -> Optional[int]:
+    def check_profit_milestone(self, strategy_profile=None) -> Optional[int]:
         """
         Check if position has hit a new profit milestone.
 
+        Args:
+            strategy_profile: StrategyProfile to check milestones against (optional)
+
         Returns:
-            Milestone level (100, 200, 300, 500) if new milestone hit, None otherwise
+            Milestone level (50, 100, 150, 200, etc.) if new milestone hit, None otherwise
         """
         # Check milestones in order from highest to lowest
-        milestones = [700, 600, 500, 400, 300, 200, 100]
+        milestones = [700, 600, 500, 400, 300, 200, 150, 100, 50]
 
         for milestone in milestones:
+            # Check if we've hit this milestone
             if self.unrealized_pnl_percent >= milestone and milestone not in self.milestones_hit:
-                return milestone
+                # If strategy profile provided, check if this milestone has a sell percentage
+                if strategy_profile:
+                    sell_pct = strategy_profile.get_milestone_percentage(milestone)
+                    if sell_pct > 0:
+                        return milestone
+                else:
+                    # No strategy profile, use old behavior (only 100, 200, 300, etc.)
+                    if milestone in [100, 200, 300, 400, 500, 600, 700]:
+                        return milestone
 
         return None
 
@@ -197,7 +212,9 @@ class PositionManager:
         take_profit: float,
         use_trailing_stop: bool = True,
         trailing_stop_percent: float = 15.0,
-        volume_fallback: bool = False
+        volume_fallback: bool = False,
+        strategy_name: str = 'established',
+        pair_created_at: int = 0
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -248,7 +265,9 @@ class PositionManager:
             trailing_stop_price=stop_loss,  # Start with regular stop loss
             initial_quantity=quantity,  # Track original quantity for partial profit taking
             last_known_price=entry_price,  # Initialize for frozen price detection
-            volume_fallback=volume_fallback  # Track if this is a high-risk volume fallback trade
+            volume_fallback=volume_fallback,  # Track if this is a high-risk volume fallback trade
+            strategy_name=strategy_name,  # Age-based strategy for this token
+            pair_created_at=pair_created_at  # Token pair creation timestamp
         )
 
         self.open_positions[token_address] = position
