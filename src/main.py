@@ -64,7 +64,8 @@ class SolanaTradingBot:
         # Market
         self.dexscreener = DexScreenerClient(settings.api.dexscreener_api_key)
         self.market_analyzer = MarketAnalyzer(
-            min_liquidity_usd=settings.trading.min_liquidity_usd
+            min_liquidity_usd=settings.trading.min_liquidity_usd,
+            min_volume_24h=settings.trading.min_volume_24h
         )
 
         # Token Discovery

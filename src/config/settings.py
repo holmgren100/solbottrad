@@ -17,6 +17,7 @@ class TradingConfig:
     """Trading-specific configuration."""
     max_position_size: float
     min_liquidity_usd: float
+    min_volume_24h: float
     max_slippage_percent: float
     min_confidence_score: float
     paper_trading_mode: bool
@@ -52,7 +53,8 @@ class Settings:
         """Initialize settings from environment variables."""
         self.trading = TradingConfig(
             max_position_size=float(os.getenv('MAX_POSITION_SIZE', '100')),
-            min_liquidity_usd=float(os.getenv('MIN_LIQUIDITY_USD', '10000')),
+            min_liquidity_usd=float(os.getenv('MIN_ENTRY_LIQUIDITY', '40000')),
+            min_volume_24h=float(os.getenv('MIN_24H_VOLUME', '20000')),
             max_slippage_percent=float(os.getenv('MAX_SLIPPAGE_PERCENT', '5')),
             min_confidence_score=float(os.getenv('MIN_CONFIDENCE_SCORE', '0.7')),
             paper_trading_mode=os.getenv('PAPER_TRADING_MODE', 'true').lower() == 'true',

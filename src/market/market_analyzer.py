@@ -28,14 +28,16 @@ class MarketSignal:
 class MarketAnalyzer:
     """Analyzes market data to generate trading signals."""
 
-    def __init__(self, min_liquidity_usd: float = 10000):
+    def __init__(self, min_liquidity_usd: float = 10000, min_volume_24h: float = 20000):
         """
         Initialize market analyzer.
 
         Args:
             min_liquidity_usd: Minimum liquidity threshold in USD
+            min_volume_24h: Minimum 24h volume threshold in USD
         """
         self.min_liquidity_usd = min_liquidity_usd
+        self.min_volume_24h = min_volume_24h
         self.price_history: Dict[str, List[Dict]] = {}
 
     def record_price(self, token_address: str, price: float, volume: float):
@@ -102,6 +104,24 @@ class MarketAnalyzer:
             reasons.append("No trading volume - likely honeypot/dead token")
             signal_type = 'hold'
             confidence = 0.1
+            return MarketSignal(
+                token_address=token_address,
+                signal_type=signal_type,
+                strength=0.0,
+                confidence=confidence,
+                reasons=reasons,
+                timestamp=datetime.now(),
+                price=price,
+                volume_24h=volume_24h,
+                liquidity=liquidity
+            )
+
+        # CRITICAL: Check minimum volume threshold
+        # BO honeypot fix: Must have minimum volume to ensure tradability
+        if volume_24h < self.min_volume_24h:
+            reasons.append(f"Insufficient volume (${volume_24h:,.0f} < ${self.min_volume_24h:,.0f})")
+            signal_type = 'hold'
+            confidence = 0.2
             return MarketSignal(
                 token_address=token_address,
                 signal_type=signal_type,
