@@ -11,6 +11,26 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 
+def escape_markdown(text: str) -> str:
+    """
+    Escape special characters for Telegram Markdown.
+
+    Args:
+        text: Text to escape
+
+    Returns:
+        Escaped text safe for Telegram Markdown
+    """
+    # Telegram Markdown special characters that need escaping
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+
+    escaped_text = text
+    for char in special_chars:
+        escaped_text = escaped_text.replace(char, f'\\{char}')
+
+    return escaped_text
+
+
 class TelegramNotifier:
     """Handles sending notifications via Telegram."""
 
@@ -76,7 +96,10 @@ class TelegramNotifier:
         }
 
         emoji = emoji_map.get(level.upper(), 'ℹ️')
-        formatted_message = f"{emoji} *{title}*\n\n{message}"
+        # Escape special markdown characters in title and message to prevent parsing errors
+        safe_title = escape_markdown(title)
+        safe_message = escape_markdown(message)
+        formatted_message = f"{emoji} *{safe_title}*\n\n{safe_message}"
 
         return await self.send_message(formatted_message)
 
