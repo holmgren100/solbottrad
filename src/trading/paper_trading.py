@@ -39,13 +39,13 @@ class PaperTradingEngine:
         """
         # Read rug detection settings from environment
         self.rug_detection_enabled = os.getenv('RUG_DETECTION_ENABLED', 'true').lower() == 'true'
-        self.stale_price_minutes = float(os.getenv('STALE_PRICE_MINUTES', '5'))
+        self.stale_price_minutes = float(os.getenv('STALE_PRICE_MINUTES', '2'))
         self.frozen_price_minutes = float(os.getenv('FROZEN_PRICE_MINUTES', '15'))
         self.min_position_liquidity = float(os.getenv('MIN_POSITION_LIQUIDITY', '5000.0'))
 
         # Read trailing stop settings from environment
         self.use_trailing_stop = os.getenv('USE_TRAILING_STOP', 'true').lower() == 'true'
-        self.trailing_stop_percent = float(os.getenv('TRAILING_STOP_PERCENT', '15.0'))
+        self.trailing_stop_percent = float(os.getenv('TRAILING_STOP_PERCENT', '10.0'))
 
         # Read partial profit taking settings from environment
         self.partial_profit_enabled = os.getenv('PARTIAL_PROFIT_ENABLED', 'false').lower() == 'true'
@@ -68,17 +68,17 @@ class PaperTradingEngine:
         self.total_fees_paid = 0.0
         self.total_slippage_cost = 0.0
 
-        # Realistic liquidity and volume filters (based on 530-trade analysis)
+        # Realistic liquidity and volume filters (Nov 30 working settings)
         # Analysis showed 29.4% trades had ZERO liquidity - this prevents those
-        self.min_entry_liquidity = float(os.getenv('MIN_ENTRY_LIQUIDITY', '100000'))  # $100k minimum at entry
-        self.min_exit_liquidity = float(os.getenv('MIN_EXIT_LIQUIDITY', '50000'))     # $50k minimum at exit
-        self.min_24h_volume = float(os.getenv('MIN_24H_VOLUME', '50000'))             # $50k daily volume
+        self.min_entry_liquidity = float(os.getenv('MIN_ENTRY_LIQUIDITY', '30000'))  # $30k minimum at entry
+        self.min_exit_liquidity = float(os.getenv('MIN_EXIT_LIQUIDITY', '15000'))     # $15k minimum at exit
+        self.min_24h_volume = float(os.getenv('MIN_24H_VOLUME', '15000'))             # $15k daily volume
         self.max_position_vs_liquidity = float(os.getenv('MAX_POSITION_VS_LIQUIDITY', '0.005'))  # Max 0.5% of pool
 
         # TIER 2 FILTERS: Price and volume safety (prevents 80% of high-risk trades!)
         self.min_entry_price = float(os.getenv('MIN_ENTRY_PRICE', '0.10'))           # Minimum entry price (blocks ultra-cheap scam tokens)
         self.max_tokens_per_dollar = float(os.getenv('MAX_TOKENS_PER_DOLLAR', '10000'))  # Max tokens per dollar (blocks high-volume scams)
-        self.max_position_size = float(os.getenv('MAX_POSITION_SIZE', '50'))         # Hard cap on position size
+        self.max_position_size = float(os.getenv('MAX_POSITION_SIZE', '100'))         # Hard cap on position size
 
         # Volume fallback (when liquidity data unavailable but volume is high)
         self.allow_volume_fallback = os.getenv('ALLOW_VOLUME_FALLBACK', 'true').lower() == 'true'
