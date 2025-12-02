@@ -56,6 +56,7 @@ class BirdeyeClient:
     async def get_trending_tokens(self, limit: int = 30) -> List[Dict]:
         """
         Get trending tokens by trading volume (24h).
+        Using tokenlist endpoint with sort.
 
         Args:
             limit: Maximum number of tokens to return
@@ -66,19 +67,20 @@ class BirdeyeClient:
         await self._ensure_session()
 
         try:
-            # Birdeye trending endpoint
-            url = f"{self.base_url}/defi/v3/token/trending"
+            # Birdeye tokenlist endpoint (sorted by volume)
+            url = f"{self.base_url}/public/tokenlist"
             params = {
-                "sort_by": "volume24hUSD",
+                "sort_by": "v24hUSD",
                 "sort_type": "desc",
                 "offset": 0,
-                "limit": min(limit, 50)
+                "limit": min(limit, 50),
+                "list_address": "solana"
             }
 
             async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status == 200:
                     data = await response.json()
-                    tokens = data.get('data', {}).get('items', [])
+                    tokens = data.get('data', {}).get('tokens', [])
 
                     # Extract token addresses
                     token_list = []
@@ -95,6 +97,9 @@ class BirdeyeClient:
 
                     logger.info(f"Retrieved {len(token_list)} trending tokens from Birdeye")
                     return token_list
+                elif response.status == 429:
+                    logger.warning("Birdeye API rate limit reached")
+                    return []
                 else:
                     logger.warning(f"Birdeye trending tokens error: {response.status}")
                     return []
@@ -105,7 +110,7 @@ class BirdeyeClient:
 
     async def get_new_listings(self, limit: int = 30) -> List[Dict]:
         """
-        Get newly listed tokens (pump.fun and other new pairs).
+        Get newly listed tokens - using token_creation_time filter.
 
         Args:
             limit: Maximum number of tokens to return
@@ -116,20 +121,20 @@ class BirdeyeClient:
         await self._ensure_session()
 
         try:
-            # Birdeye new listing endpoint
-            url = f"{self.base_url}/defi/v3/token/new-listing"
+            # Use tokenlist sorted by creation time
+            url = f"{self.base_url}/public/tokenlist"
             params = {
-                "time_to": int(datetime.now().timestamp()),
-                "sort_by": "creation_time",
+                "sort_by": "token_creation_time",
                 "sort_type": "desc",
                 "offset": 0,
-                "limit": min(limit, 50)
+                "limit": min(limit, 50),
+                "list_address": "solana"
             }
 
             async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status == 200:
                     data = await response.json()
-                    tokens = data.get('data', {}).get('items', [])
+                    tokens = data.get('data', {}).get('tokens', [])
 
                     # Extract token addresses
                     token_list = []
@@ -141,11 +146,14 @@ class BirdeyeClient:
                             'liquidity': token.get('liquidity', 0),
                             'volume_24h': token.get('v24hUSD', 0),
                             'price': token.get('price', 0),
-                            'creation_time': token.get('creationTime', 0),
+                            'creation_time': token.get('token_creation_time', 0),
                         })
 
                     logger.info(f"Retrieved {len(token_list)} new listings from Birdeye")
                     return token_list
+                elif response.status == 429:
+                    logger.warning("Birdeye API rate limit reached")
+                    return []
                 else:
                     logger.warning(f"Birdeye new listings error: {response.status}")
                     return []
