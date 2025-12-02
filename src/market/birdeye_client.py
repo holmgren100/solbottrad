@@ -70,7 +70,7 @@ class BirdeyeClient:
             # Birdeye trending tokens endpoint
             url = f"{self.base_url}/defi/token_trending"
             params = {
-                "sort_by": "volume",
+                "sort_by": "volume24hUSD",
                 "sort_type": "desc",
                 "offset": 0,
                 "limit": min(limit, 50)

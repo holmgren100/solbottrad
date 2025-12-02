@@ -19,7 +19,7 @@ async def test_birdeye():
 
     url = "https://public-api.birdeye.so/defi/token_trending"
     params = {
-        "sort_by": "volume",
+        "sort_by": "volume24hUSD",
         "sort_type": "desc",
         "offset": 0,
         "limit": 10
