@@ -130,8 +130,14 @@ class PaperTradingEngine:
         )
         logger.info(f"✅ Jupiter executor initialized (Paper Mode, Jito: {use_jito})")
 
-        # Initialize strategy selector for age-based profit strategies
-        self.strategy_selector = StrategySelector()
+        # Age-based strategies (optional - can disable to use golden settings)
+        self.enable_age_strategies = os.getenv('ENABLE_AGE_BASED_STRATEGIES', 'false').lower() == 'true'
+        if self.enable_age_strategies:
+            self.strategy_selector = StrategySelector()
+            logger.info("✅ Age-based profit strategies ENABLED")
+        else:
+            self.strategy_selector = None
+            logger.info("🔒 Age-based strategies DISABLED - using golden settings")
 
         # Load previous state if exists
         self.load_state()
@@ -417,9 +423,9 @@ class PaperTradingEngine:
         if trailing_stop_percent is None:
             trailing_stop_percent = self.trailing_stop_percent
 
-        # Select strategy based on token age (if provided)
+        # Select strategy based on token age (if age-based strategies enabled)
         strategy = None
-        if pair_created_at and pair_created_at > 0:
+        if self.enable_age_strategies and self.strategy_selector and pair_created_at and pair_created_at > 0:
             strategy = self.strategy_selector.select_strategy(pair_created_at)
             # Apply strategy-specific adjustments
             amount_usd = amount_usd * strategy.position_size_multiplier
@@ -429,6 +435,8 @@ class PaperTradingEngine:
                 f"Trailing: {strategy.trailing_stop_percent}% | "
                 f"Position multiplier: {strategy.position_size_multiplier}x"
             )
+        elif pair_created_at:
+            logger.info("📊 Using golden settings (age-based strategies disabled)")
         else:
             # No age data, use default settings from .env
             logger.debug(f"No token age data, using default .env settings")

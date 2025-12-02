@@ -81,31 +81,72 @@ class SolanaTradingBot:
         }
         self.alert_manager.setup_default_rules(alert_config)
 
-        # Blockchain
+        # === FEATURE ENABLE FLAGS (Test features one by one) ===
+        self.enable_rugcheck = os.getenv('ENABLE_RUGCHECK_API', 'false').lower() == 'true'
+        self.enable_whale_tracking = os.getenv('ENABLE_WHALE_TRACKING', 'false').lower() == 'true'
+        self.enable_movement_detection = os.getenv('ENABLE_MOVEMENT_DETECTION', 'false').lower() == 'true'
+        self.enable_twitter_sentiment = os.getenv('ENABLE_TWITTER_SENTIMENT', 'false').lower() == 'true'
+        self.enable_volume_analyzer = os.getenv('ENABLE_VOLUME_ANALYZER', 'false').lower() == 'true'
+
+        # Blockchain (core - always enabled)
         self.alchemy = AlchemyClient(settings.api.alchemy_api_key)
         self.solsniffer = SolSnifferClient(settings.api.solsniffer_api_key)
-        self.rugcheck = RugCheckClient(settings.api.rugcheck_api_key)
-        self.whale_analyzer = WhaleAnalyzer(settings.api.solscan_api_key)
-        self.movement_detector = MovementDetector(settings.api.solscan_api_key)
         self.wallet_tracker = WalletTracker()
 
-        # Market
+        # RugCheck (optional)
+        if self.enable_rugcheck:
+            self.rugcheck = RugCheckClient(settings.api.rugcheck_api_key)
+            logger.info("✅ RugCheck API ENABLED")
+        else:
+            self.rugcheck = None
+            logger.info("🔒 RugCheck API DISABLED")
+
+        # Whale Tracking (optional)
+        if self.enable_whale_tracking:
+            self.whale_analyzer = WhaleAnalyzer(settings.api.solscan_api_key)
+            logger.info("✅ Whale tracking ENABLED")
+        else:
+            self.whale_analyzer = None
+            logger.info("🔒 Whale tracking DISABLED")
+
+        # Movement Detection (optional)
+        if self.enable_movement_detection:
+            self.movement_detector = MovementDetector(settings.api.solscan_api_key)
+            logger.info("✅ Movement detection ENABLED")
+        else:
+            self.movement_detector = None
+            logger.info("🔒 Movement detection DISABLED")
+
+        # Market (core - always enabled)
         self.dexscreener = DexScreenerClient(settings.api.dexscreener_api_key)
         self.birdeye = BirdeyeClient(settings.api.birdeye_api_key) if settings.api.birdeye_api_key else None
         self.market_analyzer = MarketAnalyzer(
             min_liquidity_usd=settings.trading.min_liquidity_usd,
             min_volume_24h=settings.trading.min_volume_24h
         )
-        self.volume_analyzer = VolumeAnalyzer()
 
-        # Token Discovery
+        # Volume Analyzer (optional)
+        if self.enable_volume_analyzer:
+            self.volume_analyzer = VolumeAnalyzer()
+            logger.info("✅ Volume analyzer ENABLED")
+        else:
+            self.volume_analyzer = None
+            logger.info("🔒 Volume analyzer DISABLED")
+
+        # Token Discovery (core - always enabled)
         self.jupiter = JupiterClient()
 
-        # Social
-        self.twitter = TwitterClient(settings.api.twitter_bearer_token)
-        self.sentiment_analyzer = SentimentAnalyzer()
+        # Social (optional)
+        if self.enable_twitter_sentiment:
+            self.twitter = TwitterClient(settings.api.twitter_bearer_token)
+            self.sentiment_analyzer = SentimentAnalyzer()
+            logger.info("✅ Twitter sentiment analysis ENABLED")
+        else:
+            self.twitter = None
+            self.sentiment_analyzer = None
+            logger.info("🔒 Twitter sentiment DISABLED")
 
-        # AI Models
+        # AI Models (core - always enabled)
         self.sentiment_model = SentimentModel()
         self.price_predictor = PricePredictor()
         self.risk_assessor = RiskAssessor(
@@ -217,42 +258,46 @@ class SolanaTradingBot:
         logger.info(f"Analyzing token: {token_address}")
 
         try:
-            # 0. EARLY FILTER: RugCheck risk assessment (fast, saves expensive API calls)
+            # 0. EARLY FILTER: RugCheck risk assessment (if enabled)
             import time
-            rug_start = time.time()
-            rug_check = await self.rugcheck.quick_check(token_address)
-            rug_time_ms = (time.time() - rug_start) * 1000
-            self.metrics.record_api_call('rugcheck', success=True, response_time_ms=rug_time_ms)
+            rug_check = None
+            if self.enable_rugcheck and self.rugcheck:
+                rug_start = time.time()
+                rug_check = await self.rugcheck.quick_check(token_address)
+                rug_time_ms = (time.time() - rug_start) * 1000
+                self.metrics.record_api_call('rugcheck', success=True, response_time_ms=rug_time_ms)
 
-            # Block high-risk tokens immediately (if strict mode enabled)
-            if self.settings.trading.rugcheck_strict_mode:
-                if rug_check['risk_level'] in ['critical', 'high'] and not rug_check['is_safe']:
-                    logger.warning(
-                        f"🚫 Token {token_address[:8]}... REJECTED by RugCheck: "
-                        f"Risk={rug_check['risk_level']}, Score={rug_check['risk_score']}, "
-                        f"Risks={rug_check['risks']}"
-                    )
-                    await self.notifier.send_message(
-                        f"🚫 **RugCheck Alert**\n"
-                        f"Token: `{token_address[:8]}...`\n"
-                        f"Risk Level: **{rug_check['risk_level'].upper()}**\n"
-                        f"Score: {rug_check['risk_score']}/100\n"
-                        f"Risks: {', '.join(rug_check['risks'][:3])}"
-                    )
-                    return None
+                # Block high-risk tokens immediately (if strict mode enabled)
+                if self.settings.trading.rugcheck_strict_mode:
+                    if rug_check['risk_level'] in ['critical', 'high'] and not rug_check['is_safe']:
+                        logger.warning(
+                            f"🚫 Token {token_address[:8]}... REJECTED by RugCheck: "
+                            f"Risk={rug_check['risk_level']}, Score={rug_check['risk_score']}, "
+                            f"Risks={rug_check['risks']}"
+                        )
+                        await self.notifier.send_message(
+                            f"🚫 **RugCheck Alert**\n"
+                            f"Token: `{token_address[:8]}...`\n"
+                            f"Risk Level: **{rug_check['risk_level'].upper()}**\n"
+                            f"Score: {rug_check['risk_score']}/100\n"
+                            f"Risks: {', '.join(rug_check['risks'][:3])}"
+                        )
+                        return None
 
-                # Also check minimum score threshold
-                if rug_check['risk_score'] < self.settings.trading.rugcheck_min_score:
-                    logger.warning(
-                        f"🚫 Token {token_address[:8]}... REJECTED: "
-                        f"RugCheck score {rug_check['risk_score']} < minimum {self.settings.trading.rugcheck_min_score}"
-                    )
-                    return None
+                    # Also check minimum score threshold
+                    if rug_check['risk_score'] < self.settings.trading.rugcheck_min_score:
+                        logger.warning(
+                            f"🚫 Token {token_address[:8]}... REJECTED: "
+                            f"RugCheck score {rug_check['risk_score']} < minimum {self.settings.trading.rugcheck_min_score}"
+                        )
+                        return None
 
-            logger.info(
-                f"✅ RugCheck passed: {token_address[:8]}... "
-                f"(Risk: {rug_check['risk_level']}, Score: {rug_check['risk_score']})"
-            )
+                logger.info(
+                    f"✅ RugCheck passed: {token_address[:8]}... "
+                    f"(Risk: {rug_check['risk_level']}, Score: {rug_check['risk_score']})"
+                )
+            else:
+                logger.debug("RugCheck API disabled - skipping risk assessment")
 
             # 1. Get market data - prioritize Jupiter discovery data if available
             profile = None
@@ -298,8 +343,8 @@ class SolanaTradingBot:
             whale_analysis = None
             movement_analysis = None
 
-            # Volume breakout detection (smart money tracking)
-            if self.settings.trading.enable_volume_breakout and profile:
+            # Volume breakout detection (if enabled)
+            if self.enable_volume_analyzer and self.volume_analyzer and self.settings.trading.enable_volume_breakout and profile:
                 try:
                     volume_analysis = self.volume_analyzer.detect_smart_money_accumulation(
                         token_address=token_address,
@@ -313,9 +358,11 @@ class SolanaTradingBot:
                     )
                 except Exception as e:
                     logger.debug(f"Volume analysis skipped: {e}")
+            elif not self.enable_volume_analyzer:
+                logger.debug("Volume analyzer disabled - skipping volume breakout detection")
 
-            # Whale concentration analysis
-            if self.settings.trading.enable_whale_tracking:
+            # Whale concentration analysis (if enabled)
+            if self.enable_whale_tracking and self.whale_analyzer and self.settings.trading.enable_whale_tracking:
                 try:
                     whale_start = time.time()
                     token_supply = profile.get('fdv', 0) / profile.get('price_usd', 1) if profile.get('price_usd', 0) > 0 else None
@@ -333,9 +380,11 @@ class SolanaTradingBot:
                         logger.info(f"✅ Whale check passed: {whale_analysis['whale_risk']} risk")
                 except Exception as e:
                     logger.debug(f"Whale analysis skipped: {e}")
+            elif not self.enable_whale_tracking:
+                logger.debug("Whale tracking disabled - skipping analysis")
 
-            # Unusual movement detection
-            if self.settings.trading.enable_movement_detection:
+            # Unusual movement detection (if enabled)
+            if self.enable_movement_detection and self.movement_detector and self.settings.trading.enable_movement_detection:
                 try:
                     movement_start = time.time()
                     movement_analysis = await self.movement_detector.quick_movement_check(token_address)
@@ -366,16 +415,38 @@ class SolanaTradingBot:
             # 2. Get security data
             security_data = await self.solsniffer.analyze_token(token_address)
 
-            # 3. Get social sentiment (optional - skip if rate limited)
+            # 3. Get social sentiment (if enabled)
             token_symbol = profile.get('symbol', 'UNKNOWN')
-            try:
-                social_data = await self.twitter.analyze_token_buzz(token_symbol, token_address)
-                tweets = await self.twitter.search_token_mentions(token_symbol, token_address)
-                sentiment_analysis = self.sentiment_analyzer.analyze_tweets(tweets)
-                coordination_analysis = self.sentiment_analyzer.detect_coordinated_activity(tweets)
-            except Exception as e:
-                # Twitter optional - use neutral defaults with proper structure
-                logger.debug(f"Twitter sentiment unavailable for {token_symbol}: {e}")
+            if self.enable_twitter_sentiment and self.twitter and self.sentiment_analyzer:
+                try:
+                    social_data = await self.twitter.analyze_token_buzz(token_symbol, token_address)
+                    tweets = await self.twitter.search_token_mentions(token_symbol, token_address)
+                    sentiment_analysis = self.sentiment_analyzer.analyze_tweets(tweets)
+                    coordination_analysis = self.sentiment_analyzer.detect_coordinated_activity(tweets)
+                    logger.debug(f"Twitter sentiment analyzed for {token_symbol}")
+                except Exception as e:
+                    # Twitter optional - use neutral defaults with proper structure
+                    logger.debug(f"Twitter sentiment unavailable for {token_symbol}: {e}")
+                    social_data = {
+                        'mentions': 0,
+                        'sentiment': 'neutral',
+                        'buzz_score': 0.5,
+                        'tweet_count': 0,
+                        'influential_mentions': 0
+                    }
+                    sentiment_analysis = {
+                        'sentiment': 'neutral',
+                        'score': 0.5,
+                        'normalized_score': 0.5,
+                        'confidence': 0.6  # Moderate confidence even without Twitter
+                    }
+                    coordination_analysis = {
+                        'coordinated': False,
+                        'coordination_score': 0.0
+                    }
+            else:
+                # Twitter disabled - use neutral defaults
+                logger.debug(f"Twitter sentiment disabled - using neutral scores")
                 social_data = {
                     'mentions': 0,
                     'sentiment': 'neutral',
@@ -387,7 +458,7 @@ class SolanaTradingBot:
                     'sentiment': 'neutral',
                     'score': 0.5,
                     'normalized_score': 0.5,
-                    'confidence': 0.6  # Moderate confidence even without Twitter
+                    'confidence': 0.6
                 }
                 coordination_analysis = {
                     'coordinated': False,
@@ -1066,7 +1137,8 @@ class SolanaTradingBot:
         await self.dexscreener.close()
         if self.birdeye:
             await self.birdeye.close()
-        await self.twitter.close()
+        if self.twitter:
+            await self.twitter.close()
 
         logger.info("Bot stopped successfully")
 
