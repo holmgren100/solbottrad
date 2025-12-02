@@ -660,115 +660,106 @@ class SolanaTradingBot:
             print(f"  ❌ Token scan error: {e}")
 
     async def _scan_tokens_impl(self):
-        """Internal implementation of token scanning."""
+        """Internal implementation of token scanning - COMBINES all enabled sources."""
         logger.info("Scanning for tokens...")
         print("🔍 Starting token scan...")
 
         try:
-            new_tokens = []
-            min_liquidity = 50000  # $50k minimum
-            min_volume = 30000     # $30k minimum
+            all_tokens = []  # Will combine tokens from all sources
+            seen_addresses = set()  # Track duplicates
 
-            # PRIMARY: Try Birdeye (Solana-native, best quality!)
-            if self.birdeye:
-                print("  📡 Fetching trending + new tokens from Birdeye (Solana-native)...")
+            # Get enable flags from environment (default: Jupiter enabled, others disabled for safety)
+            enable_jupiter = os.getenv('ENABLE_JUPITER', 'true').lower() == 'true'
+            enable_dexscreener = os.getenv('ENABLE_DEXSCREENER', 'false').lower() == 'true'
+            enable_birdeye = os.getenv('ENABLE_BIRDEYE', 'false').lower() == 'true'
 
-                # Get trending tokens (high volume)
-                trending = await self.birdeye.get_trending_tokens(limit=15)
+            print(f"  🔧 Token sources: Jupiter={enable_jupiter}, DexScreener={enable_dexscreener}, Birdeye={enable_birdeye}")
+            logger.info(f"Token source flags: ENABLE_JUPITER={enable_jupiter}, ENABLE_DEXSCREENER={enable_dexscreener}, ENABLE_BIRDEYE={enable_birdeye}")
 
-                # Get new listings (fresh pump.fun tokens)
-                new_listings = await self.birdeye.get_new_listings(limit=15)
+            # === SOURCE 1: JUPITER (Proven working - default enabled) ===
+            if enable_jupiter:
+                print("  📡 Fetching tokens from Jupiter (proven working)...")
+                try:
+                    jupiter_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
 
-                # Combine both sources
-                birdeye_tokens = trending + new_listings
+                    if not jupiter_tokens:
+                        print("  ⚠️  No trending tokens, trying recent...")
+                        jupiter_tokens = await self.jupiter.get_recent_tokens(limit=50)
 
-                if birdeye_tokens:
-                    # Filter for quality
-                    for token_data in birdeye_tokens:
-                        token_address = token_data.get('address')
-                        liquidity = token_data.get('liquidity', 0)
-                        volume_24h = token_data.get('volume_24h', 0)
-
-                        if not token_address:
-                            continue
-
-                        # Filter for liquidity and volume
-                        if liquidity >= min_liquidity and volume_24h >= min_volume:
-                            new_tokens.append({
-                                'address': token_address,
-                                'symbol': token_data.get('symbol', 'UNKNOWN'),
-                                'name': token_data.get('name', 'Unknown'),
-                                'liquidity_usd': liquidity,
-                                'volume_24h': volume_24h,
-                                'price_usd': token_data.get('price', 0),
-                            })
-
-                    if new_tokens:
-                        # Sort by volume (highest first)
-                        new_tokens.sort(key=lambda x: x.get('volume_24h', 0), reverse=True)
-                        print(f"  ✅ Birdeye: Found {len(new_tokens)} quality tokens (>${min_liquidity/1000:.0f}k liq, >${min_volume/1000:.0f}k vol)")
-                        logger.info(f"Retrieved {len(new_tokens)} filtered tokens from Birdeye")
+                    if jupiter_tokens:
+                        print(f"  ✅ Jupiter: Found {len(jupiter_tokens)} tokens")
+                        logger.info(f"Jupiter returned {len(jupiter_tokens)} tokens")
+                        for token in jupiter_tokens:
+                            addr = token.get('address')
+                            if addr and addr not in seen_addresses:
+                                all_tokens.append(token)
+                                seen_addresses.add(addr)
                     else:
-                        print(f"  ⚠️  Birdeye returned {len(birdeye_tokens)} tokens but none met quality filters")
-                        logger.warning("No Birdeye tokens passed liquidity/volume filters")
-                else:
-                    print("  ⚠️  Birdeye returned no tokens")
-                    logger.warning("Birdeye trending/new listings returned no tokens")
+                        print("  ⚠️  Jupiter returned no tokens")
+                        logger.warning("Jupiter returned no tokens")
+                except Exception as e:
+                    logger.error(f"Jupiter error: {e}")
+                    print(f"  ❌ Jupiter error: {e}")
 
-            # BACKUP: Try DexScreener boosted tokens if Birdeye failed
-            if not new_tokens:
-                print("  📡 Falling back to DexScreener boosted tokens...")
-                boosted = await self.dexscreener.get_boosted_tokens(limit=20)
+            # === SOURCE 2: DEXSCREENER (Optional - better data quality) ===
+            if enable_dexscreener:
+                print("  📡 Fetching tokens from DexScreener...")
+                try:
+                    # Get boosted tokens (promoted/trending)
+                    dex_tokens = await self.dexscreener.get_boosted_tokens(limit=20)
 
-                if boosted:
-                    # Enrich with price/liquidity data
-                    for token_data in boosted:
-                        token_address = token_data.get('address')
-                        if not token_address:
-                            continue
+                    if dex_tokens:
+                        print(f"  ✅ DexScreener: Found {len(dex_tokens)} boosted tokens")
+                        logger.info(f"DexScreener returned {len(dex_tokens)} boosted tokens")
+                        for token in dex_tokens:
+                            addr = token.get('address')
+                            if addr and addr not in seen_addresses:
+                                all_tokens.append(token)
+                                seen_addresses.add(addr)
+                    else:
+                        print("  ⚠️  DexScreener returned no tokens")
+                        logger.warning("DexScreener returned no tokens")
+                except Exception as e:
+                    logger.error(f"DexScreener error: {e}")
+                    print(f"  ❌ DexScreener error: {e}")
 
-                        profile = await self.dexscreener.get_token_profile(token_address)
-                        if not profile:
-                            continue
+            # === SOURCE 3: BIRDEYE (Optional - Solana-native data) ===
+            if enable_birdeye and self.birdeye:
+                print("  📡 Fetching tokens from Birdeye (Solana-native)...")
+                try:
+                    # Get trending tokens
+                    trending = await self.birdeye.get_trending_tokens(limit=15)
+                    new_listings = await self.birdeye.get_new_listings(limit=15)
+                    birdeye_tokens = (trending or []) + (new_listings or [])
 
-                        liquidity = profile.get('liquidity_usd', 0)
-                        volume_24h = profile.get('volume_24h', 0)
+                    if birdeye_tokens:
+                        print(f"  ✅ Birdeye: Found {len(birdeye_tokens)} tokens (trending + new)")
+                        logger.info(f"Birdeye returned {len(birdeye_tokens)} tokens")
+                        for token in birdeye_tokens:
+                            addr = token.get('address')
+                            if addr and addr not in seen_addresses:
+                                all_tokens.append(token)
+                                seen_addresses.add(addr)
+                    else:
+                        print("  ⚠️  Birdeye returned no tokens")
+                        logger.warning("Birdeye returned no tokens")
+                except Exception as e:
+                    logger.error(f"Birdeye error: {e}")
+                    print(f"  ❌ Birdeye error: {e}")
 
-                        if liquidity >= min_liquidity and volume_24h >= min_volume:
-                            new_tokens.append({
-                                'address': token_address,
-                                'symbol': profile.get('symbol', 'UNKNOWN'),
-                                'name': profile.get('name', 'Unknown'),
-                                'liquidity_usd': liquidity,
-                                'volume_24h': volume_24h,
-                                'price_usd': profile.get('price_usd', 0),
-                            })
+            # === COMBINE AND DEDUPLICATE ===
+            if not all_tokens:
+                print("  ⚠️  No tokens from any source - using safe fallback")
+                logger.warning("All token sources returned no tokens, using fallback")
+                all_tokens = [
+                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
+                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
+                ]
+            else:
+                print(f"  ✅ Combined: {len(all_tokens)} unique tokens from {sum([enable_jupiter, enable_dexscreener, enable_birdeye])} sources")
+                logger.info(f"Combined {len(all_tokens)} unique tokens from enabled sources")
 
-                    if new_tokens:
-                        new_tokens.sort(key=lambda x: x.get('volume_24h', 0), reverse=True)
-                        print(f"  ✅ DexScreener: Found {len(new_tokens)} quality tokens")
-                        logger.info(f"Retrieved {len(new_tokens)} filtered tokens from DexScreener")
-
-            # LAST RESORT: Try Jupiter if both failed
-            if not new_tokens:
-                print("  📡 Falling back to Jupiter trending...")
-                new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
-
-                if not new_tokens:
-                    print("  ⚠️  No trending tokens, trying recent...")
-                    new_tokens = await self.jupiter.get_recent_tokens(limit=50)
-
-                if not new_tokens:
-                    print("  ⚠️  No tokens from Jupiter, using safe fallback")
-                    logger.warning("All token sources failed, using safe fallback")
-                    # Fallback to established tokens as last resort
-                    new_tokens = [
-                        {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
-                        {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
-                    ]
-                else:
-                    print(f"  ✅ Found {len(new_tokens)} tokens from Jupiter (fallback)")
-                    logger.info(f"Retrieved {len(new_tokens)} tokens from Jupiter fallback")
+            new_tokens = all_tokens
 
             # Get currently open positions
             if settings.is_paper_trading():
