@@ -67,22 +67,32 @@ class BirdeyeClient:
         await self._ensure_session()
 
         try:
-            # Birdeye tokenlist endpoint (sorted by volume)
-            url = f"{self.base_url}/public/tokenlist"
+            # Birdeye trending tokens endpoint
+            url = f"{self.base_url}/defi/token_trending"
             params = {
-                "sort_by": "v24hUSD",
+                "sort_by": "volume",
                 "sort_type": "desc",
                 "offset": 0,
-                "limit": min(limit, 50),
-                "list_address": "solana"
+                "limit": min(limit, 50)
+            }
+            headers = {
+                "X-API-KEY": self.api_key,
+                "x-chain": "solana",
+                "accept": "application/json"
             }
 
-            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as response:
+            async with self.session.get(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status == 200:
                     data = await response.json()
+
+                    # Check if request was successful
+                    if not data.get('success', False):
+                        logger.warning("Birdeye API returned success=false")
+                        return []
+
                     tokens = data.get('data', {}).get('tokens', [])
 
-                    # Extract token addresses
+                    # Extract token data
                     token_list = []
                     for token in tokens:
                         token_list.append({
@@ -90,9 +100,8 @@ class BirdeyeClient:
                             'symbol': token.get('symbol'),
                             'name': token.get('name'),
                             'liquidity': token.get('liquidity', 0),
-                            'volume_24h': token.get('v24hUSD', 0),
-                            'price': token.get('price', 0),
-                            'price_change_24h': token.get('priceChange24hPercent', 0),
+                            'volume_24h': token.get('volume24hUSD', 0),
+                            'rank': token.get('rank', 999),
                         })
 
                     logger.info(f"Retrieved {len(token_list)} trending tokens from Birdeye")
@@ -121,22 +130,32 @@ class BirdeyeClient:
         await self._ensure_session()
 
         try:
-            # Use tokenlist sorted by creation time
-            url = f"{self.base_url}/public/tokenlist"
+            # Birdeye trending tokens endpoint (sorted by rank for newer tokens)
+            url = f"{self.base_url}/defi/token_trending"
             params = {
-                "sort_by": "token_creation_time",
-                "sort_type": "desc",
+                "sort_by": "rank",
+                "sort_type": "asc",
                 "offset": 0,
-                "limit": min(limit, 50),
-                "list_address": "solana"
+                "limit": min(limit, 50)
+            }
+            headers = {
+                "X-API-KEY": self.api_key,
+                "x-chain": "solana",
+                "accept": "application/json"
             }
 
-            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as response:
+            async with self.session.get(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status == 200:
                     data = await response.json()
+
+                    # Check if request was successful
+                    if not data.get('success', False):
+                        logger.warning("Birdeye API returned success=false")
+                        return []
+
                     tokens = data.get('data', {}).get('tokens', [])
 
-                    # Extract token addresses
+                    # Extract token data
                     token_list = []
                     for token in tokens:
                         token_list.append({
@@ -144,9 +163,8 @@ class BirdeyeClient:
                             'symbol': token.get('symbol'),
                             'name': token.get('name'),
                             'liquidity': token.get('liquidity', 0),
-                            'volume_24h': token.get('v24hUSD', 0),
-                            'price': token.get('price', 0),
-                            'creation_time': token.get('token_creation_time', 0),
+                            'volume_24h': token.get('volume24hUSD', 0),
+                            'rank': token.get('rank', 999),
                         })
 
                     logger.info(f"Retrieved {len(token_list)} new listings from Birdeye")
