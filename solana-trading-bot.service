@@ -1,30 +1,17 @@
 [Unit]
-Description=Solana Trading Bot with Multi-Layer Screening
+Description=Solana Trading Bot
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/solbottrad
-Environment="PATH=/usr/bin:/usr/local/bin"
-
-# IMPORTANT: Must run as Python module for relative imports to work
-# Use: python3 -m src.main (NOT python3 src/main.py)
+EnvironmentFile=/root/solbottrad/.env
 ExecStart=/usr/bin/python3 -m src.main
-
-# Restart policy
-Restart=always
+Restart=on-failure
 RestartSec=10
-StartLimitInterval=200
-StartLimitBurst=5
-
-# Logging
-StandardOutput=append:/root/solbottrad/bot_output.log
-StandardError=append:/root/solbottrad/bot_error.log
-
-# Resource limits (optional)
-# LimitNOFILE=65536
-# MemoryLimit=2G
+StandardOutput=append:/root/solbottrad/bot.log
+StandardError=append:/root/solbottrad/bot.log
 
 [Install]
 WantedBy=multi-user.target
