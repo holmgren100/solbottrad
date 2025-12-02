@@ -662,46 +662,61 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # PRIMARY: Try DexScreener trending (has liquidity/volume built-in!)
-            print("  📡 Fetching trending tokens from DexScreener...")
+            # PRIMARY: Try DexScreener FREE boosted tokens (high quality!)
+            print("  📡 Fetching boosted tokens from DexScreener (FREE)...")
             new_tokens = []
-            dex_trending = await self.dexscreener.get_trending_tokens(chain='solana', limit=30)
 
-            if dex_trending:
-                # Filter DexScreener trending for quality tokens
+            # Get boosted tokens (actively promoted = quality)
+            boosted = await self.dexscreener.get_boosted_tokens(limit=20)
+
+            # Also get latest profiles for more variety
+            if len(boosted) < 15:
+                print("  📡 Also fetching latest token profiles...")
+                latest = await self.dexscreener.get_latest_token_profiles(limit=15)
+                boosted.extend(latest)
+
+            if boosted:
+                print(f"  🔍 Enriching {len(boosted)} tokens with market data...")
+
+                # Enrich tokens with full market data
                 min_liquidity = 50000  # $50k minimum
-                min_volume = 100000    # $100k minimum daily volume
+                min_volume = 30000     # $30k minimum (lower since these are already quality-filtered)
 
-                for token_data in dex_trending:
-                    # Extract token info from DexScreener format
-                    liquidity = token_data.get('liquidity', {}).get('usd', 0)
-                    volume_24h = token_data.get('volume', {}).get('h24', 0)
-                    token_address = token_data.get('baseToken', {}).get('address')
-
+                for token_data in boosted:
+                    token_address = token_data.get('address')
                     if not token_address:
                         continue
 
-                    # Only include tokens with sufficient liquidity AND volume
+                    # Get full profile with price/liquidity
+                    profile = await self.dexscreener.get_token_profile(token_address)
+                    if not profile:
+                        continue
+
+                    liquidity = profile.get('liquidity_usd', 0)
+                    volume_24h = profile.get('volume_24h', 0)
+
+                    # Filter for quality
                     if liquidity >= min_liquidity and volume_24h >= min_volume:
                         new_tokens.append({
                             'address': token_address,
-                            'symbol': token_data.get('baseToken', {}).get('symbol', 'UNKNOWN'),
-                            'name': token_data.get('baseToken', {}).get('name', 'Unknown'),
+                            'symbol': profile.get('symbol', 'UNKNOWN'),
+                            'name': profile.get('name', 'Unknown'),
                             'liquidity_usd': liquidity,
-                            'volume_24h': volume_24h
+                            'volume_24h': volume_24h,
+                            'price_usd': profile.get('price_usd', 0),
                         })
 
                 if new_tokens:
-                    # Sort by volume (highest first) - these are the WINNERS
+                    # Sort by volume (highest first) - most active = winners
                     new_tokens.sort(key=lambda x: x.get('volume_24h', 0), reverse=True)
-                    print(f"  ✅ Found {len(new_tokens)} high-quality tokens (>${min_liquidity/1000:.0f}k liq, >${min_volume/1000:.0f}k vol)")
-                    logger.info(f"Retrieved {len(new_tokens)} filtered trending tokens from DexScreener")
+                    print(f"  ✅ Found {len(new_tokens)} quality tokens (>${min_liquidity/1000:.0f}k liq, >${min_volume/1000:.0f}k vol)")
+                    logger.info(f"Retrieved {len(new_tokens)} filtered boosted tokens from DexScreener")
                 else:
-                    print(f"  ⚠️  DexScreener returned {len(dex_trending)} tokens but none met quality filters")
-                    logger.warning("No DexScreener tokens passed liquidity/volume filters")
+                    print(f"  ⚠️  Enriched {len(boosted)} tokens but none met quality filters")
+                    logger.warning("No DexScreener boosted tokens passed filters")
             else:
-                print("  ⚠️  DexScreener trending unavailable (may require premium)")
-                logger.warning("DexScreener trending returned no tokens")
+                print("  ⚠️  DexScreener boosted/latest endpoints returned no tokens")
+                logger.warning("DexScreener free endpoints returned no tokens")
 
             # FALLBACK: Try Jupiter if DexScreener failed
             if not new_tokens:

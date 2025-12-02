@@ -249,6 +249,106 @@ class DexScreenerClient:
             logger.error(f"Error fetching trending tokens: {e}")
             return []
 
+    async def get_boosted_tokens(self, limit: int = 30) -> List[Dict]:
+        """
+        Get most boosted tokens (FREE endpoint - no premium required).
+        Boosted tokens are actively promoted = higher quality & liquidity.
+
+        Args:
+            limit: Maximum number of tokens to return
+
+        Returns:
+            List of token dictionaries with market data
+        """
+        await self._ensure_session()
+
+        try:
+            # FREE endpoint: https://api.dexscreener.com/token-boosts/top/v1
+            url = "https://api.dexscreener.com/token-boosts/top/v1"
+
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Extract Solana tokens only
+                    tokens = []
+                    for item in data[:limit]:
+                        # Get token info
+                        token_address = item.get('tokenAddress')
+                        chain_id = item.get('chainId', '').lower()
+
+                        # Only Solana tokens
+                        if chain_id == 'solana' and token_address:
+                            tokens.append({
+                                'address': token_address,
+                                'chainId': chain_id,
+                                'url': item.get('url'),
+                                'links': item.get('links', []),
+                                'icon': item.get('icon'),
+                                'description': item.get('description'),
+                                'totalAmount': item.get('totalAmount', 0),
+                                # Will be enriched with price/liquidity later
+                            })
+
+                    logger.info(f"Retrieved {len(tokens)} boosted Solana tokens from DexScreener")
+                    return tokens
+                else:
+                    logger.warning(f"DexScreener boosted tokens error: {response.status}")
+                    return []
+
+        except Exception as e:
+            logger.error(f"Error fetching boosted tokens: {e}")
+            return []
+
+    async def get_latest_token_profiles(self, limit: int = 30) -> List[Dict]:
+        """
+        Get latest token profiles (FREE endpoint - no premium required).
+        These are newly created/updated tokens with profiles.
+
+        Args:
+            limit: Maximum number of tokens to return
+
+        Returns:
+            List of token dictionaries
+        """
+        await self._ensure_session()
+
+        try:
+            # FREE endpoint: https://api.dexscreener.com/token-profiles/latest/v1
+            url = "https://api.dexscreener.com/token-profiles/latest/v1"
+
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Extract Solana tokens only
+                    tokens = []
+                    for item in data[:limit]:
+                        token_address = item.get('tokenAddress')
+                        chain_id = item.get('chainId', '').lower()
+
+                        # Only Solana tokens
+                        if chain_id == 'solana' and token_address:
+                            tokens.append({
+                                'address': token_address,
+                                'chainId': chain_id,
+                                'url': item.get('url'),
+                                'links': item.get('links', []),
+                                'icon': item.get('icon'),
+                                'description': item.get('description'),
+                                # Will be enriched with price/liquidity later
+                            })
+
+                    logger.info(f"Retrieved {len(tokens)} latest Solana token profiles from DexScreener")
+                    return tokens
+                else:
+                    logger.warning(f"DexScreener latest profiles error: {response.status}")
+                    return []
+
+        except Exception as e:
+            logger.error(f"Error fetching latest token profiles: {e}")
+            return []
+
     def calculate_liquidity_score(self, liquidity_usd: float) -> float:
         """
         Calculate a normalized liquidity score (0-1).
