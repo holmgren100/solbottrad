@@ -16,7 +16,7 @@ from .monitoring.telegram_commands import TelegramCommandHandler
 from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker, RugCheckClient, WhaleAnalyzer, MovementDetector
 from .blockchain.jupiter_executor import JupiterSwapExecutor
 from .blockchain.wallet_manager import WalletManager
-from .market import DexScreenerClient, MarketAnalyzer, JupiterClient, VolumeAnalyzer
+from .market import DexScreenerClient, MarketAnalyzer, JupiterClient, VolumeAnalyzer, BirdeyeClient
 from .social import TwitterClient, SentimentAnalyzer
 from .ai import SentimentModel, PricePredictor, RiskAssessor
 from .trading import TelegramExecutor, PositionManager, PaperTradingEngine
@@ -91,6 +91,7 @@ class SolanaTradingBot:
 
         # Market
         self.dexscreener = DexScreenerClient(settings.api.dexscreener_api_key)
+        self.birdeye = BirdeyeClient(settings.api.birdeye_api_key) if settings.api.birdeye_api_key else None
         self.market_analyzer = MarketAnalyzer(
             min_liquidity_usd=settings.trading.min_liquidity_usd,
             min_volume_24h=settings.trading.min_volume_24h
@@ -192,6 +193,8 @@ class SolanaTradingBot:
         self.health_checker.register_component('alchemy', self.alchemy.health_check)
         self.health_checker.register_component('jupiter', self.jupiter.health_check)
         self.health_checker.register_component('dexscreener', self.dexscreener.health_check)
+        if self.birdeye:
+            self.health_checker.register_component('birdeye', self.birdeye.health_check)
 
         # Optional components - disabled to reduce log noise
         # These components are not critical for core trading functionality
@@ -662,63 +665,91 @@ class SolanaTradingBot:
         print("🔍 Starting token scan...")
 
         try:
-            # PRIMARY: Try DexScreener FREE boosted tokens (high quality!)
-            print("  📡 Fetching boosted tokens from DexScreener (FREE)...")
             new_tokens = []
+            min_liquidity = 50000  # $50k minimum
+            min_volume = 30000     # $30k minimum
 
-            # Get boosted tokens (actively promoted = quality)
-            boosted = await self.dexscreener.get_boosted_tokens(limit=20)
+            # PRIMARY: Try Birdeye (Solana-native, best quality!)
+            if self.birdeye:
+                print("  📡 Fetching trending + new tokens from Birdeye (Solana-native)...")
 
-            # Also get latest profiles for more variety
-            if len(boosted) < 15:
-                print("  📡 Also fetching latest token profiles...")
-                latest = await self.dexscreener.get_latest_token_profiles(limit=15)
-                boosted.extend(latest)
+                # Get trending tokens (high volume)
+                trending = await self.birdeye.get_trending_tokens(limit=15)
 
-            if boosted:
-                print(f"  🔍 Enriching {len(boosted)} tokens with market data...")
+                # Get new listings (fresh pump.fun tokens)
+                new_listings = await self.birdeye.get_new_listings(limit=15)
 
-                # Enrich tokens with full market data
-                min_liquidity = 50000  # $50k minimum
-                min_volume = 30000     # $30k minimum (lower since these are already quality-filtered)
+                # Combine both sources
+                birdeye_tokens = trending + new_listings
 
-                for token_data in boosted:
-                    token_address = token_data.get('address')
-                    if not token_address:
-                        continue
-
-                    # Get full profile with price/liquidity
-                    profile = await self.dexscreener.get_token_profile(token_address)
-                    if not profile:
-                        continue
-
-                    liquidity = profile.get('liquidity_usd', 0)
-                    volume_24h = profile.get('volume_24h', 0)
-
+                if birdeye_tokens:
                     # Filter for quality
-                    if liquidity >= min_liquidity and volume_24h >= min_volume:
-                        new_tokens.append({
-                            'address': token_address,
-                            'symbol': profile.get('symbol', 'UNKNOWN'),
-                            'name': profile.get('name', 'Unknown'),
-                            'liquidity_usd': liquidity,
-                            'volume_24h': volume_24h,
-                            'price_usd': profile.get('price_usd', 0),
-                        })
+                    for token_data in birdeye_tokens:
+                        token_address = token_data.get('address')
+                        liquidity = token_data.get('liquidity', 0)
+                        volume_24h = token_data.get('volume_24h', 0)
 
-                if new_tokens:
-                    # Sort by volume (highest first) - most active = winners
-                    new_tokens.sort(key=lambda x: x.get('volume_24h', 0), reverse=True)
-                    print(f"  ✅ Found {len(new_tokens)} quality tokens (>${min_liquidity/1000:.0f}k liq, >${min_volume/1000:.0f}k vol)")
-                    logger.info(f"Retrieved {len(new_tokens)} filtered boosted tokens from DexScreener")
+                        if not token_address:
+                            continue
+
+                        # Filter for liquidity and volume
+                        if liquidity >= min_liquidity and volume_24h >= min_volume:
+                            new_tokens.append({
+                                'address': token_address,
+                                'symbol': token_data.get('symbol', 'UNKNOWN'),
+                                'name': token_data.get('name', 'Unknown'),
+                                'liquidity_usd': liquidity,
+                                'volume_24h': volume_24h,
+                                'price_usd': token_data.get('price', 0),
+                            })
+
+                    if new_tokens:
+                        # Sort by volume (highest first)
+                        new_tokens.sort(key=lambda x: x.get('volume_24h', 0), reverse=True)
+                        print(f"  ✅ Birdeye: Found {len(new_tokens)} quality tokens (>${min_liquidity/1000:.0f}k liq, >${min_volume/1000:.0f}k vol)")
+                        logger.info(f"Retrieved {len(new_tokens)} filtered tokens from Birdeye")
+                    else:
+                        print(f"  ⚠️  Birdeye returned {len(birdeye_tokens)} tokens but none met quality filters")
+                        logger.warning("No Birdeye tokens passed liquidity/volume filters")
                 else:
-                    print(f"  ⚠️  Enriched {len(boosted)} tokens but none met quality filters")
-                    logger.warning("No DexScreener boosted tokens passed filters")
-            else:
-                print("  ⚠️  DexScreener boosted/latest endpoints returned no tokens")
-                logger.warning("DexScreener free endpoints returned no tokens")
+                    print("  ⚠️  Birdeye returned no tokens")
+                    logger.warning("Birdeye trending/new listings returned no tokens")
 
-            # FALLBACK: Try Jupiter if DexScreener failed
+            # BACKUP: Try DexScreener boosted tokens if Birdeye failed
+            if not new_tokens:
+                print("  📡 Falling back to DexScreener boosted tokens...")
+                boosted = await self.dexscreener.get_boosted_tokens(limit=20)
+
+                if boosted:
+                    # Enrich with price/liquidity data
+                    for token_data in boosted:
+                        token_address = token_data.get('address')
+                        if not token_address:
+                            continue
+
+                        profile = await self.dexscreener.get_token_profile(token_address)
+                        if not profile:
+                            continue
+
+                        liquidity = profile.get('liquidity_usd', 0)
+                        volume_24h = profile.get('volume_24h', 0)
+
+                        if liquidity >= min_liquidity and volume_24h >= min_volume:
+                            new_tokens.append({
+                                'address': token_address,
+                                'symbol': profile.get('symbol', 'UNKNOWN'),
+                                'name': profile.get('name', 'Unknown'),
+                                'liquidity_usd': liquidity,
+                                'volume_24h': volume_24h,
+                                'price_usd': profile.get('price_usd', 0),
+                            })
+
+                    if new_tokens:
+                        new_tokens.sort(key=lambda x: x.get('volume_24h', 0), reverse=True)
+                        print(f"  ✅ DexScreener: Found {len(new_tokens)} quality tokens")
+                        logger.info(f"Retrieved {len(new_tokens)} filtered tokens from DexScreener")
+
+            # LAST RESORT: Try Jupiter if both failed
             if not new_tokens:
                 print("  📡 Falling back to Jupiter trending...")
                 new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
@@ -1042,6 +1073,8 @@ class SolanaTradingBot:
         await self.jupiter.close()
         await self.solsniffer.close()
         await self.dexscreener.close()
+        if self.birdeye:
+            await self.birdeye.close()
         await self.twitter.close()
 
         logger.info("Bot stopped successfully")

@@ -48,6 +48,7 @@ class APIConfig:
     twitter_bearer_token: Optional[str]
     rugcheck_api_key: Optional[str]
     solscan_api_key: Optional[str]
+    birdeye_api_key: Optional[str]
     telegram_bot_token: str
     telegram_chat_id: str
     gmgn_telegram_bot: str
@@ -88,6 +89,7 @@ class Settings:
             twitter_bearer_token=os.getenv('TWITTER_BEARER_TOKEN'),
             rugcheck_api_key=os.getenv('RUGCHECK_API_KEY'),
             solscan_api_key=os.getenv('SOLSCAN_API_KEY'),
+            birdeye_api_key=os.getenv('BIRDEYE_API_KEY'),
             telegram_bot_token=os.getenv('TELEGRAM_BOT_TOKEN', ''),
             telegram_chat_id=os.getenv('TELEGRAM_CHAT_ID', ''),
             gmgn_telegram_bot=os.getenv('GMGN_TELEGRAM_BOT', '@gmgnsolbot')
