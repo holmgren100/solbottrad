@@ -106,11 +106,17 @@ class BirdeyeClient:
 
                     logger.info(f"Retrieved {len(token_list)} trending tokens from Birdeye")
                     return token_list
+                elif response.status == 401:
+                    error_text = await response.text()
+                    logger.error(f"Birdeye 401 Unauthorized - Check API key! Response: {error_text[:200]}")
+                    logger.error(f"API Key (first 8 chars): {self.api_key[:8]}...")
+                    return []
                 elif response.status == 429:
                     logger.warning("Birdeye API rate limit reached")
                     return []
                 else:
-                    logger.warning(f"Birdeye trending tokens error: {response.status}")
+                    error_text = await response.text()
+                    logger.warning(f"Birdeye trending tokens error {response.status}: {error_text[:200]}")
                     return []
 
         except Exception as e:
@@ -169,11 +175,16 @@ class BirdeyeClient:
 
                     logger.info(f"Retrieved {len(token_list)} new listings from Birdeye")
                     return token_list
+                elif response.status == 401:
+                    error_text = await response.text()
+                    logger.error(f"Birdeye 401 Unauthorized - Check API key! Response: {error_text[:200]}")
+                    return []
                 elif response.status == 429:
                     logger.warning("Birdeye API rate limit reached")
                     return []
                 else:
-                    logger.warning(f"Birdeye new listings error: {response.status}")
+                    error_text = await response.text()
+                    logger.warning(f"Birdeye new listings error {response.status}: {error_text[:200]}")
                     return []
 
         except Exception as e:

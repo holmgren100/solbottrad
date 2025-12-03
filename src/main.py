@@ -1072,8 +1072,8 @@ class SolanaTradingBot:
         """Main trading loop."""
         logger.info("Starting main trading loop...")
 
-        scan_interval = 120  # 2 minutes (was working between 20:16 and 03:40)
-        monitor_interval = 20  # 20 seconds - 3x faster rug detection
+        scan_interval = 120  # 2 minutes - find new opportunities
+        monitor_interval = 10  # 10 seconds - CRITICAL for fast position monitoring and rug detection
 
         last_scan = 0
         last_monitor = 0
@@ -1092,8 +1092,8 @@ class SolanaTradingBot:
                     await self.monitor_positions()
                     last_monitor = current_time
 
-                # Sleep briefly
-                await asyncio.sleep(10)
+                # Sleep briefly - keep responsive
+                await asyncio.sleep(5)
 
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
