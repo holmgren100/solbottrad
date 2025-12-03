@@ -465,17 +465,22 @@ class SolanaTradingBot:
                     'coordination_score': 0.0
                 }
 
-            # 4. Generate market signal
+            # 4. Safety check: Ensure we have profile data before proceeding
+            if not profile:
+                logger.warning(f"⚠️  No profile data for {token_address} - skipping analysis")
+                return None
+
+            # 5. Generate market signal
             market_signal = self.market_analyzer.analyze_token(profile)
 
-            # 5. Score sentiment
+            # 6. Score sentiment
             sentiment_score = self.sentiment_model.score_sentiment(
                 social_data=social_data,
                 sentiment_analysis=sentiment_analysis,
                 coordination_analysis=coordination_analysis
             )
 
-            # 6. Predict price movement
+            # 7. Predict price movement
             price_prediction = self.price_predictor.predict(
                 token_address=token_address,
                 current_price=profile['price_usd'],
@@ -484,7 +489,7 @@ class SolanaTradingBot:
                 timeframe_hours=24
             )
 
-            # 7. Assess risk
+            # 8. Assess risk
             risk_assessment = self.risk_assessor.assess_risk(
                 token_address=token_address,
                 market_data=profile,
