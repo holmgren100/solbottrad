@@ -30,8 +30,8 @@ class BirdeyeClient:
         """Ensure aiohttp session exists."""
         if self.session is None or self.session.closed:
             headers = {
-                "X-API-KEY": self.api_key,
-                "Accept": "application/json"
+                "x-api-key": self.api_key,  # Lowercase - Birdeye might be case-sensitive
+                "accept": "application/json"
             }
             self.session = aiohttp.ClientSession(headers=headers)
 
@@ -76,7 +76,7 @@ class BirdeyeClient:
                 "limit": min(limit, 50)
             }
             headers = {
-                "X-API-KEY": self.api_key,
+                "x-api-key": self.api_key,  # Lowercase for consistency
                 "x-chain": "solana",
                 "accept": "application/json"
             }
@@ -109,7 +109,8 @@ class BirdeyeClient:
                 elif response.status == 401:
                     error_text = await response.text()
                     logger.error(f"Birdeye 401 Unauthorized - Check API key! Response: {error_text[:200]}")
-                    logger.error(f"API Key (first 8 chars): {self.api_key[:8]}...")
+                    logger.error(f"Headers sent: x-api-key={self.api_key[:8]}..., x-chain=solana")
+                    logger.error(f"URL: {url}")
                     return []
                 elif response.status == 429:
                     logger.warning("Birdeye API rate limit reached")
@@ -145,7 +146,7 @@ class BirdeyeClient:
                 "limit": min(limit, 50)
             }
             headers = {
-                "X-API-KEY": self.api_key,
+                "x-api-key": self.api_key,  # Lowercase for consistency
                 "x-chain": "solana",
                 "accept": "application/json"
             }
@@ -178,6 +179,8 @@ class BirdeyeClient:
                 elif response.status == 401:
                     error_text = await response.text()
                     logger.error(f"Birdeye 401 Unauthorized - Check API key! Response: {error_text[:200]}")
+                    logger.error(f"Headers sent: x-api-key={self.api_key[:8]}..., x-chain=solana")
+                    logger.error(f"URL: {url}")
                     return []
                 elif response.status == 429:
                     logger.warning("Birdeye API rate limit reached")
