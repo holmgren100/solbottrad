@@ -30,7 +30,7 @@ class BirdeyeClient:
         """Ensure aiohttp session exists."""
         if self.session is None or self.session.closed:
             headers = {
-                "x-api-key": self.api_key,  # Lowercase - Birdeye might be case-sensitive
+                "X-API-KEY": self.api_key,
                 "accept": "application/json"
             }
             self.session = aiohttp.ClientSession(headers=headers)
@@ -76,7 +76,7 @@ class BirdeyeClient:
                 "limit": min(limit, 50)
             }
             headers = {
-                "x-api-key": self.api_key,  # Lowercase for consistency
+                "X-API-KEY": self.api_key,
                 "x-chain": "solana",
                 "accept": "application/json"
             }
@@ -146,7 +146,7 @@ class BirdeyeClient:
                 "limit": min(limit, 50)
             }
             headers = {
-                "x-api-key": self.api_key,  # Lowercase for consistency
+                "X-API-KEY": self.api_key,
                 "x-chain": "solana",
                 "accept": "application/json"
             }
