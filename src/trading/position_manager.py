@@ -137,10 +137,10 @@ class Position:
         time_since_change = datetime.now() - self.last_price_change
         minutes_frozen = time_since_change.total_seconds() / 60
 
-        # Only flag as frozen if we've held for at least 5 minutes
+        # Only flag as frozen if we've held for at least 1 minute
         # (prevents false positives on new positions)
         minutes_held = (datetime.now() - self.entry_time).total_seconds() / 60
-        if minutes_held < 5:
+        if minutes_held < 1:
             return False
 
         return time_since_change > timedelta(minutes=freeze_minutes)
