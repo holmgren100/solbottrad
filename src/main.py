@@ -71,6 +71,10 @@ class SolanaTradingBot:
         self.metrics.register_api('rugcheck')
         self.metrics.register_api('whale_analyzer')
         self.metrics.register_api('movement_detector')
+        # New multi-source system APIs
+        self.metrics.register_api('coingecko')  # Market monitor (BTC/ETH/SOL)
+        self.metrics.register_api('rugcheck_holder')  # RugCheck holder analysis
+        self.metrics.register_api('birdeye')  # Birdeye API
 
         # Set up default alert rules
         alert_config = {
@@ -87,6 +91,12 @@ class SolanaTradingBot:
         self.enable_movement_detection = os.getenv('ENABLE_MOVEMENT_DETECTION', 'false').lower() == 'true'
         self.enable_twitter_sentiment = os.getenv('ENABLE_TWITTER_SENTIMENT', 'false').lower() == 'true'
         self.enable_volume_analyzer = os.getenv('ENABLE_VOLUME_ANALYZER', 'false').lower() == 'true'
+
+        # === MULTI-SOURCE SYSTEM FLAGS (New enhanced monitoring) ===
+        self.enable_multi_source_aggregator = os.getenv('ENABLE_MULTI_SOURCE_AGGREGATOR', 'false').lower() == 'true'
+        self.enable_rugcheck_holder_analysis = os.getenv('ENABLE_RUGCHECK_HOLDER_ANALYSIS', 'false').lower() == 'true'
+        self.enable_market_monitor = os.getenv('ENABLE_MARKET_MONITOR', 'false').lower() == 'true'
+        self.enable_dynamic_scorer = os.getenv('ENABLE_DYNAMIC_SCORER', 'false').lower() == 'true'
 
         # Blockchain (core - always enabled)
         self.alchemy = AlchemyClient(settings.api.alchemy_api_key)
@@ -222,6 +232,28 @@ class SolanaTradingBot:
         # Connect ML collector to trading engine
         from .trading.paper_trading import set_ml_collector
         set_ml_collector(self.ml_collector)
+
+        # === MULTI-SOURCE MONITORING SYSTEM (Optional) ===
+        # Enhanced bot with cross-validation, holder analysis, market monitoring, dynamic scoring
+        self.enhanced_bot = None
+        if self.enable_multi_source_aggregator:
+            try:
+                from .market.enhanced_bot_integration import EnhancedTradingIntegration
+                self.enhanced_bot = EnhancedTradingIntegration(
+                    jupiter_client=self.jupiter,
+                    dexscreener_client=self.dexscreener,
+                    birdeye_client=self.birdeye,
+                    position_manager=self.position_manager,
+                    trading_engine=self.trading_engine,
+                    notifier=self.notifier
+                )
+                logger.info("✅ Multi-Source Monitoring System ENABLED")
+                logger.info("   - Cross-validation across Jupiter/DexScreener/Birdeye")
+                logger.info("   - 5-second position monitoring with force exit")
+                logger.info("   - Holder analysis, market monitoring, dynamic scoring")
+            except Exception as e:
+                logger.error(f"Failed to initialize enhanced bot: {e}")
+                self.enable_multi_source_aggregator = False
 
         # Register health checks
         self._register_health_checks()
@@ -1117,6 +1149,14 @@ class SolanaTradingBot:
 
         # Start health monitoring in background
         asyncio.create_task(self.health_checker.monitor())
+
+        # Start enhanced bot background monitoring (if enabled)
+        if self.enhanced_bot:
+            try:
+                await self.enhanced_bot.start_background_monitoring()
+                logger.info("✅ Enhanced bot background monitoring started (BTC/ETH/SOL market monitor)")
+            except Exception as e:
+                logger.error(f"Failed to start enhanced bot monitoring: {e}")
 
         # Run main loop
         await self.main_loop()
