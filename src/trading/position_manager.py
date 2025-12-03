@@ -562,11 +562,11 @@ class PositionManager:
                 continue
 
             # Check if price hasn't actually changed (fake updates / minimal movement)
-            # If price moved less than 1% after 5+ minutes, likely honeypot/dead/manipulated
+            # If price moved less than 1% after 1+ minutes, likely honeypot/dead/manipulated
             minutes_held = (datetime.now() - position.entry_time).total_seconds() / 60
-            if minutes_held >= 5:
+            if minutes_held >= 1:
                 price_change_pct = abs((position.current_price - position.entry_price) / position.entry_price) * 100
-                if price_change_pct < 1.0:  # Less than 1% movement in 5+ minutes
+                if price_change_pct < 1.0:  # Less than 1% movement in 1+ minutes
                     logger.warning(
                         f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
                         f"Minimal price movement ({price_change_pct:.2f}%) for {minutes_held:.1f} minutes (likely honeypot/dead/rugged)"
