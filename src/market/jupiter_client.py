@@ -13,10 +13,18 @@ logger = get_logger(__name__)
 class JupiterClient:
     """Client for Jupiter Token API v2 to discover new tokens."""
 
+    # Cycling strategies for token discovery
+    DISCOVERY_CYCLES = [
+        'toporganicscore',  # Cycle 1: Organic activity (filters bots)
+        'toptraded',        # Cycle 2: Highest traded volume
+        'toptrending'       # Cycle 3: Trending tokens
+    ]
+
     def __init__(self):
         """Initialize Jupiter client (no API key needed)."""
         self.base_url = "https://lite-api.jup.ag/tokens/v2"
         self.session: Optional[aiohttp.ClientSession] = None
+        self.current_cycle = 0  # Track which discovery cycle we're on
 
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
@@ -94,20 +102,20 @@ class JupiterClient:
 
     async def get_trending_tokens(
         self,
-        category: str = 'toporganicscore',  # Changed default to organic
+        category: str = None,  # If None, uses cycling
         interval: str = '1h',
         limit: int = 50
     ) -> List[Dict]:
         """
-        Get trending/top tokens by category using Jupiter Token API v2.
+        Get trending/top tokens using CYCLING strategy.
 
-        BEST CATEGORIES:
-        - 'toporganicscore': Filters out artificial/bot activity (RECOMMENDED)
-        - 'toptraded': Highest volume (can be manipulated)
-        - 'toptrending': Trending tokens (moderate risk)
+        Rotates through 3 discovery methods:
+        1. toporganicscore - Organic activity (filters bots)
+        2. toptraded - Highest traded volume
+        3. toptrending - Trending tokens
 
         Args:
-            category: Category type (toporganicscore, toptraded, toptrending)
+            category: Category type (if None, uses automatic cycling)
             interval: Time interval (5m, 1h, 6h, 24h)
             limit: Maximum number of tokens to retrieve
 
@@ -117,6 +125,14 @@ class JupiterClient:
         await self._ensure_session()
 
         try:
+            # Use cycling if category not specified
+            if category is None:
+                category = self.DISCOVERY_CYCLES[self.current_cycle]
+                use_cycling = True
+                logger.info(f"Jupiter Cycle {self.current_cycle + 1}/3: Using '{category}' discovery")
+            else:
+                use_cycling = False
+
             # Correct format: /tokens/v2/{category}/{interval}?limit={limit}
             url = f"{self.base_url}/{category}/{interval}"
             params = {'limit': limit}
@@ -124,7 +140,6 @@ class JupiterClient:
             async with self.session.get(url, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
-                    logger.info(f"Retrieved {len(data)} {category} tokens from Jupiter (interval: {interval})")
 
                     tokens = []
                     for token in data:
@@ -153,7 +168,13 @@ class JupiterClient:
 
                     # FILTER: Remove tokens with $0 liquidity (garbage data)
                     filtered_tokens = [t for t in tokens if t.get('liquidity', 0) > 0]
-                    logger.info(f"Filtered to {len(filtered_tokens)} tokens with liquidity >$0")
+
+                    # Advance cycle if using automatic cycling
+                    if use_cycling:
+                        self.current_cycle = (self.current_cycle + 1) % len(self.DISCOVERY_CYCLES)
+                        logger.info(f"Retrieved {len(filtered_tokens)} tokens using '{category}' (Next cycle: {self.DISCOVERY_CYCLES[self.current_cycle]})")
+                    else:
+                        logger.info(f"Retrieved {len(filtered_tokens)} {category} tokens from Jupiter")
 
                     return filtered_tokens
                 else:

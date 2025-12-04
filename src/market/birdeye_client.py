@@ -14,6 +14,15 @@ logger = get_logger(__name__)
 class BirdeyeClient:
     """Client for Birdeye API - Solana-native DEX aggregator."""
 
+    # Cycling strategies for token discovery
+    DISCOVERY_CYCLES = [
+        'rank',             # Cycle 1: Trending rank
+        'liquidity',        # Cycle 2: Liquidity amount
+        'volume24hUSD',     # Cycle 3: 24h volume
+        'priceChange24h',   # Cycle 4: 24h price change (gainers)
+        'priceChange1h'     # Cycle 5: 1h price change (gainers)
+    ]
+
     def __init__(self, api_key: str):
         """
         Initialize Birdeye client.
@@ -25,6 +34,7 @@ class BirdeyeClient:
         self.base_url = "https://public-api.birdeye.so"
         self.session: Optional[aiohttp.ClientSession] = None
         self.chain = "solana"
+        self.current_cycle = 0  # Track which discovery cycle we're on
 
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
@@ -55,8 +65,14 @@ class BirdeyeClient:
 
     async def get_trending_tokens(self, limit: int = 30) -> List[Dict]:
         """
-        Get trending tokens by trading volume (24h).
-        Using tokenlist endpoint with sort.
+        Get trending tokens using CYCLING strategy.
+
+        Rotates through 5 discovery methods:
+        1. rank - Trending rank
+        2. liquidity - Liquidity amount
+        3. volume24hUSD - 24h volume
+        4. priceChange24h - 24h price change (gainers)
+        5. priceChange1h - 1h price change (gainers)
 
         Args:
             limit: Maximum number of tokens to return
@@ -67,10 +83,14 @@ class BirdeyeClient:
         await self._ensure_session()
 
         try:
+            # Get current cycle
+            sort_by = self.DISCOVERY_CYCLES[self.current_cycle]
+            logger.info(f"Birdeye Cycle {self.current_cycle + 1}/5: Using '{sort_by}' discovery")
+
             # Birdeye trending tokens endpoint
             url = f"{self.base_url}/defi/token_trending"
             params = {
-                "sort_by": "volume24hUSD",
+                "sort_by": sort_by,
                 "sort_type": "desc",
                 "offset": 0,
                 "limit": min(limit, 50)
@@ -104,7 +124,10 @@ class BirdeyeClient:
                             'rank': token.get('rank', 999),
                         })
 
-                    logger.info(f"Retrieved {len(token_list)} trending tokens from Birdeye")
+                    # Advance to next cycle for next scan
+                    self.current_cycle = (self.current_cycle + 1) % len(self.DISCOVERY_CYCLES)
+
+                    logger.info(f"Retrieved {len(token_list)} tokens using '{sort_by}' (Next cycle: {self.DISCOVERY_CYCLES[self.current_cycle]})")
                     return token_list
                 elif response.status == 401:
                     error_text = await response.text()
