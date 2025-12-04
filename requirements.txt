@@ -11,6 +11,9 @@ base58>=2.1.1
 # Telegram
 python-telegram-bot==20.7
 
+# API clients
+apify-client==1.7.1
+
 # Web Dashboard
 flask==3.0.0
 

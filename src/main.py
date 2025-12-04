@@ -17,6 +17,8 @@ from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker, RugCheck
 from .blockchain.jupiter_executor import JupiterSwapExecutor
 from .blockchain.wallet_manager import WalletManager
 from .market import DexScreenerClient, MarketAnalyzer, JupiterClient, VolumeAnalyzer, BirdeyeClient
+from .market.coingecko_client import CoinGeckoClient
+from .market.apify_client import ApifyDexScreenerClient
 from .social import TwitterClient, SentimentAnalyzer
 from .ai import SentimentModel, PricePredictor, RiskAssessor
 from .trading import TelegramExecutor, PositionManager, PaperTradingEngine
@@ -130,6 +132,15 @@ class SolanaTradingBot:
         # Market (core - always enabled)
         self.dexscreener = DexScreenerClient(settings.api.dexscreener_api_key)
         self.birdeye = BirdeyeClient(settings.api.birdeye_api_key) if settings.api.birdeye_api_key else None
+
+        # CoinGecko (optional - top gainers/losers)
+        coingecko_api_key = os.getenv('COINGECKO_API_KEY')
+        self.coingecko = CoinGeckoClient(coingecko_api_key) if coingecko_api_key and coingecko_api_key != 'your_coingecko_api_key_here' else None
+
+        # Apify DexScreener scraper (optional - BEST for GAINERS)
+        apify_api_token = os.getenv('APIFY_API_TOKEN')
+        self.apify = ApifyDexScreenerClient(apify_api_token) if apify_api_token and apify_api_token != 'your_apify_api_token_here' else None
+
         self.market_analyzer = MarketAnalyzer(
             min_liquidity_usd=settings.trading.min_liquidity_usd,
             min_volume_24h=settings.trading.min_volume_24h
@@ -268,6 +279,10 @@ class SolanaTradingBot:
         self.health_checker.register_component('dexscreener', self.dexscreener.health_check)
         if self.birdeye:
             self.health_checker.register_component('birdeye', self.birdeye.health_check)
+        if self.coingecko:
+            self.health_checker.register_component('coingecko', self.coingecko.health_check)
+        if self.apify:
+            self.health_checker.register_component('apify', self.apify.health_check)
 
         # Optional components - disabled to reduce log noise
         # These components are not critical for core trading functionality
@@ -793,9 +808,11 @@ class SolanaTradingBot:
             enable_jupiter = os.getenv('ENABLE_JUPITER', 'true').lower() == 'true'
             enable_dexscreener = os.getenv('ENABLE_DEXSCREENER', 'false').lower() == 'true'
             enable_birdeye = os.getenv('ENABLE_BIRDEYE', 'false').lower() == 'true'
+            enable_coingecko = os.getenv('ENABLE_COINGECKO', 'false').lower() == 'true'
+            enable_apify = os.getenv('ENABLE_APIFY', 'false').lower() == 'true'
 
-            print(f"  🔧 Token sources: Jupiter={enable_jupiter}, DexScreener={enable_dexscreener}, Birdeye={enable_birdeye}")
-            logger.info(f"Token source flags: ENABLE_JUPITER={enable_jupiter}, ENABLE_DEXSCREENER={enable_dexscreener}, ENABLE_BIRDEYE={enable_birdeye}")
+            print(f"  🔧 Token sources: Jupiter={enable_jupiter}, DexScreener={enable_dexscreener}, Birdeye={enable_birdeye}, CoinGecko={enable_coingecko}, Apify={enable_apify}")
+            logger.info(f"Token source flags: ENABLE_JUPITER={enable_jupiter}, ENABLE_DEXSCREENER={enable_dexscreener}, ENABLE_BIRDEYE={enable_birdeye}, ENABLE_COINGECKO={enable_coingecko}, ENABLE_APIFY={enable_apify}")
 
             # 🚫 BLUECHIP FILTER - Define once, use everywhere
             # Skip these stable/high-cap tokens (won't 10x-100x)
@@ -954,6 +971,100 @@ class SolanaTradingBot:
                 except Exception as e:
                     logger.error(f"Birdeye error: {e}")
                     print(f"  ❌ Birdeye error: {e}")
+
+            # === SOURCE 4: COINGECKO (Top Gainers/Losers - FREE) ===
+            # CoinGecko provides top gainers across ALL chains with Solana filtering
+            # FREE tier: 30 calls/min (1,800/hour) - Perfect as supplement
+            # Cycling through: top_gainers → trending → top_losers
+            if enable_coingecko and self.coingecko:
+                print("  📡 Fetching tokens from CoinGecko (Top Gainers)...")
+                try:
+                    # Use cycling method to rotate discovery strategies
+                    coingecko_tokens = await self.coingecko.get_tokens_by_cycle(limit=10)
+
+                    if coingecko_tokens:
+                        # 🚫 Apply bluechip filter
+                        filtered_cg_tokens = []
+                        for token in coingecko_tokens:
+                            symbol = token.get('symbol', '').upper()
+                            addr = token.get('address')
+
+                            # Skip bluechips by symbol or address
+                            if symbol in BLUECHIP_SYMBOLS:
+                                logger.debug(f"[CG] Filtered out bluechip: {symbol}")
+                                continue
+                            if addr in BLUECHIP_ADDRESSES:
+                                logger.debug(f"[CG] Filtered out bluechip: {addr[:8]}...")
+                                continue
+
+                            filtered_cg_tokens.append(token)
+
+                        print(f"  ✅ CoinGecko: Found {len(filtered_cg_tokens)} GAINERS ({len(coingecko_tokens) - len(filtered_cg_tokens)} bluechips filtered)")
+                        logger.info(f"CoinGecko returned {len(filtered_cg_tokens)} tokens after bluechip filter")
+
+                        for token in filtered_cg_tokens:
+                            addr = token.get('address')
+                            if addr and addr not in seen_addresses:
+                                all_tokens.append(token)
+                                seen_addresses.add(addr)
+                    else:
+                        print("  ⚠️  CoinGecko returned no tokens")
+                        logger.warning("CoinGecko returned no tokens")
+                except Exception as e:
+                    logger.error(f"CoinGecko error: {e}")
+                    print(f"  ❌ CoinGecko error: {e}")
+
+            # === SOURCE 5: APIFY DEXSCREENER SCRAPER (BEST for GAINERS - ~$50/mo) ===
+            # Apify scraper gets SORTED DexScreener data by price change!
+            # This is the MAIN GAINER source - actual price movement sorting
+            # Cycling through: priceChange24h → priceChange6h → priceChange1h → volume → liquidity
+            if enable_apify and self.apify:
+                print("  📡 Fetching tokens from Apify DexScreener (SORTED BY GAINERS)...")
+                try:
+                    # Use cycling method to rotate discovery strategies
+                    # NOTE: Apify runs take 10-30 seconds, so this will slow down scans
+                    apify_tokens = self.apify.get_tokens_by_cycle(
+                        limit=20,
+                        min_volume=50000,
+                        min_liquidity=10000,
+                        time_frame="6h"
+                    )
+
+                    if apify_tokens:
+                        # 🚫 Apply bluechip filter
+                        filtered_apify_tokens = []
+                        for token in apify_tokens:
+                            symbol = token.get('symbol', '').upper()
+                            addr = token.get('address')
+                            mcap = token.get('mcap', 0)
+
+                            # Skip bluechips by symbol, address, or market cap
+                            if symbol in BLUECHIP_SYMBOLS:
+                                logger.debug(f"[APIFY] Filtered out bluechip: {symbol}")
+                                continue
+                            if addr in BLUECHIP_ADDRESSES:
+                                logger.debug(f"[APIFY] Filtered out bluechip: {addr[:8]}...")
+                                continue
+                            if mcap and mcap > MAX_MARKET_CAP:
+                                logger.debug(f"[APIFY] Filtered out high mcap: {symbol} (${mcap/1e6:.1f}M)")
+                                continue
+
+                            filtered_apify_tokens.append(token)
+
+                        print(f"  ✅ Apify: Found {len(filtered_apify_tokens)} SORTED GAINERS ({len(apify_tokens) - len(filtered_apify_tokens)} bluechips filtered)")
+                        logger.info(f"Apify returned {len(filtered_apify_tokens)} tokens after bluechip filter")
+
+                        for token in filtered_apify_tokens:
+                            addr = token.get('address')
+                            if addr and addr not in seen_addresses:
+                                all_tokens.append(token)
+                                seen_addresses.add(addr)
+                    else:
+                        print("  ⚠️  Apify returned no tokens")
+                        logger.warning("Apify returned no tokens")
+                except Exception as e:
+                    logger.error(f"Apify error: {e}")
+                    print(f"  ❌ Apify error: {e}")
 
             # === COMBINE AND DEDUPLICATE ===
             if not all_tokens:
