@@ -257,10 +257,14 @@ class JupiterClient:
                     logger.debug(f"Token {token_address[:8]}... not found in Jupiter search")
                     return None
                 else:
-                    # 400/404 = token not found (normal for new tokens), use debug
+                    # 400/404/429 = token not found or rate limited (expected), use debug
                     # Other errors = real issues, use warning
-                    log_level = logger.debug if response.status in [400, 404] else logger.warning
-                    log_level(f"Jupiter search API returned {response.status} for {token_address[:8]}...")
+                    if response.status in [400, 404]:
+                        logger.debug(f"Jupiter search: token {token_address[:8]}... not found ({response.status})")
+                    elif response.status == 429:
+                        logger.debug(f"Jupiter search: rate limited (429) - skipping {token_address[:8]}...")
+                    else:
+                        logger.warning(f"Jupiter search API returned {response.status} for {token_address[:8]}...")
                     return None
 
         except Exception as e:

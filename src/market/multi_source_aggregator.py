@@ -72,7 +72,7 @@ class MultiSourceAggregator:
         # Rate limiters for each API
         self.dex_limiter = RateLimiter(calls_per_minute=280)  # Safe margin under 300
         self.jupiter_limiter = RateLimiter(calls_per_minute=500)  # Conservative estimate
-        self.birdeye_limiter = RateLimiter(calls_per_minute=50)  # Free tier: 1 RPS = 60/min, use 50 for safety
+        self.birdeye_limiter = RateLimiter(calls_per_minute=40)  # Free tier: 1 RPS = 60/min, but compute units limit is stricter - use 40 for safety
 
         # Cache for recent data (avoid redundant calls)
         self.cache = {}

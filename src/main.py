@@ -355,8 +355,13 @@ class SolanaTradingBot:
             # ALWAYS fetch DexScreener data if liquidity or volume is missing
             # Jupiter discovery often has price but missing/zero liquidity and volume
             if not profile or profile['price_usd'] == 0 or profile.get('liquidity_usd', 0) == 0 or profile.get('volume_24h', 0) == 0:
+                # Try DexScreener first (has best liquidity + volume data)
                 dex_profile = await self.dexscreener.get_token_profile(token_address)
-                jupiter_data = await self.jupiter.get_token_price_data(token_address)
+
+                # Only call Jupiter search if DexScreener fails (reduce rate limit pressure)
+                jupiter_data = None
+                if not dex_profile:
+                    jupiter_data = await self.jupiter.get_token_price_data(token_address)
 
                 # Validate we have data from at least one source
                 if not dex_profile and not jupiter_data:
@@ -369,6 +374,11 @@ class SolanaTradingBot:
 
                 if profile:
                     logger.info(f"📊 Enriched with real data: {token_address[:12]}... (liq: ${profile.get('liquidity_usd', 0):,.0f}, vol: ${profile.get('volume_24h', 0):,.0f})")
+
+            # CRITICAL: Safety check - ensure we have profile data before proceeding
+            if not profile:
+                logger.warning(f"⚠️  No profile data for {token_address} - skipping analysis")
+                return None
 
             # 1.5. MULTI-LAYER SCREENING (Phase 3) - Additional smart money & risk filters
             volume_analysis = None
@@ -497,12 +507,7 @@ class SolanaTradingBot:
                     'coordination_score': 0.0
                 }
 
-            # 4. Safety check: Ensure we have profile data before proceeding
-            if not profile:
-                logger.warning(f"⚠️  No profile data for {token_address} - skipping analysis")
-                return None
-
-            # 5. Generate market signal
+            # 4. Generate market signal
             market_signal = self.market_analyzer.analyze_token(profile)
 
             # 6. Score sentiment
