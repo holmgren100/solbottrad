@@ -702,16 +702,6 @@ class SolanaTradingBot:
         print(f"      💵 Amount: ${decision['position_size']:.2f} @ ${decision['entry_price']:.8f}")
 
         try:
-            # Send trade signal notification
-            print(f"      📱 Sending Telegram notification...")
-            await self.notifier.send_trade_signal(
-                token_address=decision['token_address'],
-                action=decision['action'].upper(),
-                confidence=decision['confidence'],
-                price=decision['entry_price'],
-                reasons=decision['reasons']
-            )
-
             print(f"      💰 Calling trading engine...")
             if decision['action'] == 'buy':
                 # Extract pair_created_at from analysis data for age-based strategy
@@ -729,20 +719,36 @@ class SolanaTradingBot:
                     pair_created_at=pair_created_at  # Pass for age-based strategy selection
                 )
                 print(f"      ✅ Trade result: {result}")
+
+                # ONLY send Telegram notification on SUCCESSFUL entry
+                if result.get('status') == 'success':
+                    print(f"      📱 Sending entry notification to Telegram...")
+                    await self.notifier.send_entry_notification(
+                        token_address=decision['token_address'],
+                        symbol=decision['symbol'],
+                        entry_price=decision['entry_price'],
+                        position_size=decision['position_size'],
+                        score=analysis_data.get('score', 0),
+                        confidence=decision.get('confidence', 'medium'),
+                        token_data=profile or {},
+                        rugcheck_data=analysis_data.get('rug_check'),
+                        market_data=None,  # Could add market conditions here
+                        score_breakdown=analysis_data.get('score_breakdown'),
+                        warnings=decision.get('warnings', []),
+                        is_pumpfun=decision['token_address'].endswith('pump')
+                    )
+                # Failures are just logged, no Telegram spam
             else:
                 result = await self.trading_engine.execute_sell(
                     token_address=decision['token_address'],
                     price=decision['entry_price']
                 )
 
-            # Send execution notification
-            await self.notifier.send_trade_execution(
-                token_address=decision['token_address'],
-                action=decision['action'].upper(),
-                amount=decision['position_size'],
-                price=decision['entry_price'],
-                status=result.get('status', 'UNKNOWN').upper()
-            )
+                # ONLY send Telegram notification on SUCCESSFUL exit
+                if result.get('status') == 'success':
+                    print(f"      📱 Sending exit notification to Telegram...")
+                    # TODO: Implement exit notification with P&L data
+                    # await self.notifier.send_exit_notification(...)
 
             return result.get('status') == 'success'
 
@@ -797,10 +803,11 @@ class SolanaTradingBot:
                 try:
                     # Use toporganicscore to filter out artificial/bot activity
                     # This is MUCH better than 'toptraded' or 'recent'
+                    # Reduced limit to 25-30 for higher quality (top tokens are best)
                     jupiter_tokens = await self.jupiter.get_trending_tokens(
                         category='toporganicscore',
                         interval='1h',
-                        limit=100
+                        limit=30
                     )
 
                     if jupiter_tokens:
@@ -824,7 +831,8 @@ class SolanaTradingBot:
                 try:
                     # Get ORGANIC tokens - filters out boosted (paid promotions)
                     # Boosted tokens are usually scams!
-                    dex_tokens = await self.dexscreener.get_organic_tokens(limit=30)
+                    # Reduced to 20-25 for better quality focus
+                    dex_tokens = await self.dexscreener.get_organic_tokens(limit=25)
 
                     if dex_tokens:
                         print(f"  ✅ DexScreener: Found {len(dex_tokens)} organic tokens")
@@ -845,9 +853,10 @@ class SolanaTradingBot:
             if enable_birdeye and self.birdeye:
                 print("  📡 Fetching tokens from Birdeye (Solana-native)...")
                 try:
-                    # Get trending tokens
-                    trending = await self.birdeye.get_trending_tokens(limit=15)
-                    new_listings = await self.birdeye.get_new_listings(limit=15)
+                    # Get trending tokens - reduced limits for higher quality
+                    # Focus on best tokens from each category
+                    trending = await self.birdeye.get_trending_tokens(limit=12)
+                    new_listings = await self.birdeye.get_new_listings(limit=12)
                     birdeye_tokens = (trending or []) + (new_listings or [])
 
                     if birdeye_tokens:
