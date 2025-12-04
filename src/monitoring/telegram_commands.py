@@ -391,7 +391,16 @@ class TelegramCommandHandler:
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
     async def cmd_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Export trade history to CSV file."""
+        """
+        Export trade history to CSV file with optional filters.
+
+        Usage:
+            /export - Export all trades
+            /export 100 - Export latest 100 trades
+            /export daily - Export last 24 hours
+            /export weekly - Export last 7 days
+            /export monthly - Export last 30 days
+        """
         if not self.is_authorized(update):
             await update.message.reply_text("⛔ Unauthorized")
             return
@@ -399,38 +408,90 @@ class TelegramCommandHandler:
         try:
             from datetime import datetime
 
+            # Parse arguments
+            timeframe = 'all'
+            limit = None
+
+            if context.args and len(context.args) > 0:
+                arg = context.args[0].lower()
+
+                # Check if it's a number (limit)
+                if arg.isdigit():
+                    limit = int(arg)
+                    timeframe = 'all'
+                # Check if it's a timeframe
+                elif arg in ['daily', 'weekly', 'monthly']:
+                    timeframe = arg
+                    limit = None
+                else:
+                    await update.message.reply_text(
+                        "❌ Invalid argument\n\n"
+                        "Usage:\n"
+                        "/export - All trades\n"
+                        "/export 100 - Latest 100 trades\n"
+                        "/export daily - Last 24 hours\n"
+                        "/export weekly - Last 7 days\n"
+                        "/export monthly - Last 30 days"
+                    )
+                    return
+
             # Export trades to CSV
-            filepath = 'data/trade_history.csv'
-            trade_count = self.bot.trading_engine.position_manager.export_to_csv(filepath)
+            filepath = f'data/trade_history_{timeframe}.csv'
+            trade_count = self.bot.trading_engine.position_manager.export_to_csv(
+                filepath=filepath,
+                timeframe=timeframe,
+                limit=limit
+            )
 
             if trade_count == 0:
-                await update.message.reply_text("📭 No trades to export yet")
+                await update.message.reply_text("📭 No trades to export for this timeframe")
                 return
 
-            # Send file to user
+            # Build description
+            if limit:
+                description = f"Latest {limit} trades"
+            elif timeframe == 'daily':
+                description = "Last 24 hours"
+            elif timeframe == 'weekly':
+                description = "Last 7 days"
+            elif timeframe == 'monthly':
+                description = "Last 30 days"
+            else:
+                description = "All trades"
+
+            # Send file info
             await update.message.reply_text(
-                f"📊 Exporting {trade_count} trades...\n\n"
-                f"Columns:\n"
-                f"• Date & Time\n"
-                f"• Token & Symbol\n"
+                f"📊 Exporting {trade_count} trades ({description})...\n\n"
+                f"✅ *Enhanced Columns:*\n"
+                f"• Date, Time, Day of Week, Hour\n"
+                f"• Token Address & Symbol\n"
                 f"• Entry/Exit Prices\n"
-                f"• Position Size\n"
+                f"• Price Change ($ and %)\n"
+                f"• Position Size & Quantity\n"
+                f"• Tokens per Dollar\n"
+                f"• Entry/Exit Liquidity\n"
+                f"• Liquidity Change (%)\n"
                 f"• PnL ($ and %)\n"
                 f"• Win/Loss\n"
-                f"• Duration\n"
-                f"• Close Reason (Trailing Stop, Rug, Manual, etc.)\n\n"
-                f"Opening in Excel..."
+                f"• Duration (hours & minutes)\n"
+                f"• Close Reason\n"
+                f"• Volume Fallback\n"
+                f"• Strategy Used\n"
+                f"• Token Age at Entry\n\n"
+                f"📈 Ready for Excel analysis!",
+                parse_mode='Markdown'
             )
 
             # Send CSV file
             with open(filepath, 'rb') as f:
+                filename = f"trades_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
                 await update.message.reply_document(
                     document=f,
-                    filename=f"trade_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    caption=f"✅ {trade_count} trades exported"
+                    filename=filename,
+                    caption=f"✅ {trade_count} trades ({description})"
                 )
 
-            logger.info(f"Exported {trade_count} trades via /export command")
+            logger.info(f"Exported {trade_count} trades via /export command (timeframe: {timeframe}, limit: {limit})")
 
         except Exception as e:
             logger.error(f"Error in /export command: {e}")
@@ -729,7 +790,13 @@ class TelegramCommandHandler:
 /daily - Daily trade summary (24h)
 /weekly - Weekly trade analysis (7 days)
 /apis - Test all API connections
-/export - Export trade history to CSV (Excel)
+
+*Export Data*
+/export - Export ALL trades to CSV
+/export 100 - Export latest 100 trades
+/export daily - Export last 24 hours
+/export weekly - Export last 7 days
+/export monthly - Export last 30 days
 
 *Controls*
 /pause - Pause trading
@@ -743,8 +810,8 @@ class TelegramCommandHandler:
 /take_profit <pct> - Set take profit %
 
 *Examples*
-/stop_loss 15
-/take_profit 40
+/stop_loss 10
+/export 100
 /close So111111
 """
         await update.message.reply_text(message, parse_mode='Markdown')

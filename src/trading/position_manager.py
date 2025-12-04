@@ -790,16 +790,25 @@ class PositionManager:
         self.daily_trades = []
         logger.info("Daily statistics reset")
 
-    def export_to_csv(self, filepath: str = 'data/trade_history.csv') -> int:
+    def export_to_csv(
+        self,
+        filepath: str = 'data/trade_history.csv',
+        timeframe: str = 'all',  # 'all', 'daily', 'weekly', 'monthly'
+        limit: int = None  # Limit number of trades (most recent first)
+    ) -> int:
         """
-        Export all closed trades to a CSV file for easy analysis in Excel.
+        Export closed trades to a CSV file for easy analysis in Excel.
 
         Args:
             filepath: Path to save CSV file
+            timeframe: Filter by timeframe ('all', 'daily', 'weekly', 'monthly')
+            limit: Limit to most recent N trades
 
         Returns:
             Number of trades exported
         """
+        from datetime import timedelta
+
         # Create data directory if it doesn't exist
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
@@ -810,24 +819,56 @@ class PositionManager:
             logger.info("No trades to export")
             return 0
 
-        # Define CSV columns
+        # Sort by timestamp (most recent first)
+        sell_trades = sorted(sell_trades, key=lambda t: t.timestamp, reverse=True)
+
+        # Filter by timeframe
+        if timeframe == 'daily':
+            cutoff = datetime.now() - timedelta(hours=24)
+            sell_trades = [t for t in sell_trades if t.timestamp >= cutoff]
+        elif timeframe == 'weekly':
+            cutoff = datetime.now() - timedelta(days=7)
+            sell_trades = [t for t in sell_trades if t.timestamp >= cutoff]
+        elif timeframe == 'monthly':
+            cutoff = datetime.now() - timedelta(days=30)
+            sell_trades = [t for t in sell_trades if t.timestamp >= cutoff]
+
+        # Apply limit
+        if limit:
+            sell_trades = sell_trades[:limit]
+
+        if not sell_trades:
+            logger.info(f"No trades to export for timeframe '{timeframe}'")
+            return 0
+
+        # Enhanced CSV columns with more analysis fields
         fieldnames = [
             'Date',
             'Time',
+            'Day of Week',          # NEW - Pattern analysis
+            'Hour',                 # NEW - Time of day analysis
             'Token Address',
             'Token',
             'Symbol',
             'Entry Price',
             'Exit Price',
+            'Price Change ($)',     # NEW - Absolute price change
+            'Price Change (%)',     # NEW - Price movement during hold
             'Position Size ($)',
-            'Quantity',             # NEW - Total tokens bought
-            'Tokens per Dollar',    # NEW - Critical risk metric!
+            'Quantity',
+            'Tokens per Dollar',
+            'Entry Liquidity',      # NEW - Need to track this
+            'Exit Liquidity',       # NEW - Need to track this
+            'Liquidity Change (%)', # NEW - Liquidity movement
             'PnL ($)',
             'PnL (%)',
             'Win/Loss',
-            'Duration',
+            'Duration (hours)',     # Changed format
+            'Duration (minutes)',   # NEW - For short-term analysis
             'Close Reason',
-            'Volume Fallback'
+            'Volume Fallback',
+            'Strategy',             # NEW - Which strategy used
+            'Token Age (hours)'     # NEW - How old was token at entry
         ]
 
         # Write to CSV
@@ -839,9 +880,11 @@ class PositionManager:
                 # Calculate duration
                 if trade.entry_time:
                     duration = trade.timestamp - trade.entry_time
-                    duration_str = f"{duration.total_seconds() / 3600:.1f}h"
+                    duration_hours = duration.total_seconds() / 3600
+                    duration_minutes = duration.total_seconds() / 60
                 else:
-                    duration_str = "N/A"
+                    duration_hours = 0
+                    duration_minutes = 0
 
                 # Determine win/loss
                 win_loss = "WIN" if trade.pnl > 0 else "LOSS" if trade.pnl < 0 else "BREAK-EVEN"
@@ -854,39 +897,70 @@ class PositionManager:
                     'manual': 'Manual Close',
                     'manual_telegram': 'Manual (Telegram)',
                     'manual_closeall': 'Close All (Telegram)',
+                    'manual_cleanup': 'Cleanup (Telegram)',
                     'rugged/dead': 'Rugged/Dead',
-                    'partial_profit': 'Partial Profit'
+                    'partial_profit': 'Partial Profit',
+                    'force_exit': 'Force Exit',
+                    'low_liquidity': 'Low Liquidity',
+                    'max_age': 'Max Age Reached'
                 }
                 close_reason = reason_map.get(trade.reason, trade.reason or 'Unknown')
 
-                # Calculate tokens per dollar (critical risk metric)
-                # Use entry price and quantity to calculate how many tokens per dollar
+                # Calculate tokens per dollar
                 if trade.entry_price > 0 and trade.quantity > 0:
-                    # Calculate original position size (before any sells)
                     original_position_usd = trade.quantity * trade.entry_price
                     tokens_per_dollar = trade.quantity / original_position_usd if original_position_usd > 0 else 0
                 else:
                     tokens_per_dollar = 0
 
+                # Calculate price change
+                price_change_usd = trade.price - trade.entry_price
+                price_change_pct = ((trade.price - trade.entry_price) / trade.entry_price * 100) if trade.entry_price > 0 else 0
+
+                # Get strategy name (if available in position attributes)
+                strategy = getattr(trade, 'strategy_name', 'unknown')
+
+                # Calculate token age at entry (if available)
+                token_age_hours = 0
+                if hasattr(trade, 'pair_created_at') and trade.pair_created_at > 0 and trade.entry_time:
+                    token_age_hours = (trade.entry_time.timestamp() - trade.pair_created_at / 1000) / 3600
+
+                # Get liquidity data (if available in trade attributes)
+                entry_liq = getattr(trade, 'entry_liquidity', 0)
+                exit_liq = getattr(trade, 'exit_liquidity', 0)
+                liq_change_pct = 0
+                if entry_liq > 0:
+                    liq_change_pct = ((exit_liq - entry_liq) / entry_liq * 100)
+
                 # Write row
                 writer.writerow({
                     'Date': trade.timestamp.strftime('%Y-%m-%d'),
                     'Time': trade.timestamp.strftime('%H:%M:%S'),
-                    'Token Address': trade.token_address,  # Full address for verification
-                    'Token': trade.token_address[:16] + '...',  # Shortened for readability
+                    'Day of Week': trade.timestamp.strftime('%A'),
+                    'Hour': trade.timestamp.strftime('%H'),
+                    'Token Address': trade.token_address,
+                    'Token': trade.token_address[:16] + '...',
                     'Symbol': trade.symbol or trade.token_address[:8],
-                    'Entry Price': f"${trade.entry_price:.8f}",
-                    'Exit Price': f"${trade.price:.8f}",
-                    'Position Size ($)': f"${trade.amount_usd:.2f}",
+                    'Entry Price': f"{trade.entry_price:.12f}",  # More decimal places
+                    'Exit Price': f"{trade.price:.12f}",
+                    'Price Change ($)': f"{price_change_usd:+.12f}",
+                    'Price Change (%)': f"{price_change_pct:+.2f}",
+                    'Position Size ($)': f"{trade.amount_usd:.2f}",
                     'Quantity': f"{trade.quantity:,.0f}",
                     'Tokens per Dollar': f"{tokens_per_dollar:,.0f}",
-                    'PnL ($)': f"${trade.pnl:.2f}",
-                    'PnL (%)': f"{trade.pnl_percent:+.2f}%",
+                    'Entry Liquidity': f"{entry_liq:,.0f}",
+                    'Exit Liquidity': f"{exit_liq:,.0f}",
+                    'Liquidity Change (%)': f"{liq_change_pct:+.1f}",
+                    'PnL ($)': f"{trade.pnl:+.2f}",
+                    'PnL (%)': f"{trade.pnl_percent:+.2f}",
                     'Win/Loss': win_loss,
-                    'Duration': duration_str,
+                    'Duration (hours)': f"{duration_hours:.1f}",
+                    'Duration (minutes)': f"{duration_minutes:.0f}",
                     'Close Reason': close_reason,
-                    'Volume Fallback': 'YES' if trade.volume_fallback else 'NO'
+                    'Volume Fallback': 'YES' if trade.volume_fallback else 'NO',
+                    'Strategy': strategy,
+                    'Token Age (hours)': f"{token_age_hours:.1f}"
                 })
 
-        logger.info(f"Exported {len(sell_trades)} trades to {filepath}")
+        logger.info(f"Exported {len(sell_trades)} trades to {filepath} (timeframe: {timeframe}, limit: {limit})")
         return len(sell_trades)
