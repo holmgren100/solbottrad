@@ -903,23 +903,47 @@ class SolanaTradingBot:
                     logger.error(f"DexScreener error: {e}")
                     print(f"  ❌ DexScreener error: {e}")
 
-            # === SOURCE 3: BIRDEYE (DISABLED - hitting compute limits) ===
-            # NOTE: Birdeye free tier is hitting "Compute units usage limit exceeded"
-            # Temporarily disabled to avoid wasting API calls
-            # TODO: Re-enable when we upgrade to paid tier or they reset limits
-            if False:  # Disabled - was: enable_birdeye and self.birdeye
-                print("  📡 Fetching tokens from Birdeye (Solana-native)...")
+            # === SOURCE 3: BIRDEYE (OPTIMIZED for GAINERS - reduced CU usage) ===
+            # NOTE: Free tier is 30K CUs/month - we optimize by using SMALL limits
+            # Birdeye HAS THE BEST GAINER DATA (priceChange24h, priceChange1h sorting!)
+            # Cycling through: rank → liquidity → volume → priceChange24h → priceChange1h
+            if enable_birdeye and self.birdeye:
+                print("  📡 Fetching tokens from Birdeye (GAINERS focus)...")
                 try:
-                    # Get trending tokens - reduced limits for higher quality
-                    # Focus on best tokens from each category
-                    trending = await self.birdeye.get_trending_tokens(limit=12)
-                    new_listings = await self.birdeye.get_new_listings(limit=12)
-                    birdeye_tokens = (trending or []) + (new_listings or [])
+                    # OPTIMIZED: Use limit=5 (was 12) to save CUs
+                    # The cycling in birdeye_client.py will rotate through:
+                    # - priceChange24h (24h GAINERS!)
+                    # - priceChange1h (1h MOVERS!)
+                    # - volume24hUSD (high interest)
+                    # - liquidity (liquid tokens)
+                    # - rank (trending)
+                    trending = await self.birdeye.get_trending_tokens(limit=5)  # Reduced from 12
+
+                    # Skip new_listings call to save CUs (trending already has new movers)
+                    birdeye_tokens = trending or []
 
                     if birdeye_tokens:
-                        print(f"  ✅ Birdeye: Found {len(birdeye_tokens)} tokens (trending + new)")
-                        logger.info(f"Birdeye returned {len(birdeye_tokens)} tokens")
+                        # 🚫 Apply bluechip filter (same as Jupiter/DexScreener)
+                        filtered_birdeye_tokens = []
                         for token in birdeye_tokens:
+                            symbol = token.get('symbol', '').upper()
+                            addr = token.get('address')
+                            # Birdeye doesn't always have mcap, skip that filter
+
+                            # Skip bluechips by symbol or address
+                            if symbol in BLUECHIP_SYMBOLS:
+                                logger.debug(f"[BIRDEYE] Filtered out bluechip: {symbol}")
+                                continue
+                            if addr in BLUECHIP_ADDRESSES:
+                                logger.debug(f"[BIRDEYE] Filtered out bluechip: {addr[:8]}...")
+                                continue
+
+                            filtered_birdeye_tokens.append(token)
+
+                        print(f"  ✅ Birdeye: Found {len(filtered_birdeye_tokens)} GAINERS ({len(birdeye_tokens) - len(filtered_birdeye_tokens)} bluechips filtered)")
+                        logger.info(f"Birdeye returned {len(filtered_birdeye_tokens)} tokens after bluechip filter")
+
+                        for token in filtered_birdeye_tokens:
                             addr = token.get('address')
                             if addr and addr not in seen_addresses:
                                 all_tokens.append(token)

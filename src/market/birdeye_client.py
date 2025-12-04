@@ -15,12 +15,13 @@ class BirdeyeClient:
     """Client for Birdeye API - Solana-native DEX aggregator."""
 
     # Cycling strategies for token discovery
+    # REORDERED: GAINERS FIRST! (priceChange is most important)
     DISCOVERY_CYCLES = [
-        'rank',             # Cycle 1: Trending rank
-        'liquidity',        # Cycle 2: Liquidity amount
-        'volume24hUSD',     # Cycle 3: 24h volume
-        'priceChange24h',   # Cycle 4: 24h price change (gainers)
-        'priceChange1h'     # Cycle 5: 1h price change (gainers)
+        'priceChange24h',   # Cycle 1: 24h GAINERS (tokens up 50-200%+)
+        'priceChange1h',    # Cycle 2: 1h MOVERS (tokens moving NOW)
+        'volume24hUSD',     # Cycle 3: High volume (interest)
+        'liquidity',        # Cycle 4: Liquid tokens (can sell)
+        'rank'              # Cycle 5: Trending rank
     ]
 
     def __init__(self, api_key: str):
