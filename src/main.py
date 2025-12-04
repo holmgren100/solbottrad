@@ -564,9 +564,11 @@ class SolanaTradingBot:
                 'timestamp': datetime.now().isoformat()
             }
 
+            # Build log message (handle None rug_check)
+            rug_info = f"RugCheck={rug_check['risk_score']}/100" if rug_check else "RugCheck=disabled"
             logger.info(
                 f"Analysis complete for {token_symbol}: "
-                f"RugCheck={rug_check['risk_score']}/100, "
+                f"{rug_info}, "
                 f"Market={market_signal.signal_type}, "
                 f"Sentiment={sentiment_score.recommendation}, "
                 f"Risk={risk_assessment.overall_risk}"

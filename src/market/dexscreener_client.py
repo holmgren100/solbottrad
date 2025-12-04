@@ -14,14 +14,6 @@ logger = get_logger(__name__)
 class DexScreenerClient:
     """Client for DexScreener API to get market data."""
 
-    # Cycling strategies for token discovery
-    DISCOVERY_CYCLES = [
-        'priceChange1h',   # Cycle 1: 1h gainers
-        'priceChange24h',  # Cycle 2: 24h gainers
-        'txns1h',          # Cycle 3: 1h trending (transactions)
-        'volume1h'         # Cycle 4: 1h top volume
-    ]
-
     def __init__(self, api_key: Optional[str] = None):
         """
         Initialize DexScreener client.
@@ -33,7 +25,6 @@ class DexScreenerClient:
         self.base_url = "https://api.dexscreener.com/latest"
         self.session: Optional[aiohttp.ClientSession] = None
         self.price_cache: Dict[str, float] = {}  # Cache last known good prices
-        self.current_cycle = 0  # Track which discovery cycle we're on
 
     def _validate_price(self, price: float, token_address: str) -> bool:
         """
@@ -259,92 +250,6 @@ class DexScreenerClient:
             logger.error(f"Error fetching trending tokens: {e}")
             return []
 
-    async def get_organic_tokens_cycling(self, limit: int = 30) -> List[Dict]:
-        """
-        Get organic (NON-BOOSTED) tokens using CYCLING strategy.
-
-        Rotates through 4 discovery methods:
-        1. priceChange1h - 1h gainers
-        2. priceChange24h - 24h gainers
-        3. txns1h - 1h trending (transaction count)
-        4. volume1h - 1h top volume
-
-        Args:
-            limit: Maximum number of ORGANIC tokens to return
-
-        Returns:
-            List of organic token dictionaries
-        """
-        await self._ensure_session()
-
-        try:
-            # Get current cycle
-            cycle_method = self.DISCOVERY_CYCLES[self.current_cycle]
-            logger.info(f"DexScreener Cycle {self.current_cycle + 1}/4: Using '{cycle_method}' discovery")
-
-            # Fetch Solana pairs
-            url = f"{self.base_url}/dex/pairs/solana"
-
-            async with self.session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    pairs = data.get('pairs', [])
-
-                    # Filter and sort based on current cycle
-                    organic_pairs = []
-                    for pair in pairs:
-                        # Skip boosted tokens
-                        if pair.get('boosts', {}).get('active', 0) > 0:
-                            continue
-
-                        # Extract base token address
-                        base_token = pair.get('baseToken', {})
-                        token_address = base_token.get('address')
-
-                        if not token_address:
-                            continue
-
-                        # Get sorting value based on cycle
-                        sort_value = 0
-                        if cycle_method == 'priceChange1h':
-                            sort_value = pair.get('priceChange', {}).get('h1', 0) or 0
-                        elif cycle_method == 'priceChange24h':
-                            sort_value = pair.get('priceChange', {}).get('h24', 0) or 0
-                        elif cycle_method == 'txns1h':
-                            h1_buys = pair.get('txns', {}).get('h1', {}).get('buys', 0) or 0
-                            h1_sells = pair.get('txns', {}).get('h1', {}).get('sells', 0) or 0
-                            sort_value = h1_buys + h1_sells
-                        elif cycle_method == 'volume1h':
-                            sort_value = pair.get('volume', {}).get('h1', 0) or 0
-
-                        organic_pairs.append({
-                            'address': token_address,
-                            'symbol': base_token.get('symbol'),
-                            'name': base_token.get('name'),
-                            'pairAddress': pair.get('pairAddress'),
-                            'sort_value': sort_value,
-                            'boosts_active': 0
-                        })
-
-                    # Sort by the cycle metric (descending)
-                    organic_pairs.sort(key=lambda x: x['sort_value'], reverse=True)
-
-                    # Take top N
-                    top_tokens = organic_pairs[:limit]
-
-                    # Advance to next cycle for next scan
-                    self.current_cycle = (self.current_cycle + 1) % len(self.DISCOVERY_CYCLES)
-
-                    logger.info(f"Retrieved {len(top_tokens)} organic tokens using '{cycle_method}' (Next cycle: {self.DISCOVERY_CYCLES[self.current_cycle]})")
-                    return top_tokens
-                else:
-                    logger.warning(f"DexScreener pairs API error: {response.status}")
-                    return []
-
-        except Exception as e:
-            logger.error(f"Error fetching organic tokens with cycling: {e}")
-            return []
-
     async def get_organic_tokens(self, limit: int = 30) -> List[Dict]:
         """
         Get organic (NON-BOOSTED) token profiles from latest listings.
@@ -352,14 +257,67 @@ class DexScreenerClient:
         WARNING: This method fetches latest profiles and FILTERS OUT boosted tokens.
         Boosted = PAID PROMOTIONS = High scam risk!
 
+        NOTE: DexScreener API only supports fetching LATEST profiles, not sorted by
+        price change or volume. Cycling strategies are not available for this API.
+
         Args:
             limit: Maximum number of ORGANIC tokens to return (will fetch more to filter)
 
         Returns:
             List of organic token dictionaries
         """
-        # Use cycling strategy
-        return await self.get_organic_tokens_cycling(limit=limit)
+        await self._ensure_session()
+
+        try:
+            # Get latest token profiles (need to fetch more to filter out boosted)
+            url = "https://api.dexscreener.com/token-profiles/latest/v1"
+
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Extract Solana tokens and filter OUT boosted
+                    organic_tokens = []
+                    for item in data:
+                        token_address = item.get('tokenAddress')
+                        chain_id = item.get('chainId', '').lower()
+
+                        # Only Solana tokens
+                        if chain_id != 'solana' or not token_address:
+                            continue
+
+                        # CRITICAL: Skip boosted (promoted) tokens
+                        # These are paid promotions and usually scams!
+                        boosts = item.get('boosts', {})
+                        active_boosts = boosts.get('active', 0) if boosts else 0
+
+                        if active_boosts > 0:
+                            logger.debug(f"Skipping boosted token {token_address[:8]} (boosts: {active_boosts})")
+                            continue
+
+                        organic_tokens.append({
+                            'address': token_address,
+                            'chainId': chain_id,
+                            'url': item.get('url'),
+                            'links': item.get('links', []),
+                            'icon': item.get('icon'),
+                            'description': item.get('description'),
+                            'boosts_active': 0,  # Explicitly mark as organic
+                            # Will be enriched with price/liquidity later
+                        })
+
+                        if len(organic_tokens) >= limit:
+                            break
+
+                    logger.info(f"Retrieved {len(organic_tokens)} ORGANIC (non-boosted) Solana tokens from DexScreener")
+                    return organic_tokens
+                else:
+                    logger.warning(f"DexScreener organic tokens error: {response.status}")
+                    return []
+
+        except Exception as e:
+            logger.error(f"Error fetching organic tokens: {e}")
+            return []
 
     async def get_latest_token_profiles(self, limit: int = 30) -> List[Dict]:
         """
