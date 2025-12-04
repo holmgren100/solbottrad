@@ -797,30 +797,61 @@ class SolanaTradingBot:
             print(f"  🔧 Token sources: Jupiter={enable_jupiter}, DexScreener={enable_dexscreener}, Birdeye={enable_birdeye}")
             logger.info(f"Token source flags: ENABLE_JUPITER={enable_jupiter}, ENABLE_DEXSCREENER={enable_dexscreener}, ENABLE_BIRDEYE={enable_birdeye}")
 
-            # === SOURCE 1: JUPITER (Organic tokens - filters bot activity) ===
+            # === SOURCE 1: JUPITER (CYCLING for gainers - finds movers!) ===
             if enable_jupiter:
-                print("  📡 Fetching tokens from Jupiter (organic score)...")
+                print("  📡 Fetching tokens from Jupiter (CYCLING discovery)...")
                 try:
-                    # Use toporganicscore to filter out artificial/bot activity
-                    # This is MUCH better than 'toptraded' or 'recent'
-                    # Reduced limit to 25-30 for higher quality (top tokens are best)
+                    # 🔄 CYCLING: Rotates through toporganicscore → toptraded → toptrending
+                    # This finds GAINERS and MOVERS, not just bluechips!
+                    # category=None enables automatic cycling in jupiter_client.py
                     jupiter_tokens = await self.jupiter.get_trending_tokens(
-                        category='toporganicscore',
+                        category=None,  # Enable cycling (was hardcoded 'toporganicscore')
                         interval='1h',
                         limit=30
                     )
 
                     if jupiter_tokens:
-                        print(f"  ✅ Jupiter: Found {len(jupiter_tokens)} organic tokens")
-                        logger.info(f"Jupiter returned {len(jupiter_tokens)} organic tokens with liquidity")
+                        # 🚫 FILTER OUT BLUECHIPS - Focus on gainers with room to grow
+                        # Bluechips like SOL, TRUMP, JUP won't 10x-100x
+                        BLUECHIP_SYMBOLS = {'SOL', 'USDC', 'USDT', 'JUP', 'BONK', 'WIF', 'TRUMP', 'PYTH', 'RAY', 'ORCA'}
+                        BLUECHIP_ADDRESSES = {
+                            'So11111111111111111111111111111111111111112',  # SOL
+                            'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+                            'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+                            'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',  # JUP
+                            'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',  # BONK
+                        }
+
+                        filtered_tokens = []
                         for token in jupiter_tokens:
+                            symbol = token.get('symbol', '').upper()
+                            addr = token.get('address')
+                            mcap = token.get('mcap', 0)
+
+                            # Skip bluechips by symbol, address, or market cap >$100M
+                            if symbol in BLUECHIP_SYMBOLS:
+                                logger.debug(f"Filtered out bluechip: {symbol}")
+                                continue
+                            if addr in BLUECHIP_ADDRESSES:
+                                logger.debug(f"Filtered out bluechip: {addr[:8]}...")
+                                continue
+                            if mcap and mcap > 100_000_000:  # >$100M market cap
+                                logger.debug(f"Filtered out high mcap token: {symbol} (${mcap/1e6:.1f}M)")
+                                continue
+
+                            filtered_tokens.append(token)
+
+                        print(f"  ✅ Jupiter: Found {len(filtered_tokens)} tokens ({len(jupiter_tokens) - len(filtered_tokens)} bluechips filtered)")
+                        logger.info(f"Jupiter returned {len(filtered_tokens)} tokens after bluechip filter")
+
+                        for token in filtered_tokens:
                             addr = token.get('address')
                             if addr and addr not in seen_addresses:
                                 all_tokens.append(token)
                                 seen_addresses.add(addr)
                     else:
-                        print("  ⚠️  Jupiter returned no organic tokens")
-                        logger.warning("Jupiter organic tokens returned empty")
+                        print("  ⚠️  Jupiter returned no tokens")
+                        logger.warning("Jupiter tokens returned empty")
                 except Exception as e:
                     logger.error(f"Jupiter error: {e}")
                     print(f"  ❌ Jupiter error: {e}")
@@ -849,8 +880,11 @@ class SolanaTradingBot:
                     logger.error(f"DexScreener error: {e}")
                     print(f"  ❌ DexScreener error: {e}")
 
-            # === SOURCE 3: BIRDEYE (Optional - Solana-native data) ===
-            if enable_birdeye and self.birdeye:
+            # === SOURCE 3: BIRDEYE (DISABLED - hitting compute limits) ===
+            # NOTE: Birdeye free tier is hitting "Compute units usage limit exceeded"
+            # Temporarily disabled to avoid wasting API calls
+            # TODO: Re-enable when we upgrade to paid tier or they reset limits
+            if False:  # Disabled - was: enable_birdeye and self.birdeye
                 print("  📡 Fetching tokens from Birdeye (Solana-native)...")
                 try:
                     # Get trending tokens - reduced limits for higher quality

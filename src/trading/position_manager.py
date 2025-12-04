@@ -518,9 +518,25 @@ class PositionManager:
         Returns:
             List of token addresses for dead positions
         """
+        # 🚫 BLUECHIP EXCLUSION - Never flag these as dead (they're stable by design)
+        BLUECHIP_ADDRESSES = {
+            'So11111111111111111111111111111111111111112',  # SOL - Solana native token
+            'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+            'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+            'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',  # JUP - Jupiter
+            'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',  # BONK
+            '27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4',   # JTO - Jito
+            'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3',   # PYTH
+            '7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj',   # stSOL
+            'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',    # mSOL
+        }
+
         dead_positions = []
 
         for token_address, position in self.open_positions.items():
+            # Skip bluechip tokens - they are stable by design, not dead!
+            if token_address in BLUECHIP_ADDRESSES:
+                continue
             # Check if price is stale (no updates in X minutes)
             if position.is_price_stale(stale_minutes):
                 minutes_since = (datetime.now() - position.last_price_update).total_seconds() / 60
@@ -562,11 +578,12 @@ class PositionManager:
                 continue
 
             # Check if price hasn't actually changed (fake updates / minimal movement)
-            # If price moved less than 1% after 1+ minutes, likely honeypot/dead/manipulated
+            # If price moved less than 2% after 5+ minutes, likely honeypot/dead/manipulated
+            # NOTE: Increased from 1% in 1 minute to 2% in 5 minutes (was too aggressive)
             minutes_held = (datetime.now() - position.entry_time).total_seconds() / 60
-            if minutes_held >= 1:
+            if minutes_held >= 5:  # Wait 5 minutes before checking (was 1)
                 price_change_pct = abs((position.current_price - position.entry_price) / position.entry_price) * 100
-                if price_change_pct < 1.0:  # Less than 1% movement in 1+ minutes
+                if price_change_pct < 2.0:  # Less than 2% movement in 5+ minutes (was 1%)
                     logger.warning(
                         f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
                         f"Minimal price movement ({price_change_pct:.2f}%) for {minutes_held:.1f} minutes (likely honeypot/dead/rugged)"
