@@ -784,49 +784,52 @@ class SolanaTradingBot:
             print(f"  🔧 Token sources: Jupiter={enable_jupiter}, DexScreener={enable_dexscreener}, Birdeye={enable_birdeye}")
             logger.info(f"Token source flags: ENABLE_JUPITER={enable_jupiter}, ENABLE_DEXSCREENER={enable_dexscreener}, ENABLE_BIRDEYE={enable_birdeye}")
 
-            # === SOURCE 1: JUPITER (Proven working - default enabled) ===
+            # === SOURCE 1: JUPITER (Organic tokens - filters bot activity) ===
             if enable_jupiter:
-                print("  📡 Fetching tokens from Jupiter (proven working)...")
+                print("  📡 Fetching tokens from Jupiter (organic score)...")
                 try:
-                    jupiter_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
-
-                    if not jupiter_tokens:
-                        print("  ⚠️  No trending tokens, trying recent...")
-                        jupiter_tokens = await self.jupiter.get_recent_tokens(limit=50)
+                    # Use toporganicscore to filter out artificial/bot activity
+                    # This is MUCH better than 'toptraded' or 'recent'
+                    jupiter_tokens = await self.jupiter.get_trending_tokens(
+                        category='toporganicscore',
+                        interval='1h',
+                        limit=100
+                    )
 
                     if jupiter_tokens:
-                        print(f"  ✅ Jupiter: Found {len(jupiter_tokens)} tokens")
-                        logger.info(f"Jupiter returned {len(jupiter_tokens)} tokens")
+                        print(f"  ✅ Jupiter: Found {len(jupiter_tokens)} organic tokens")
+                        logger.info(f"Jupiter returned {len(jupiter_tokens)} organic tokens with liquidity")
                         for token in jupiter_tokens:
                             addr = token.get('address')
                             if addr and addr not in seen_addresses:
                                 all_tokens.append(token)
                                 seen_addresses.add(addr)
                     else:
-                        print("  ⚠️  Jupiter returned no tokens")
-                        logger.warning("Jupiter returned no tokens")
+                        print("  ⚠️  Jupiter returned no organic tokens")
+                        logger.warning("Jupiter organic tokens returned empty")
                 except Exception as e:
                     logger.error(f"Jupiter error: {e}")
                     print(f"  ❌ Jupiter error: {e}")
 
-            # === SOURCE 2: DEXSCREENER (Optional - better data quality) ===
+            # === SOURCE 2: DEXSCREENER (Organic only - NO paid promotions) ===
             if enable_dexscreener:
-                print("  📡 Fetching tokens from DexScreener...")
+                print("  📡 Fetching tokens from DexScreener (organic only)...")
                 try:
-                    # Get boosted tokens (promoted/trending)
-                    dex_tokens = await self.dexscreener.get_boosted_tokens(limit=20)
+                    # Get ORGANIC tokens - filters out boosted (paid promotions)
+                    # Boosted tokens are usually scams!
+                    dex_tokens = await self.dexscreener.get_organic_tokens(limit=30)
 
                     if dex_tokens:
-                        print(f"  ✅ DexScreener: Found {len(dex_tokens)} boosted tokens")
-                        logger.info(f"DexScreener returned {len(dex_tokens)} boosted tokens")
+                        print(f"  ✅ DexScreener: Found {len(dex_tokens)} organic tokens")
+                        logger.info(f"DexScreener returned {len(dex_tokens)} organic (non-boosted) tokens")
                         for token in dex_tokens:
                             addr = token.get('address')
                             if addr and addr not in seen_addresses:
                                 all_tokens.append(token)
                                 seen_addresses.add(addr)
                     else:
-                        print("  ⚠️  DexScreener returned no tokens")
-                        logger.warning("DexScreener returned no tokens")
+                        print("  ⚠️  DexScreener returned no organic tokens")
+                        logger.warning("DexScreener organic tokens returned empty")
                 except Exception as e:
                     logger.error(f"DexScreener error: {e}")
                     print(f"  ❌ DexScreener error: {e}")
@@ -938,8 +941,20 @@ class SolanaTradingBot:
         if not positions:
             return  # No positions to monitor
 
-        print(f"📊 Monitoring {len(positions)} open position(s)...")
-        logger.info(f"Monitoring {len(positions)} positions")
+        # Reduce log spam: only log header occasionally
+        # Monitor runs every 10 seconds, log header every 60 seconds
+        current_time = asyncio.get_event_loop().time()
+        if not hasattr(self, '_last_monitor_log_time'):
+            self._last_monitor_log_time = 0
+
+        should_log_header = (current_time - self._last_monitor_log_time) >= 60
+        if should_log_header:
+            print(f"📊 Monitoring {len(positions)} open position(s)...")
+            logger.info(f"Monitoring {len(positions)} positions")
+            self._last_monitor_log_time = current_time
+        else:
+            # Silent monitoring - just logger debug
+            logger.debug(f"Monitoring {len(positions)} positions")
 
         price_updates = {}
         liquidity_updates = {}  # Track liquidity for rug detection
@@ -1069,26 +1084,53 @@ class SolanaTradingBot:
                 # Calculate current P&L
                 pnl_percent = ((current_price - position.entry_price) / position.entry_price) * 100
 
-                # Show price update with data source
-                symbol = profile.get('symbol', position.token_address[:8])
-                print(f"  💹 {symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%) [{data_source}]")
+                # REDUCE LOG SPAM: Only print if significant change or important event
+                # Track last printed price for each position
+                if not hasattr(self, '_last_printed_prices'):
+                    self._last_printed_prices = {}
 
-                # Check if close to stop loss or take profit/trailing stop
+                last_price = self._last_printed_prices.get(position.token_address, position.entry_price)
+                price_change_pct = abs((current_price - last_price) / last_price * 100) if last_price > 0 else 100
+
+                # Only print if:
+                # 1. Periodic header was shown (every 60 seconds), OR
+                # 2. Price changed >2% since last print, OR
+                # 3. Close to stop/target
+                symbol = profile.get('symbol', position.token_address[:8])
+
+                close_to_action = False
                 if position.use_trailing_stop:
-                    # Show trailing stop info
-                    print(f"  🔄 Trailing stop: ${position.trailing_stop_price:.8f} ({position.trailing_stop_percent:.0f}% below peak ${position.highest_price:.8f})")
-                    # Warn if close to trailing stop
-                    if current_price <= position.trailing_stop_price * 1.02:  # Within 2% of trailing stop
-                        print(f"  ⚠️  Warning: Close to trailing stop!")
+                    close_to_action = current_price <= position.trailing_stop_price * 1.02
                 else:
-                    # Fixed stop loss / take profit
                     sl_distance = ((current_price - position.stop_loss) / position.stop_loss) * 100
                     tp_distance = ((position.take_profit - current_price) / current_price) * 100
+                    close_to_action = sl_distance < 5 or tp_distance < 10
 
-                    if sl_distance < 5:  # Within 5% of stop loss
-                        print(f"  ⚠️  Warning: Close to stop loss (${position.stop_loss:.8f})")
-                    elif tp_distance < 10:  # Within 10% of take profit
-                        print(f"  🎯 Near take profit target (${position.take_profit:.8f})")
+                should_print = should_log_header or price_change_pct >= 2.0 or close_to_action
+
+                if should_print:
+                    print(f"  💹 {symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%) [{data_source}]")
+                    self._last_printed_prices[position.token_address] = current_price
+
+                    # Check if close to stop loss or take profit/trailing stop
+                    if position.use_trailing_stop:
+                        # Show trailing stop info
+                        print(f"  🔄 Trailing stop: ${position.trailing_stop_price:.8f} ({position.trailing_stop_percent:.0f}% below peak ${position.highest_price:.8f})")
+                        # Warn if close to trailing stop
+                        if current_price <= position.trailing_stop_price * 1.02:  # Within 2% of trailing stop
+                            print(f"  ⚠️  Warning: Close to trailing stop!")
+                    else:
+                        # Fixed stop loss / take profit
+                        sl_distance = ((current_price - position.stop_loss) / position.stop_loss) * 100
+                        tp_distance = ((position.take_profit - current_price) / current_price) * 100
+
+                        if sl_distance < 5:  # Within 5% of stop loss
+                            print(f"  ⚠️  Warning: Close to stop loss (${position.stop_loss:.8f})")
+                        elif tp_distance < 10:  # Within 10% of take profit
+                            print(f"  🎯 Near take profit target (${position.take_profit:.8f})")
+                else:
+                    # Silent monitoring - just debug log
+                    logger.debug(f"{symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%)")
 
             except Exception as e:
                 logger.error(f"Error getting price for {position.token_address}: {e}")

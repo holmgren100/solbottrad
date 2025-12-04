@@ -92,42 +92,76 @@ class JupiterClient:
             logger.error(f"Error fetching recent tokens from Jupiter: {e}")
             return []
 
-    async def get_trending_tokens(self, category: str = 'toptraded', limit: int = 50) -> List[Dict]:
+    async def get_trending_tokens(
+        self,
+        category: str = 'toporganicscore',  # Changed default to organic
+        interval: str = '1h',
+        limit: int = 50
+    ) -> List[Dict]:
         """
-        Get trending/top tokens by category.
+        Get trending/top tokens by category using Jupiter Token API v2.
+
+        BEST CATEGORIES:
+        - 'toporganicscore': Filters out artificial/bot activity (RECOMMENDED)
+        - 'toptraded': Highest volume (can be manipulated)
+        - 'toptrending': Trending tokens (moderate risk)
 
         Args:
-            category: Category type ('toptraded', 'toptrending', 'toporganicscore')
+            category: Category type (toporganicscore, toptraded, toptrending)
+            interval: Time interval (5m, 1h, 6h, 24h)
             limit: Maximum number of tokens to retrieve
 
         Returns:
-            List of token dictionaries
+            List of token dictionaries with full market data
         """
         await self._ensure_session()
 
         try:
-            url = f"{self.base_url}/categories/{category}"
+            # Correct format: /tokens/v2/{category}/{interval}?limit={limit}
+            url = f"{self.base_url}/{category}/{interval}"
             params = {'limit': limit}
 
             async with self.session.get(url, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
-                    logger.info(f"Retrieved {len(data)} {category} tokens from Jupiter")
+                    logger.info(f"Retrieved {len(data)} {category} tokens from Jupiter (interval: {interval})")
 
                     tokens = []
                     for token in data:
+                        # Jupiter v2 returns comprehensive data
+                        token_address = token.get('id') or token.get('address')
+                        if not token_address:
+                            continue
+
                         tokens.append({
-                            'address': token.get('address'),
+                            'address': token_address,
                             'symbol': token.get('symbol'),
-                            'name': token.get('name')
+                            'name': token.get('name'),
+                            'decimals': token.get('decimals'),
+                            'logoURI': token.get('icon') or token.get('logoURI'),
+                            'tags': token.get('tags') or [],
+                            'liquidity': token.get('liquidity', 0),  # IMPORTANT for filtering
+                            'fdv': token.get('fdv'),
+                            'mcap': token.get('mcap'),
+                            'usdPrice': token.get('usdPrice'),
+                            'holderCount': token.get('holderCount'),
+                            'organicScore': token.get('organicScore'),  # Organic activity indicator
+                            'audit': token.get('audit') or {},
+                            'launchpad': token.get('launchpad'),
+                            'createdAt': token.get('createdAt')
                         })
-                    return tokens
+
+                    # FILTER: Remove tokens with $0 liquidity (garbage data)
+                    filtered_tokens = [t for t in tokens if t.get('liquidity', 0) > 0]
+                    logger.info(f"Filtered to {len(filtered_tokens)} tokens with liquidity >$0")
+
+                    return filtered_tokens
                 else:
-                    logger.warning(f"Jupiter categories API returned {response.status}")
+                    logger.warning(f"Jupiter {category} API returned {response.status}")
                     return []
 
         except Exception as e:
-            logger.error(f"Error fetching trending tokens from Jupiter: {e}")
+            logger.error(f"Error fetching {category} tokens from Jupiter: {e}")
             return []
 
     async def search_token(self, query: str) -> List[Dict]:
