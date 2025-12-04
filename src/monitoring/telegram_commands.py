@@ -4,6 +4,7 @@ Allows users to check status, modify settings, and control the bot via Telegram.
 """
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Optional, Callable
 from telegram import Update
@@ -463,6 +464,256 @@ class TelegramCommandHandler:
             logger.error(f"Error in /resume command: {e}")
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
+    async def cmd_daily(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show daily trade summary."""
+        if not self.is_authorized(update):
+            await update.message.reply_text("⛔ Unauthorized")
+            return
+
+        try:
+            from datetime import datetime, timedelta
+            import json
+
+            # Load trades from last 24 hours
+            trades_file = "data/ml_training/ml_trades.jsonl"
+            if not os.path.exists(trades_file):
+                await update.message.reply_text("📭 No trade history found")
+                return
+
+            now = datetime.now()
+            yesterday = now - timedelta(hours=24)
+            daily_trades = []
+
+            with open(trades_file, 'r') as f:
+                for line in f:
+                    try:
+                        trade = json.loads(line)
+                        trade_time = datetime.fromisoformat(trade.get('exit_time', ''))
+                        if trade_time >= yesterday:
+                            daily_trades.append(trade)
+                    except:
+                        continue
+
+            if not daily_trades:
+                await update.message.reply_text("📭 No trades in the last 24 hours")
+                return
+
+            # Calculate stats
+            wins = [t for t in daily_trades if t.get('win', False)]
+            losses = [t for t in daily_trades if not t.get('win', False)]
+            total_pnl = sum(t.get('pnl', 0) for t in daily_trades)
+            win_rate = len(wins) / len(daily_trades) * 100 if daily_trades else 0
+
+            # Exit reason breakdown
+            exit_reasons = {}
+            for t in daily_trades:
+                reason = t.get('exit_reason', 'unknown')
+                exit_reasons[reason] = exit_reasons.get(reason, 0) + 1
+
+            # Build message
+            message = f"📊 *Daily Summary* (24h)\n"
+            message += f"━━━━━━━━━━━━━━━━\n\n"
+            message += f"💰 *Performance*\n"
+            message += f"Total P&L: ${total_pnl:+.2f}\n"
+            message += f"Total Trades: {len(daily_trades)}\n"
+            message += f"Win Rate: {win_rate:.1f}%\n"
+            message += f"Wins/Losses: {len(wins)}/{len(losses)}\n\n"
+
+            if wins:
+                avg_win = sum(t.get('pnl', 0) for t in wins) / len(wins)
+                message += f"🟢 Average Win: ${avg_win:.2f}\n"
+            if losses:
+                avg_loss = sum(t.get('pnl', 0) for t in losses) / len(losses)
+                message += f"🔴 Average Loss: ${avg_loss:.2f}\n"
+
+            message += f"\n📝 *Exit Reasons*\n"
+            for reason, count in sorted(exit_reasons.items(), key=lambda x: x[1], reverse=True):
+                message += f"  • {reason.replace('_', ' ').title()}: {count}\n"
+
+            # Current status
+            engine = self.bot.trading_engine
+            positions = engine.position_manager.get_all_positions()
+            message += f"\n📈 *Current*\n"
+            message += f"Open Positions: {len(positions)}\n"
+            message += f"Available Slots: {engine.position_manager.max_open_positions - len(positions)}\n"
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+
+        except Exception as e:
+            logger.error(f"Error in /daily command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def cmd_weekly(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show weekly trade analysis."""
+        if not self.is_authorized(update):
+            await update.message.reply_text("⛔ Unauthorized")
+            return
+
+        try:
+            from datetime import datetime, timedelta
+            import json
+
+            # Load trades from last 7 days
+            trades_file = "data/ml_training/ml_trades.jsonl"
+            if not os.path.exists(trades_file):
+                await update.message.reply_text("📭 No trade history found")
+                return
+
+            now = datetime.now()
+            week_ago = now - timedelta(days=7)
+            weekly_trades = []
+
+            with open(trades_file, 'r') as f:
+                for line in f:
+                    try:
+                        trade = json.loads(line)
+                        trade_time = datetime.fromisoformat(trade.get('exit_time', ''))
+                        if trade_time >= week_ago:
+                            weekly_trades.append(trade)
+                    except:
+                        continue
+
+            if not weekly_trades:
+                await update.message.reply_text("📭 No trades in the last 7 days")
+                return
+
+            # Calculate stats
+            wins = [t for t in weekly_trades if t.get('win', False)]
+            losses = [t for t in weekly_trades if not t.get('win', False)]
+            total_pnl = sum(t.get('pnl', 0) for t in weekly_trades)
+            win_rate = len(wins) / len(weekly_trades) * 100 if weekly_trades else 0
+
+            # Daily breakdown
+            daily_pnl = {}
+            for t in weekly_trades:
+                day = datetime.fromisoformat(t.get('exit_time', '')).strftime('%Y-%m-%d')
+                daily_pnl[day] = daily_pnl.get(day, 0) + t.get('pnl', 0)
+
+            # Best/worst trades
+            sorted_trades = sorted(weekly_trades, key=lambda x: x.get('pnl_percent', 0), reverse=True)
+            best_trade = sorted_trades[0] if sorted_trades else None
+            worst_trade = sorted_trades[-1] if sorted_trades else None
+
+            # Build message
+            message = f"📊 *Weekly Summary* (7 days)\n"
+            message += f"━━━━━━━━━━━━━━━━\n\n"
+            message += f"💰 *Performance*\n"
+            message += f"Total P&L: ${total_pnl:+.2f}\n"
+            message += f"Total Trades: {len(weekly_trades)}\n"
+            message += f"Win Rate: {win_rate:.1f}%\n"
+            message += f"Wins/Losses: {len(wins)}/{len(losses)}\n\n"
+
+            if best_trade:
+                message += f"🏆 *Best Trade*\n"
+                message += f"  {best_trade.get('symbol', 'Unknown')}: {best_trade.get('pnl_percent', 0):+.1f}% (${best_trade.get('pnl', 0):+.2f})\n\n"
+
+            if worst_trade:
+                message += f"💔 *Worst Trade*\n"
+                message += f"  {worst_trade.get('symbol', 'Unknown')}: {worst_trade.get('pnl_percent', 0):+.1f}% (${worst_trade.get('pnl', 0):+.2f})\n\n"
+
+            message += f"📅 *Daily Breakdown*\n"
+            for day in sorted(daily_pnl.keys(), reverse=True)[:7]:
+                pnl = daily_pnl[day]
+                emoji = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
+                message += f"  {emoji} {day}: ${pnl:+.2f}\n"
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+
+        except Exception as e:
+            logger.error(f"Error in /weekly command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def cmd_apis(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Test all API connections."""
+        if not self.is_authorized(update):
+            await update.message.reply_text("⛔ Unauthorized")
+            return
+
+        try:
+            await update.message.reply_text("🔄 Testing all APIs...\n"
+                                           "This may take a moment...")
+
+            results = []
+            total_tests = 0
+            passed = 0
+
+            # Test Jupiter API
+            total_tests += 1
+            try:
+                test_token = "So11111111111111111111111111111111111111112"  # SOL
+                data = await self.bot.jupiter.get_token_price_data(test_token)
+                if data and data.get('price_usd', 0) > 0:
+                    results.append("🟢 Jupiter: Online")
+                    passed += 1
+                else:
+                    results.append("🔴 Jupiter: No data")
+            except Exception as e:
+                results.append(f"🔴 Jupiter: {str(e)[:50]}")
+
+            # Test DexScreener API
+            total_tests += 1
+            try:
+                test_token = "So11111111111111111111111111111111111111112"
+                data = await self.bot.dexscreener.get_token_profile(test_token)
+                if data and data.get('price_usd', 0) > 0:
+                    results.append("🟢 DexScreener: Online")
+                    passed += 1
+                else:
+                    results.append("🔴 DexScreener: No data")
+            except Exception as e:
+                results.append(f"🔴 DexScreener: {str(e)[:50]}")
+
+            # Test Birdeye API (if enabled)
+            if hasattr(self.bot, 'birdeye') and self.bot.birdeye:
+                total_tests += 1
+                try:
+                    test_token = "So11111111111111111111111111111111111111112"
+                    # Birdeye test would go here
+                    results.append("🟡 Birdeye: Not tested (add test)")
+                except Exception as e:
+                    results.append(f"🔴 Birdeye: {str(e)[:50]}")
+
+            # Test RugCheck API (if enabled)
+            if hasattr(self.bot, 'enhanced_bot') and self.bot.enhanced_bot:
+                total_tests += 1
+                try:
+                    test_token = "So11111111111111111111111111111111111111112"
+                    data = await self.bot.enhanced_bot.rugcheck.get_token_report(test_token)
+                    if data:
+                        results.append("🟢 RugCheck: Online")
+                        passed += 1
+                    else:
+                        results.append("🟡 RugCheck: No data (may not exist)")
+                        passed += 1  # Not an error
+                except Exception as e:
+                    results.append(f"🔴 RugCheck: {str(e)[:50]}")
+
+            # Test CoinGecko (Market Monitor)
+            if hasattr(self.bot, 'enhanced_bot') and self.bot.enhanced_bot:
+                total_tests += 1
+                try:
+                    data = await self.bot.enhanced_bot.market_monitor.get_market_data()
+                    if data and data.get('btc', {}).get('price', 0) > 0:
+                        results.append("🟢 CoinGecko: Online")
+                        passed += 1
+                    else:
+                        results.append("🔴 CoinGecko: No data")
+                except Exception as e:
+                    results.append(f"🔴 CoinGecko: {str(e)[:50]}")
+
+            # Build summary
+            message = f"🔧 *API Status Report*\n"
+            message += f"━━━━━━━━━━━━━━━━\n\n"
+            message += f"✅ Passed: {passed}/{total_tests}\n\n"
+            message += "\n".join(results)
+            message += f"\n\n💡 If APIs are down, bot will use fallback sources"
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+
+        except Exception as e:
+            logger.error(f"Error in /apis command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show available commands."""
         if not self.is_authorized(update):
@@ -475,6 +726,9 @@ class TelegramCommandHandler:
 *Status & Info*
 /status - View portfolio and positions
 /settings - View current settings
+/daily - Daily trade summary (24h)
+/weekly - Weekly trade analysis (7 days)
+/apis - Test all API connections
 /export - Export trade history to CSV (Excel)
 
 *Controls*
@@ -508,6 +762,9 @@ class TelegramCommandHandler:
         # Register command handlers
         self.application.add_handler(CommandHandler("status", self.cmd_status))
         self.application.add_handler(CommandHandler("settings", self.cmd_settings))
+        self.application.add_handler(CommandHandler("daily", self.cmd_daily))
+        self.application.add_handler(CommandHandler("weekly", self.cmd_weekly))
+        self.application.add_handler(CommandHandler("apis", self.cmd_apis))
         self.application.add_handler(CommandHandler("stop_loss", self.cmd_stop_loss))
         self.application.add_handler(CommandHandler("take_profit", self.cmd_take_profit))
         self.application.add_handler(CommandHandler("close", self.cmd_close))
