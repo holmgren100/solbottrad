@@ -797,6 +797,18 @@ class SolanaTradingBot:
             print(f"  🔧 Token sources: Jupiter={enable_jupiter}, DexScreener={enable_dexscreener}, Birdeye={enable_birdeye}")
             logger.info(f"Token source flags: ENABLE_JUPITER={enable_jupiter}, ENABLE_DEXSCREENER={enable_dexscreener}, ENABLE_BIRDEYE={enable_birdeye}")
 
+            # 🚫 BLUECHIP FILTER - Define once, use everywhere
+            # Skip these stable/high-cap tokens (won't 10x-100x)
+            BLUECHIP_SYMBOLS = {'SOL', 'USDC', 'USDT', 'JUP', 'BONK', 'WIF', 'TRUMP', 'PYTH', 'RAY', 'ORCA'}
+            BLUECHIP_ADDRESSES = {
+                'So11111111111111111111111111111111111111112',  # SOL
+                'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+                'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',  # JUP
+                'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',  # BONK
+            }
+            MAX_MARKET_CAP = 100_000_000  # $100M - tokens above this are too big to 10x
+
             # === SOURCE 1: JUPITER (CYCLING for gainers - finds movers!) ===
             if enable_jupiter:
                 print("  📡 Fetching tokens from Jupiter (CYCLING discovery)...")
@@ -811,32 +823,22 @@ class SolanaTradingBot:
                     )
 
                     if jupiter_tokens:
-                        # 🚫 FILTER OUT BLUECHIPS - Focus on gainers with room to grow
-                        # Bluechips like SOL, TRUMP, JUP won't 10x-100x
-                        BLUECHIP_SYMBOLS = {'SOL', 'USDC', 'USDT', 'JUP', 'BONK', 'WIF', 'TRUMP', 'PYTH', 'RAY', 'ORCA'}
-                        BLUECHIP_ADDRESSES = {
-                            'So11111111111111111111111111111111111111112',  # SOL
-                            'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
-                            'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
-                            'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',  # JUP
-                            'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',  # BONK
-                        }
-
+                        # 🚫 Apply bluechip filter (using constants defined above)
                         filtered_tokens = []
                         for token in jupiter_tokens:
                             symbol = token.get('symbol', '').upper()
                             addr = token.get('address')
                             mcap = token.get('mcap', 0)
 
-                            # Skip bluechips by symbol, address, or market cap >$100M
+                            # Skip bluechips by symbol, address, or market cap
                             if symbol in BLUECHIP_SYMBOLS:
-                                logger.debug(f"Filtered out bluechip: {symbol}")
+                                logger.debug(f"[JUP] Filtered out bluechip: {symbol}")
                                 continue
                             if addr in BLUECHIP_ADDRESSES:
-                                logger.debug(f"Filtered out bluechip: {addr[:8]}...")
+                                logger.debug(f"[JUP] Filtered out bluechip: {addr[:8]}...")
                                 continue
-                            if mcap and mcap > 100_000_000:  # >$100M market cap
-                                logger.debug(f"Filtered out high mcap token: {symbol} (${mcap/1e6:.1f}M)")
+                            if mcap and mcap > MAX_MARKET_CAP:
+                                logger.debug(f"[JUP] Filtered out high mcap: {symbol} (${mcap/1e6:.1f}M)")
                                 continue
 
                             filtered_tokens.append(token)
@@ -866,9 +868,30 @@ class SolanaTradingBot:
                     dex_tokens = await self.dexscreener.get_organic_tokens(limit=25)
 
                     if dex_tokens:
-                        print(f"  ✅ DexScreener: Found {len(dex_tokens)} organic tokens")
-                        logger.info(f"DexScreener returned {len(dex_tokens)} organic (non-boosted) tokens")
+                        # 🚫 Apply bluechip filter (using same constants as Jupiter)
+                        filtered_dex_tokens = []
                         for token in dex_tokens:
+                            symbol = token.get('symbol', '').upper()
+                            addr = token.get('address')
+                            mcap = token.get('mcap', 0)
+
+                            # Skip bluechips by symbol, address, or market cap
+                            if symbol in BLUECHIP_SYMBOLS:
+                                logger.debug(f"[DEX] Filtered out bluechip: {symbol}")
+                                continue
+                            if addr in BLUECHIP_ADDRESSES:
+                                logger.debug(f"[DEX] Filtered out bluechip: {addr[:8]}...")
+                                continue
+                            if mcap and mcap > MAX_MARKET_CAP:
+                                logger.debug(f"[DEX] Filtered out high mcap: {symbol} (${mcap/1e6:.1f}M)")
+                                continue
+
+                            filtered_dex_tokens.append(token)
+
+                        print(f"  ✅ DexScreener: Found {len(filtered_dex_tokens)} tokens ({len(dex_tokens) - len(filtered_dex_tokens)} bluechips filtered)")
+                        logger.info(f"DexScreener returned {len(filtered_dex_tokens)} tokens after bluechip filter")
+
+                        for token in filtered_dex_tokens:
                             addr = token.get('address')
                             if addr and addr not in seen_addresses:
                                 all_tokens.append(token)
