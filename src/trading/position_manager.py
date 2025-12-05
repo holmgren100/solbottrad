@@ -48,6 +48,20 @@ class Position:
     strategy_name: str = 'established'  # Which strategy is this position using
     pair_created_at: int = 0  # Unix timestamp when pair was created (for age tracking)
 
+    # === ENHANCED DATA TRACKING FOR ANALYSIS ===
+    # Liquidity tracking (entry vs exit)
+    entry_liquidity: float = 0.0  # Liquidity at entry
+    exit_liquidity: float = 0.0   # Liquidity at exit (set when closing)
+    # Volume tracking (multiple timeframes)
+    volume_24h: float = 0.0  # 24h volume at entry
+    volume_1h: float = 0.0   # 1h volume at entry (if available)
+    # Score tracking (from score-based selection)
+    opportunity_score: float = 0.0  # Score 0-100 from _calculate_opportunity_score()
+    # Source tracking (which API found this token)
+    token_source: str = 'unknown'  # jupiter, coingecko, dexscreener, birdeye, apify
+    # DEX platform tracking
+    dex_platform: str = 'unknown'  # pump.fun, raydium, orca, meteora, jupiter, etc.
+
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
         # Track if price ACTUALLY changed (not just API responding with same price)
@@ -176,6 +190,22 @@ class Trade:
     entry_price: float = 0.0  # Entry price (for sell trades)
     entry_time: datetime = None  # Entry time (for calculating duration)
     volume_fallback: bool = False  # True if entered with volume fallback (high risk/reduced size)
+    # Strategy tracking
+    strategy_name: str = 'established'  # Which strategy was used
+    pair_created_at: int = 0  # Unix timestamp when pair was created
+    # === ENHANCED DATA TRACKING FOR ANALYSIS ===
+    # Liquidity tracking (entry vs exit)
+    entry_liquidity: float = 0.0  # Liquidity at entry
+    exit_liquidity: float = 0.0   # Liquidity at exit
+    # Volume tracking (multiple timeframes)
+    volume_24h: float = 0.0  # 24h volume at entry
+    volume_1h: float = 0.0   # 1h volume at entry (if available)
+    # Score tracking (from score-based selection)
+    opportunity_score: float = 0.0  # Score 0-100 from _calculate_opportunity_score()
+    # Source tracking (which API found this token)
+    token_source: str = 'unknown'  # jupiter, coingecko, dexscreener, birdeye, apify
+    # DEX platform tracking
+    dex_platform: str = 'unknown'  # pump.fun, raydium, orca, meteora, jupiter, etc.
 
 
 class PositionManager:
@@ -214,7 +244,14 @@ class PositionManager:
         trailing_stop_percent: float = 15.0,
         volume_fallback: bool = False,
         strategy_name: str = 'established',
-        pair_created_at: int = 0
+        pair_created_at: int = 0,
+        # Enhanced tracking fields
+        entry_liquidity: float = 0.0,
+        volume_24h: float = 0.0,
+        volume_1h: float = 0.0,
+        opportunity_score: float = 0.0,
+        token_source: str = 'unknown',
+        dex_platform: str = 'unknown'
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -228,6 +265,14 @@ class PositionManager:
             use_trailing_stop: Whether to use trailing stop instead of fixed take profit
             trailing_stop_percent: Percent to trail below peak (default 15%)
             volume_fallback: Whether this trade used volume fallback (high risk/reduced size)
+            strategy_name: Age-based strategy name ('ultra_new', 'new', 'established')
+            pair_created_at: Unix timestamp when pair was created (for age tracking)
+            entry_liquidity: Liquidity at entry in USD
+            volume_24h: 24h trading volume at entry
+            volume_1h: 1h trading volume at entry (if available)
+            opportunity_score: Score 0-100 from opportunity scoring
+            token_source: API source (jupiter, coingecko, dexscreener, etc.)
+            dex_platform: DEX platform (pump.fun, raydium, orca, etc.)
 
         Returns:
             Position object if successful, None otherwise
@@ -267,7 +312,14 @@ class PositionManager:
             last_known_price=entry_price,  # Initialize for frozen price detection
             volume_fallback=volume_fallback,  # Track if this is a high-risk volume fallback trade
             strategy_name=strategy_name,  # Age-based strategy for this token
-            pair_created_at=pair_created_at  # Token pair creation timestamp
+            pair_created_at=pair_created_at,  # Token pair creation timestamp
+            # Enhanced tracking fields
+            entry_liquidity=entry_liquidity,  # Liquidity at entry
+            volume_24h=volume_24h,  # 24h volume at entry
+            volume_1h=volume_1h,  # 1h volume at entry
+            opportunity_score=opportunity_score,  # Score 0-100 from selection
+            token_source=token_source,  # API source (jupiter, coingecko, etc.)
+            dex_platform=dex_platform  # DEX platform (pump.fun, raydium, etc.)
         )
 
         self.open_positions[token_address] = position
@@ -320,6 +372,9 @@ class PositionManager:
         pnl = position.unrealized_pnl
         pnl_percent = position.unrealized_pnl_percent
 
+        # Capture exit liquidity
+        position.exit_liquidity = position.current_liquidity
+
         # Create sell trade with full details for CSV export
         sell_trade = Trade(
             token_address=token_address,
@@ -334,7 +389,18 @@ class PositionManager:
             symbol=getattr(position, 'symbol', token_address[:8]),  # Token symbol or short address
             entry_price=position.entry_price,  # Store entry price for reference
             entry_time=position.entry_time,  # Store entry time for duration calculation
-            volume_fallback=position.volume_fallback  # Preserve volume fallback flag from position
+            volume_fallback=position.volume_fallback,  # Preserve volume fallback flag from position
+            # Strategy tracking
+            strategy_name=position.strategy_name,
+            pair_created_at=position.pair_created_at,
+            # Enhanced tracking fields
+            entry_liquidity=position.entry_liquidity,
+            exit_liquidity=position.exit_liquidity,
+            volume_24h=position.volume_24h,
+            volume_1h=position.volume_1h,
+            opportunity_score=position.opportunity_score,
+            token_source=position.token_source,
+            dex_platform=position.dex_platform
         )
 
         self.closed_trades.append(sell_trade)
@@ -384,6 +450,9 @@ class PositionManager:
         pnl = -position.amount_usd  # Total loss
         pnl_percent = -100.0
 
+        # Capture exit liquidity (if available)
+        position.exit_liquidity = position.current_liquidity
+
         # Create sell trade (even though we couldn't actually sell)
         sell_trade = Trade(
             token_address=token_address,
@@ -398,7 +467,18 @@ class PositionManager:
             symbol=getattr(position, 'symbol', token_address[:8]),
             entry_price=position.entry_price,
             entry_time=position.entry_time,
-            volume_fallback=position.volume_fallback
+            volume_fallback=position.volume_fallback,
+            # Strategy tracking
+            strategy_name=position.strategy_name,
+            pair_created_at=position.pair_created_at,
+            # Enhanced tracking fields
+            entry_liquidity=position.entry_liquidity,
+            exit_liquidity=position.exit_liquidity,
+            volume_24h=position.volume_24h,
+            volume_1h=position.volume_1h,
+            opportunity_score=position.opportunity_score,
+            token_source=position.token_source,
+            dex_platform=position.dex_platform
         )
 
         self.closed_trades.append(sell_trade)
@@ -862,30 +942,40 @@ class PositionManager:
         fieldnames = [
             'Date',
             'Time',
-            'Day of Week',          # NEW - Pattern analysis
-            'Hour',                 # NEW - Time of day analysis
+            'Day of Week',          # Pattern analysis
+            'Hour',                 # Time of day analysis
             'Token Address',
             'Token',
             'Symbol',
             'Entry Price',
             'Exit Price',
-            'Price Change ($)',     # NEW - Absolute price change
-            'Price Change (%)',     # NEW - Price movement during hold
+            'Price Change ($)',     # Absolute price change
+            'Price Change (%)',     # Price movement during hold
             'Position Size ($)',
             'Quantity',
             'Tokens per Dollar',
-            'Entry Liquidity',      # NEW - Need to track this
-            'Exit Liquidity',       # NEW - Need to track this
-            'Liquidity Change (%)', # NEW - Liquidity movement
+            # === LIQUIDITY DATA ===
+            'Entry Liquidity',      # Liquidity when entered
+            'Exit Liquidity',       # Liquidity when exited
+            'Liquidity Change (%)', # How much liquidity changed
+            # === VOLUME DATA ===
+            'Volume 24h',           # 24h volume at entry
+            'Volume 1h',            # 1h volume at entry (if available)
+            # === SCORE DATA ===
+            'Opportunity Score',    # Score 0-100 from selection
+            # === SOURCE DATA ===
+            'Token Source',         # jupiter, coingecko, dexscreener, etc.
+            'DEX Platform',         # pump.fun, raydium, orca, meteora, etc.
+            # === OUTCOME DATA ===
             'PnL ($)',
             'PnL (%)',
             'Win/Loss',
-            'Duration (hours)',     # Changed format
-            'Duration (minutes)',   # NEW - For short-term analysis
+            'Duration (hours)',
+            'Duration (minutes)',
             'Close Reason',
             'Volume Fallback',
-            'Strategy',             # NEW - Which strategy used
-            'Token Age (hours)'     # NEW - How old was token at entry
+            'Strategy',             # Age-based strategy used
+            'Token Age (hours)'     # How old was token at entry
         ]
 
         # Write to CSV
@@ -949,6 +1039,13 @@ class PositionManager:
                 if entry_liq > 0:
                     liq_change_pct = ((exit_liq - entry_liq) / entry_liq * 100)
 
+                # Get enhanced data fields (with defaults for old trades)
+                volume_24h = getattr(trade, 'volume_24h', 0)
+                volume_1h = getattr(trade, 'volume_1h', 0)
+                opp_score = getattr(trade, 'opportunity_score', 0)
+                token_source = getattr(trade, 'token_source', 'unknown')
+                dex_platform = getattr(trade, 'dex_platform', 'unknown')
+
                 # Write row
                 writer.writerow({
                     'Date': trade.timestamp.strftime('%Y-%m-%d'),
@@ -958,16 +1055,26 @@ class PositionManager:
                     'Token Address': trade.token_address,
                     'Token': trade.token_address[:16] + '...',
                     'Symbol': trade.symbol or trade.token_address[:8],
-                    'Entry Price': f"{trade.entry_price:.12f}",  # More decimal places
+                    'Entry Price': f"{trade.entry_price:.12f}",
                     'Exit Price': f"{trade.price:.12f}",
                     'Price Change ($)': f"{price_change_usd:+.12f}",
                     'Price Change (%)': f"{price_change_pct:+.2f}",
                     'Position Size ($)': f"{trade.amount_usd:.2f}",
                     'Quantity': f"{trade.quantity:,.0f}",
                     'Tokens per Dollar': f"{tokens_per_dollar:,.0f}",
+                    # === LIQUIDITY DATA ===
                     'Entry Liquidity': f"{entry_liq:,.0f}",
                     'Exit Liquidity': f"{exit_liq:,.0f}",
                     'Liquidity Change (%)': f"{liq_change_pct:+.1f}",
+                    # === VOLUME DATA ===
+                    'Volume 24h': f"{volume_24h:,.0f}",
+                    'Volume 1h': f"{volume_1h:,.0f}",
+                    # === SCORE DATA ===
+                    'Opportunity Score': f"{opp_score:.1f}",
+                    # === SOURCE DATA ===
+                    'Token Source': token_source,
+                    'DEX Platform': dex_platform,
+                    # === OUTCOME DATA ===
                     'PnL ($)': f"{trade.pnl:+.2f}",
                     'PnL (%)': f"{trade.pnl_percent:+.2f}",
                     'Win/Loss': win_loss,
