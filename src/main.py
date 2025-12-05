@@ -776,6 +776,110 @@ class SolanaTradingBot:
             )
             return False
 
+    def _calculate_opportunity_score(self, decision: dict, token_data: dict) -> float:
+        """
+        Calculate opportunity score based on multiple factors.
+        Higher score = better opportunity (prioritizes GAINERS).
+
+        Args:
+            decision: Trading decision dict with analyzed token info
+            token_data: Original token data from source (may contain price_change_24h, etc.)
+
+        Returns:
+            float: Score from 0-100 (higher = better opportunity)
+        """
+        score = 50.0  # Base score
+
+        # === FACTOR 1: PRICE CHANGE (HIGHEST PRIORITY FOR GAINERS) ===
+        # CoinGecko and Apify provide price_change_24h/6h/1h
+        price_change_24h = token_data.get('price_change_24h', 0)
+        price_change_6h = token_data.get('price_change_6h', 0)
+        price_change_1h = token_data.get('price_change_1h', 0)
+
+        # Use best available price change metric (24h > 6h > 1h)
+        if price_change_24h > 0:
+            # Up to +30 points for high 24h gains
+            # +10% = +5pts, +50% = +25pts, +100%+ = +30pts
+            score += min(price_change_24h / 2, 30)
+        elif price_change_6h > 0:
+            # Up to +25 points for 6h gains (slightly less weight)
+            score += min(price_change_6h / 2.5, 25)
+        elif price_change_1h > 0:
+            # Up to +20 points for 1h gains (lowest weight)
+            score += min(price_change_1h / 3, 20)
+
+        # === FACTOR 2: LIQUIDITY (CRITICAL FOR EXITS) ===
+        liquidity = decision.get('liquidity', 0) or token_data.get('liquidity', 0)
+        if liquidity > 100000:  # >$100k liquidity
+            score += 10
+        elif liquidity > 50000:  # >$50k liquidity
+            score += 5
+        elif liquidity > 30000:  # >$30k liquidity (minimum)
+            score += 2
+        else:
+            # Penalty for low liquidity (risky!)
+            score -= 5
+
+        # === FACTOR 3: VOLUME (ACTIVITY INDICATOR) ===
+        volume_24h = decision.get('volume_24h', 0) or token_data.get('volume_24h', 0)
+        if volume_24h > 500000:  # >$500k volume
+            score += 8
+        elif volume_24h > 100000:  # >$100k volume
+            score += 5
+        elif volume_24h > 50000:  # >$50k volume
+            score += 2
+
+        # === FACTOR 4: SOURCE QUALITY (GAINERS SOURCES GET BONUS) ===
+        source = token_data.get('source', 'unknown')
+        if source == 'coingecko':
+            # CoinGecko sorted by price_change = high-quality GAINERS
+            score += 8
+        elif source == 'apify':
+            # Apify DexScreener scraper = BEST sorted data
+            score += 10
+        elif source == 'birdeye':
+            # Birdeye GAINERS focus
+            score += 6
+        elif source == 'dexscreener':
+            # DexScreener organic tokens (not sorted)
+            score += 3
+        elif source == 'jupiter':
+            # Jupiter tokens (reliable but not GAINERS-focused)
+            score += 2
+
+        # === FACTOR 5: MARKET CAP (LOWER = MORE MOONSHOT POTENTIAL) ===
+        market_cap = token_data.get('market_cap', 0)
+        if 0 < market_cap < 500000:  # Under $500k = micro-cap moonshot
+            score += 12
+        elif 500000 <= market_cap < 1000000:  # $500k-$1M
+            score += 8
+        elif 1000000 <= market_cap < 5000000:  # $1M-$5M
+            score += 5
+        elif 5000000 <= market_cap < 10000000:  # $5M-$10M
+            score += 2
+        # Above $10M = no bonus (harder to 10x-100x)
+
+        # === FACTOR 6: MARKET CAP RANK (COINGECKO SPECIFIC) ===
+        # Lower rank number = more established, higher rank = more speculative
+        market_cap_rank = token_data.get('market_cap_rank', 999)
+        if market_cap_rank > 500:  # Unranked or very low cap
+            score += 5  # More moonshot potential
+        elif market_cap_rank > 200:
+            score += 3
+
+        # === FACTOR 7: VOLUME/LIQUIDITY RATIO (HEALTHY METRIC) ===
+        if liquidity > 0 and volume_24h > 0:
+            vol_liq_ratio = volume_24h / liquidity
+            if 0.5 <= vol_liq_ratio <= 3.0:
+                # Healthy ratio (volume comparable to liquidity)
+                score += 5
+            elif vol_liq_ratio > 3.0:
+                # High volume vs liquidity = strong momentum
+                score += 8
+
+        # Cap score at 100 (perfect opportunity)
+        return min(score, 100.0)
+
     async def scan_tokens(self):
         """Scan for new tokens and trading opportunities."""
         # Check if trading is paused
@@ -1088,6 +1192,10 @@ class SolanaTradingBot:
 
             print(f"Analyzing {len(new_tokens)} tokens ({len(open_positions)} positions already open)...")
 
+            # === PHASE 1: ANALYZE ALL TOKENS AND COLLECT SCORES ===
+            # Don't buy yet - just score all opportunities
+            scored_opportunities = []
+
             for token_data in new_tokens:
                 token_address = token_data.get('address')
                 if not token_address:
@@ -1107,19 +1215,49 @@ class SolanaTradingBot:
                     print(f"  ❌ No analysis data")
                     continue
 
-                print(f"  ✅ Analysis complete")
-
-                # Make trading decision
+                # Make trading decision (get score but don't buy yet)
                 decision = await self.make_trading_decision(analysis)
                 if decision:
-                    print(f"  🎯 TRADING OPPORTUNITY: {decision['symbol']}")
-                    logger.info(f"Trading opportunity found: {decision['symbol']}")
-                    await self.execute_trade(decision)
+                    # Calculate opportunity score based on multiple factors
+                    score = self._calculate_opportunity_score(decision, token_data)
+                    scored_opportunities.append({
+                        'decision': decision,
+                        'score': score,
+                        'source': token_data.get('source', 'unknown'),
+                        'address': token_address
+                    })
+                    print(f"  ✅ Opportunity found (score: {score:.2f})")
                 else:
                     print(f"  ⏸️  No trade signal")
 
-                # Delay between analyses
-                await asyncio.sleep(2)
+                # Small delay between analyses
+                await asyncio.sleep(0.5)
+
+            # === PHASE 2: SORT BY SCORE AND BUY BEST OPPORTUNITIES ===
+            if scored_opportunities:
+                # Sort by score (highest first)
+                scored_opportunities.sort(key=lambda x: x['score'], reverse=True)
+
+                print(f"\n🎯 Found {len(scored_opportunities)} opportunities, buying best ones...")
+                logger.info(f"Found {len(scored_opportunities)} opportunities, sorted by score")
+
+                # Buy top opportunities (respecting max open positions)
+                max_positions = settings.risk.max_open_positions
+                available_slots = max_positions - len(open_positions)
+
+                for i, opp in enumerate(scored_opportunities[:available_slots]):
+                    print(f"  🎯 #{i+1} BEST OPPORTUNITY (score {opp['score']:.2f}): {opp['decision']['symbol']} from {opp['source']}")
+                    logger.info(f"Trading opportunity #{i+1}: {opp['decision']['symbol']} (score: {opp['score']:.2f}, source: {opp['source']})")
+                    await self.execute_trade(opp['decision'])
+                    await asyncio.sleep(2)  # Delay between trades
+
+                # Log opportunities that didn't make the cut
+                if len(scored_opportunities) > available_slots:
+                    print(f"  ⏭️  Skipped {len(scored_opportunities) - available_slots} lower-scored opportunities (no slots)")
+                    for i, opp in enumerate(scored_opportunities[available_slots:]):
+                        logger.info(f"Skipped opportunity: {opp['decision']['symbol']} (score: {opp['score']:.2f}, source: {opp['source']}) - no slots available")
+            else:
+                print("  ℹ️  No trading opportunities found in this scan")
 
             print("✅ Scan cycle complete\n")
 
