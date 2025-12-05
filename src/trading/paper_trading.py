@@ -75,10 +75,15 @@ class PaperTradingEngine:
         self.min_24h_volume = float(os.getenv('MIN_24H_VOLUME', '15000'))             # $15k daily volume
         self.max_position_vs_liquidity = float(os.getenv('MAX_POSITION_VS_LIQUIDITY', '0.005'))  # Max 0.5% of pool
 
-        # TIER 2 FILTERS: Price and volume safety (prevents 80% of high-risk trades!)
-        self.min_entry_price = float(os.getenv('MIN_ENTRY_PRICE', '0.10'))           # Minimum entry price (blocks ultra-cheap scam tokens)
-        self.max_tokens_per_dollar = float(os.getenv('MAX_TOKENS_PER_DOLLAR', '10000'))  # Max tokens per dollar (blocks high-volume scams)
-        self.max_position_size = float(os.getenv('MAX_POSITION_SIZE', '100'))         # Hard cap on position size
+        # TIER 2 FILTERS: Price and volume safety (OPTIMIZED from 363-trade analysis!)
+        # Analysis: Entry price sweet spot = $0.00035, range $0.0001-0.001 (best performance)
+        # Analysis: 2.5k-5k tokens/$ = 29.8% win rate (vs 13.1% for <1k expensive tokens)
+        self.min_entry_price = float(os.getenv('MIN_ENTRY_PRICE', '0.0001'))         # Minimum entry price (cheap tokens sweet spot)
+        self.max_entry_price = float(os.getenv('MAX_ENTRY_PRICE', '0.001'))          # Maximum entry price (sweet spot range)
+        self.min_tokens_per_dollar = float(os.getenv('MIN_TOKENS_PER_DOLLAR', '2500'))  # Min volume (filters expensive tokens)
+        self.max_tokens_per_dollar = float(os.getenv('MAX_TOKENS_PER_DOLLAR', '5000'))  # Max volume (sweet spot upper)
+        self.max_position_size = float(os.getenv('MAX_POSITION_SIZE', '50'))          # Hard cap ($50 max per top trades)
+        self.min_position_size = float(os.getenv('MIN_POSITION_SIZE', '35'))          # Min position ($35 minimum per analysis)
 
         # Volume fallback (when liquidity data unavailable but volume is high)
         self.allow_volume_fallback = os.getenv('ALLOW_VOLUME_FALLBACK', 'true').lower() == 'true'
@@ -97,9 +102,12 @@ class PaperTradingEngine:
             'low_entry_liquidity': 0,
             'low_volume': 0,
             'position_too_large': 0,
+            'position_too_small': 0,      # NEW: Position < $35 (bad tokens filter)
             'low_exit_liquidity': 0,
-            'price_too_low': 0,           # NEW: Ultra-cheap tokens rejected
-            'high_volume_risk': 0,        # NEW: Too many tokens per dollar
+            'price_too_low': 0,           # NEW: Price < $0.0001 (below sweet spot)
+            'price_too_high': 0,          # NEW: Price > $0.001 (above sweet spot)
+            'low_volume_expensive': 0,    # NEW: <2.5k tokens/$ (expensive = bad)
+            'high_volume_risk': 0,        # NEW: >5k tokens/$ (above sweet spot)
             'volume_fallback_unsafe': 0,   # NEW: Volume fallback blocked by price/tokens checks
             'forced_cleanup': 0           # NEW: Stuck positions force-closed
         }
@@ -444,19 +452,49 @@ class PaperTradingEngine:
         # Track if this trade uses volume fallback (for analysis)
         is_volume_fallback = False
 
-        # TIER 2 FILTER: Check minimum entry price (blocks ultra-cheap scam tokens)
+        # TIER 2 FILTER: Check minimum entry price (sweet spot filter)
         if price < self.min_entry_price:
             self.rejected_trades['price_too_low'] += 1
             logger.warning(
-                f"❌ REJECTED {token_address[:8]}... - Price too low (scam risk):\n"
-                f"   Entry Price: ${price:.8f} < ${self.min_entry_price:.2f}\n"
-                f"   Ultra-cheap tokens are 6x more likely to be unsellable!"
+                f"❌ REJECTED {token_address[:8]}... - Price too low:\n"
+                f"   Entry Price: ${price:.8f} < ${self.min_entry_price:.8f}\n"
+                f"   Below sweet spot range"
             )
             return {
                 'status': 'failed',
                 'reason': 'price_too_low',
                 'price': price,
                 'min_required': self.min_entry_price
+            }
+
+        # TIER 2 FILTER: Check maximum entry price (sweet spot filter - NEW!)
+        if price > self.max_entry_price:
+            self.rejected_trades['price_too_high'] += 1
+            logger.warning(
+                f"❌ REJECTED {token_address[:8]}... - Price too high:\n"
+                f"   Entry Price: ${price:.8f} > ${self.max_entry_price:.8f}\n"
+                f"   Above sweet spot range (expensive tokens = 4.5% win rate)"
+            )
+            return {
+                'status': 'failed',
+                'reason': 'price_too_high',
+                'price': price,
+                'max_allowed': self.max_entry_price
+            }
+
+        # TIER 2 FILTER: Check minimum position size (quality filter - NEW!)
+        if amount_usd < self.min_position_size:
+            self.rejected_trades['position_too_small'] += 1
+            logger.warning(
+                f"❌ REJECTED {token_address[:8]}... - Position too small:\n"
+                f"   Position: ${amount_usd:.2f} < ${self.min_position_size:.2f}\n"
+                f"   Small positions = bad tokens (0% win rate per analysis)"
+            )
+            return {
+                'status': 'failed',
+                'reason': 'position_too_small',
+                'amount_usd': amount_usd,
+                'min_required': self.min_position_size
             }
 
         # TIER 2 FILTER: Check maximum position size (hard cap for safety)
@@ -474,18 +512,35 @@ class PaperTradingEngine:
                 'max_allowed': self.max_position_size
             }
 
-        # TIER 2 FILTER: Calculate and check tokens per dollar (blocks high-volume scam tokens)
-        # This is the CRITICAL metric that predicts 80% of risky trades!
+        # TIER 2 FILTER: Calculate and check tokens per dollar (OPTIMIZED sweet spot filter!)
+        # Analysis: 2.5k-5k tokens/$ = 29.8% win rate (BEST!)
         quantity_estimate = amount_usd / price
         tokens_per_dollar = quantity_estimate / amount_usd
 
+        # Check minimum tokens per dollar (filters expensive tokens with low win rate)
+        if tokens_per_dollar < self.min_tokens_per_dollar:
+            self.rejected_trades['low_volume_expensive'] += 1
+            logger.warning(
+                f"❌ REJECTED {token_address[:8]}... - Too expensive (low volume):\n"
+                f"   Tokens per $1: {tokens_per_dollar:,.0f} < {self.min_tokens_per_dollar:,.0f} minimum\n"
+                f"   Total tokens: {quantity_estimate:,.0f}\n"
+                f"   Expensive tokens (<2.5k/$ = 13.1% win rate per analysis)"
+            )
+            return {
+                'status': 'failed',
+                'reason': 'low_volume_expensive',
+                'tokens_per_dollar': tokens_per_dollar,
+                'min_required': self.min_tokens_per_dollar
+            }
+
+        # Check maximum tokens per dollar (upper bound of sweet spot)
         if tokens_per_dollar > self.max_tokens_per_dollar:
             self.rejected_trades['high_volume_risk'] += 1
             logger.warning(
-                f"❌ REJECTED {token_address[:8]}... - High volume risk (too many tokens per dollar):\n"
-                f"   Tokens per $1: {tokens_per_dollar:,.0f} > {self.max_tokens_per_dollar:,.0f} limit\n"
+                f"❌ REJECTED {token_address[:8]}... - Volume too high (above sweet spot):\n"
+                f"   Tokens per $1: {tokens_per_dollar:,.0f} > {self.max_tokens_per_dollar:,.0f} max\n"
                 f"   Total tokens: {quantity_estimate:,.0f}\n"
-                f"   High volume cheap tokens are 80% likely to be unsellable!"
+                f"   Sweet spot: 2.5k-5k tokens/$ (29.8% win rate)"
             )
             return {
                 'status': 'failed',
