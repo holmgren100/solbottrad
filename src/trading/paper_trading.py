@@ -524,7 +524,7 @@ class PaperTradingEngine:
                 f"❌ REJECTED {token_address[:8]}... - Too expensive (low volume):\n"
                 f"   Tokens per $1: {tokens_per_dollar:,.0f} < {self.min_tokens_per_dollar:,.0f} minimum\n"
                 f"   Total tokens: {quantity_estimate:,.0f}\n"
-                f"   Expensive tokens (<2.5k/$ = 13.1% win rate per analysis)"
+                f"   Expensive tokens (below minimum threshold based on analysis)"
             )
             return {
                 'status': 'failed',
