@@ -728,11 +728,20 @@ class TelegramCommandHandler:
             if hasattr(self.bot, 'birdeye') and self.bot.birdeye:
                 total_tests += 1
                 try:
-                    test_token = "So11111111111111111111111111111111111111112"
-                    # Birdeye test would go here
-                    results.append("🟡 Birdeye: Not tested (add test)")
+                    # Test Birdeye health check
+                    is_healthy = await self.bot.birdeye.health_check()
+                    if is_healthy:
+                        results.append("🟢 Birdeye: Online")
+                        passed += 1
+                    else:
+                        results.append("🔴 Birdeye: Health check failed")
                 except Exception as e:
-                    results.append(f"🔴 Birdeye: {str(e)[:50]}")
+                    error_msg = str(e)[:50]
+                    # Check if it's the CU limit error
+                    if "Compute units" in str(e) or "limit exceeded" in str(e):
+                        results.append("🟡 Birdeye: CU limit hit (resets monthly)")
+                    else:
+                        results.append(f"🔴 Birdeye: {error_msg}")
 
             # Test RugCheck API (if enabled)
             if hasattr(self.bot, 'enhanced_bot') and self.bot.enhanced_bot:
@@ -749,18 +758,33 @@ class TelegramCommandHandler:
                 except Exception as e:
                     results.append(f"🔴 RugCheck: {str(e)[:50]}")
 
-            # Test CoinGecko (Market Monitor)
-            if hasattr(self.bot, 'enhanced_bot') and self.bot.enhanced_bot:
+            # Test CoinGecko API (Top Gainers source)
+            if hasattr(self.bot, 'coingecko') and self.bot.coingecko:
                 total_tests += 1
                 try:
-                    data = await self.bot.enhanced_bot.market_monitor.get_market_data()
-                    if data and data.get('btc', {}).get('price', 0) > 0:
+                    # Test CoinGecko health check (ping endpoint)
+                    is_healthy = await self.bot.coingecko.health_check()
+                    if is_healthy:
                         results.append("🟢 CoinGecko: Online")
                         passed += 1
                     else:
-                        results.append("🔴 CoinGecko: No data")
+                        results.append("🔴 CoinGecko: Health check failed")
                 except Exception as e:
                     results.append(f"🔴 CoinGecko: {str(e)[:50]}")
+
+            # Test Apify API (if enabled)
+            if hasattr(self.bot, 'apify') and self.bot.apify:
+                total_tests += 1
+                try:
+                    # Test Apify health check
+                    is_healthy = await self.bot.apify.health_check()
+                    if is_healthy:
+                        results.append("🟢 Apify: Online")
+                        passed += 1
+                    else:
+                        results.append("🔴 Apify: Health check failed")
+                except Exception as e:
+                    results.append(f"🔴 Apify: {str(e)[:50]}")
 
             # Build summary
             message = f"🔧 *API Status Report*\n"
