@@ -738,19 +738,25 @@ class SolanaTradingBot:
                 # ONLY send Telegram notification on SUCCESSFUL entry
                 if result.get('status') == 'success':
                     print(f"      📱 Sending entry notification to Telegram...")
+
+                    # Use opportunity_score if available (from score-based selection), otherwise use analysis score
+                    opportunity_score = decision.get('opportunity_score', analysis_data.get('score', 0))
+                    token_source = decision.get('token_source', 'unknown')
+
                     await self.notifier.send_entry_notification(
                         token_address=decision['token_address'],
                         symbol=decision['symbol'],
                         entry_price=decision['entry_price'],
                         position_size=decision['position_size'],
-                        score=analysis_data.get('score', 0),
+                        score=opportunity_score,
                         confidence=decision.get('confidence', 'medium'),
                         token_data=profile or {},
                         rugcheck_data=analysis_data.get('rug_check'),
                         market_data=None,  # Could add market conditions here
                         score_breakdown=analysis_data.get('score_breakdown'),
                         warnings=decision.get('warnings', []),
-                        is_pumpfun=decision['token_address'].endswith('pump')
+                        is_pumpfun=decision['token_address'].endswith('pump'),
+                        source=token_source  # Pass source to notification
                     )
                 # Failures are just logged, no Telegram spam
             else:
@@ -1248,6 +1254,12 @@ class SolanaTradingBot:
                 for i, opp in enumerate(scored_opportunities[:available_slots]):
                     print(f"  🎯 #{i+1} BEST OPPORTUNITY (score {opp['score']:.2f}): {opp['decision']['symbol']} from {opp['source']}")
                     logger.info(f"Trading opportunity #{i+1}: {opp['decision']['symbol']} (score: {opp['score']:.2f}, source: {opp['source']})")
+
+                    # Add score and source to decision before executing trade
+                    # This ensures Telegram notification shows the correct data
+                    opp['decision']['opportunity_score'] = opp['score']
+                    opp['decision']['token_source'] = opp['source']
+
                     await self.execute_trade(opp['decision'])
                     await asyncio.sleep(2)  # Delay between trades
 

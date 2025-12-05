@@ -206,7 +206,8 @@ The Solana trading bot has been shut down.
         market_data: dict = None,
         score_breakdown: dict = None,
         warnings: list = None,
-        is_pumpfun: bool = False
+        is_pumpfun: bool = False,
+        source: str = None
     ) -> bool:
         """
         Send enhanced entry notification with comprehensive data.
@@ -217,7 +218,7 @@ The Solana trading bot has been shut down.
             symbol: Token symbol
             entry_price: Entry price
             position_size: Position size in USD
-            score: Token score 0-100
+            score: Token score 0-100 (opportunity score from score-based selection)
             confidence: Confidence level (high/medium/low)
             token_data: Token data from aggregator
             rugcheck_data: RugCheck analysis (optional)
@@ -225,6 +226,7 @@ The Solana trading bot has been shut down.
             score_breakdown: Score breakdown by factor (optional)
             warnings: List of warnings (optional)
             is_pumpfun: Whether this is a pump.fun token
+            source: Token source (jupiter/coingecko/dexscreener/birdeye/apify)
 
         Returns:
             True if successful
@@ -242,14 +244,17 @@ The Solana trading bot has been shut down.
         token_emoji = '🚀' if is_pumpfun else '📈'
         confidence_emoji = '🟢' if confidence == 'high' else '🟡' if confidence == 'medium' else '🟠'
 
+        # Use provided source if available, otherwise fall back to token_data
+        display_source = (source or token_data.get('primary_source', 'UNKNOWN')).upper()
+
         message = (
             f"{confidence_emoji} *ENTERED: {symbol}* {token_emoji}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"💰 Position: ${position_size:.2f}\n"
             f"💲 Entry: ${entry_price:.8f}\n"
-            f"📊 Score: {score}/100 ({confidence})\n"
+            f"📊 Score: {score}/100 ({score:.1f})\n"
             f"\n"
-            f"📍 Source: {token_data.get('primary_source', 'UNKNOWN').upper()}\n"
+            f"📍 Source: {display_source}\n"
             f"💧 Liquidity: ${token_data.get('liquidity', 0):,.0f} ({token_data.get('confidence', 'unknown')})\n"
             f"📈 Volume 24h: ${token_data.get('volume_24h', 0):,.0f}\n"
             f"⏰ Age: {age_hours:.1f}h\n"
