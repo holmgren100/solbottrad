@@ -77,9 +77,9 @@ class CoinGeckoClient:
             params = {
                 "vs_currency": vs_currency,
                 "order": "price_change_percentage_24h_desc",  # Sort by 24h gainers
-                "per_page": limit,
-                "page": 1,
-                "sparkline": False,
+                "per_page": str(limit),
+                "page": "1",
+                "sparkline": "false",  # Must be string, not boolean
                 "price_change_percentage": "24h",
                 "x_cg_demo_api_key": self.api_key  # API key as query param for Demo tier
             }
@@ -151,23 +151,21 @@ class CoinGeckoClient:
 
                     coins = data.get('coins', [])
 
-                    # Filter for Solana tokens
-                    solana_trending = []
+                    # Return all trending tokens (CoinGecko trending doesn't filter by chain easily)
+                    # We'll validate Solana addresses later in the bot
+                    trending_tokens = []
                     for item in coins:
                         coin = item.get('item', {})
-                        platforms = coin.get('data', {}).get('platforms', {})
+                        trending_tokens.append({
+                            'address': coin.get('id'),  # Use CoinGecko ID as placeholder
+                            'symbol': coin.get('symbol'),
+                            'name': coin.get('name'),
+                            'market_cap_rank': coin.get('market_cap_rank', 999),
+                            'coingecko_id': coin.get('id'),
+                        })
 
-                        if 'solana' in platforms or coin.get('symbol', '').upper() == 'SOL':
-                            solana_trending.append({
-                                'address': platforms.get('solana', coin.get('id')),
-                                'symbol': coin.get('symbol'),
-                                'name': coin.get('name'),
-                                'market_cap_rank': coin.get('market_cap_rank', 999),
-                                'coingecko_id': coin.get('id'),
-                            })
-
-                    logger.info(f"Retrieved {len(solana_trending)} Solana TRENDING tokens from CoinGecko (total: {len(coins)})")
-                    return solana_trending
+                    logger.info(f"Retrieved {len(trending_tokens)} TRENDING tokens from CoinGecko")
+                    return trending_tokens
 
                 elif response.status == 401:
                     logger.error(f"CoinGecko 401 Unauthorized - Check API key!")
