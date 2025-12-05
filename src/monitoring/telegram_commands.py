@@ -830,11 +830,11 @@ class TelegramCommandHandler:
 /cleanup - Force cleanup stuck positions (zero liquidity)
 
 *Settings*
-/stop_loss <pct> - Set stop loss %
-/take_profit <pct> - Set take profit %
+/stop\\_loss <pct> - Set stop loss %
+/take\\_profit <pct> - Set take profit %
 
 *Examples*
-/stop_loss 10
+/stop\\_loss 10
 /export 100
 /close So111111
 """
