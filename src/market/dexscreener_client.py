@@ -195,6 +195,11 @@ class DexScreenerClient:
             # Cache valid price
             self.price_cache[token_address] = price_usd
 
+        # Extract transaction data for dead token / honeypot detection
+        txns = main_pair.get('txns', {})
+        txns_h1 = txns.get('h1', {})
+        txns_m5 = txns.get('m5', {})
+
         profile = {
             'address': token_address,
             'symbol': main_pair.get('baseToken', {}).get('symbol', 'UNKNOWN'),
@@ -210,6 +215,11 @@ class DexScreenerClient:
             'dex_id': main_pair.get('dexId'),
             'pair_created_at': main_pair.get('pairCreatedAt'),
             'source': 'dexscreener',
+            # Transaction data for dead token / honeypot detection
+            'txns_h1_buys': int(txns_h1.get('buys', 0)),
+            'txns_h1_sells': int(txns_h1.get('sells', 0)),
+            'txns_m5_buys': int(txns_m5.get('buys', 0)),
+            'txns_m5_sells': int(txns_m5.get('sells', 0)),
             'all_pairs': pairs,
             'timestamp': datetime.now().isoformat()
         }

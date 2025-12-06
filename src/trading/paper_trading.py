@@ -628,6 +628,120 @@ class PaperTradingEngine:
                     'min_required': self.min_24h_volume
                 }
 
+            # === DEAD TOKEN / HONEYPOT DETECTION (Transaction Activity Analysis) ===
+            # Extract transaction data from profile
+            txns_h1_buys = profile.get('txns_h1_buys', 0)
+            txns_h1_sells = profile.get('txns_h1_sells', 0)
+            txns_total_h1 = txns_h1_buys + txns_h1_sells
+
+            # HONEYPOT CHECK: Lots of buys but ZERO sells = honeypot (can't sell!)
+            if txns_h1_buys > 5 and txns_h1_sells == 0:
+                if 'honeypot_detected' not in self.rejected_trades:
+                    self.rejected_trades['honeypot_detected'] = 0
+                self.rejected_trades['honeypot_detected'] += 1
+                logger.warning(
+                    f"❌ REJECTED {token_address[:8]}... - HONEYPOT DETECTED:\n"
+                    f"   Buys last 1h: {txns_h1_buys}\n"
+                    f"   Sells last 1h: {txns_h1_sells} (ZERO SELLS!)\n"
+                    f"   This token cannot be sold - honeypot scam!"
+                )
+                return {
+                    'status': 'failed',
+                    'reason': 'honeypot_detected',
+                    'txns_h1_buys': txns_h1_buys,
+                    'txns_h1_sells': txns_h1_sells
+                }
+
+            # DEAD TOKEN CHECK: Very few transactions = no activity/dead
+            if txns_total_h1 > 0 and txns_total_h1 < 20:
+                if 'dead_token_low_activity' not in self.rejected_trades:
+                    self.rejected_trades['dead_token_low_activity'] = 0
+                self.rejected_trades['dead_token_low_activity'] += 1
+                logger.warning(
+                    f"❌ REJECTED {token_address[:8]}... - DEAD TOKEN (low activity):\n"
+                    f"   Total transactions last 1h: {txns_total_h1} < 20\n"
+                    f"   Buys: {txns_h1_buys}, Sells: {txns_h1_sells}\n"
+                    f"   Token has minimal trading activity - likely dead/abandoned"
+                )
+                return {
+                    'status': 'failed',
+                    'reason': 'dead_token_low_activity',
+                    'txns_total_h1': txns_total_h1
+                }
+
+            # BUY/SELL IMBALANCE CHECK: Heavy buy pressure with almost no sells = suspicious
+            if txns_h1_sells > 0:  # Avoid division by zero
+                buy_sell_ratio = txns_h1_buys / txns_h1_sells
+                if buy_sell_ratio > 5:
+                    if 'suspicious_buy_sell_ratio' not in self.rejected_trades:
+                        self.rejected_trades['suspicious_buy_sell_ratio'] = 0
+                    self.rejected_trades['suspicious_buy_sell_ratio'] += 1
+                    logger.warning(
+                        f"❌ REJECTED {token_address[:8]}... - SUSPICIOUS buy/sell ratio:\n"
+                        f"   Buys: {txns_h1_buys}, Sells: {txns_h1_sells}\n"
+                        f"   Ratio: {buy_sell_ratio:.1f}:1 (>5:1 threshold)\n"
+                        f"   Heavy buy pressure with minimal sells - potential manipulation"
+                    )
+                    return {
+                        'status': 'failed',
+                        'reason': 'suspicious_buy_sell_ratio',
+                        'buy_sell_ratio': buy_sell_ratio
+                    }
+
+            # === RUGCHECK-BASED SECURITY FILTERS ===
+            # Extract RugCheck data if available
+            rug_check = analysis_data.get('rug_check', {}) if analysis_data else {}
+
+            if rug_check:
+                # Extract LP lock info from raw RugCheck report
+                raw_report = rug_check.get('raw_report', {})
+                markets = raw_report.get('markets', [])
+                top_holders = raw_report.get('topHolders', [])
+
+                # LP LOCK CHECK: Ensure liquidity is locked to prevent instant rugs
+                if markets:
+                    # Get first market (highest liquidity pair)
+                    main_market = markets[0] if markets else {}
+                    lp_data = main_market.get('lp', {})
+                    lp_locked_pct = float(lp_data.get('lpLockedPct', 0))
+
+                    # Reject if less than 50% LP locked
+                    if lp_locked_pct < 50:
+                        if 'lp_not_locked' not in self.rejected_trades:
+                            self.rejected_trades['lp_not_locked'] = 0
+                        self.rejected_trades['lp_not_locked'] += 1
+                        logger.warning(
+                            f"❌ REJECTED {token_address[:8]}... - LIQUIDITY NOT LOCKED:\n"
+                            f"   LP Locked: {lp_locked_pct:.1f}% < 50% minimum\n"
+                            f"   Developer can remove liquidity at any time - RUG RISK!"
+                        )
+                        return {
+                            'status': 'failed',
+                            'reason': 'lp_not_locked',
+                            'lp_locked_pct': lp_locked_pct
+                        }
+
+                # TOP 10 HOLDER CONCENTRATION CHECK: Ensure token is not too concentrated
+                if top_holders and len(top_holders) >= 10:
+                    # Calculate total % owned by top 10 holders
+                    top10_total_pct = sum(float(h.get('pct', 0)) * 100 for h in top_holders[:10])
+
+                    # Reject if top 10 own more than 80%
+                    if top10_total_pct > 80:
+                        if 'top10_concentration' not in self.rejected_trades:
+                            self.rejected_trades['top10_concentration'] = 0
+                        self.rejected_trades['top10_concentration'] += 1
+                        logger.warning(
+                            f"❌ REJECTED {token_address[:8]}... - TOO CONCENTRATED:\n"
+                            f"   Top 10 holders own: {top10_total_pct:.1f}% > 80% threshold\n"
+                            f"   Token supply is too concentrated - manipulation risk!"
+                        )
+                        return {
+                            'status': 'failed',
+                            'reason': 'top10_concentration',
+                            'top10_total_pct': top10_total_pct
+                        }
+
             # Check position size vs liquidity (prevent price impact >0.5%)
             if amount_usd > liquidity * self.max_position_vs_liquidity:
                 self.rejected_trades['position_too_large'] += 1

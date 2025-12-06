@@ -365,7 +365,12 @@ class SolanaTradingBot:
                     'fdv': float(jupiter_token_data.get('fdv', 0)),
                     'pair_created_at': jupiter_token_data.get('createdAt'),
                     'source': 'jupiter_discovery',
-                    'dex_id': 'unknown'  # Not in discovery data
+                    'dex_id': 'unknown',  # Not in discovery data
+                    # Transaction data (not in discovery data)
+                    'txns_h1_buys': 0,
+                    'txns_h1_sells': 0,
+                    'txns_m5_buys': 0,
+                    'txns_m5_sells': 0
                 }
                 logger.info(f"✅ Using Jupiter discovery data for {token_address[:12]}... (price: ${profile['price_usd']:.8f}, liq: ${profile['liquidity_usd']:,.0f})")
 

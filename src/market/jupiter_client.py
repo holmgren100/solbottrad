@@ -253,7 +253,12 @@ class JupiterClient:
                                     'symbol': token.get('symbol', 'UNKNOWN'),
                                     'name': token.get('name', 'Unknown'),
                                     'source': 'jupiter',
-                                    'dex_id': 'unknown'  # Jupiter doesn't provide DEX platform
+                                    'dex_id': 'unknown',  # Jupiter doesn't provide DEX platform
+                                    # Transaction data (Jupiter doesn't provide, set to 0)
+                                    'txns_h1_buys': 0,
+                                    'txns_h1_sells': 0,
+                                    'txns_m5_buys': 0,
+                                    'txns_m5_sells': 0
                                 }
 
                     # Token not found in search results
