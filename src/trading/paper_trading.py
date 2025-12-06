@@ -692,7 +692,22 @@ class PaperTradingEngine:
                 f"Entry ${price:.8f} → ${actual_entry_price:.8f}"
             )
 
-        # Open position with actual entry price (after slippage)
+        # Extract enhanced tracking data from analysis_data for position tracking
+        entry_liquidity = 0.0
+        tracking_volume_24h = 0.0
+        volume_1h = 0.0
+        token_source = 'unknown'
+        dex_platform = 'unknown'
+
+        if analysis_data:
+            profile = analysis_data.get('profile', {})
+            entry_liquidity = profile.get('liquidity_usd', 0.0)
+            tracking_volume_24h = profile.get('volume_24h', 0.0)
+            volume_1h = profile.get('volume_1h', 0.0)
+            token_source = profile.get('source', 'unknown')
+            dex_platform = profile.get('dex_id', 'unknown')
+
+        # Open position with actual entry price (after slippage) and enhanced tracking data
         position = self.position_manager.open_position(
             token_address=token_address,
             entry_price=actual_entry_price,
@@ -701,7 +716,13 @@ class PaperTradingEngine:
             take_profit=take_profit,
             use_trailing_stop=use_trailing_stop,
             trailing_stop_percent=trailing_stop_percent,
-            volume_fallback=is_volume_fallback  # Mark volume fallback trades for analysis
+            volume_fallback=is_volume_fallback,  # Mark volume fallback trades for analysis
+            # Enhanced tracking fields for analysis
+            entry_liquidity=entry_liquidity,
+            volume_24h=tracking_volume_24h,
+            volume_1h=volume_1h,
+            token_source=token_source,
+            dex_platform=dex_platform
         )
 
         if not position:

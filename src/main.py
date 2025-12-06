@@ -359,11 +359,13 @@ class SolanaTradingBot:
                     'price_usd': float(jupiter_token_data.get('usdPrice', 0)),
                     'liquidity_usd': float(jupiter_token_data.get('liquidity', 0)),
                     'volume_24h': 0,  # Not in discovery data
+                    'volume_1h': 0,  # Not in discovery data
                     'price_change_24h': 0,  # Not in discovery data
                     'market_cap': float(jupiter_token_data.get('mcap', 0)),
                     'fdv': float(jupiter_token_data.get('fdv', 0)),
                     'pair_created_at': jupiter_token_data.get('createdAt'),
-                    'source': 'jupiter_discovery'
+                    'source': 'jupiter_discovery',
+                    'dex_id': 'unknown'  # Not in discovery data
                 }
                 logger.info(f"✅ Using Jupiter discovery data for {token_address[:12]}... (price: ${profile['price_usd']:.8f}, liq: ${profile['liquidity_usd']:,.0f})")
 

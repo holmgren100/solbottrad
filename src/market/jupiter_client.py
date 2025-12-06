@@ -248,9 +248,12 @@ class JupiterClient:
                                 return {
                                     'price_usd': float(price_usd),
                                     'liquidity_usd': float(liquidity) if liquidity else 0.0,
+                                    'volume_24h': 0.0,  # Jupiter doesn't provide volume data
+                                    'volume_1h': 0.0,   # Jupiter doesn't provide volume data
                                     'symbol': token.get('symbol', 'UNKNOWN'),
                                     'name': token.get('name', 'Unknown'),
-                                    'source': 'jupiter'
+                                    'source': 'jupiter',
+                                    'dex_id': 'unknown'  # Jupiter doesn't provide DEX platform
                                 }
 
                     # Token not found in search results

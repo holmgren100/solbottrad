@@ -202,12 +202,14 @@ class DexScreenerClient:
             'price_usd': price_usd,
             'price_change_24h': float(main_pair.get('priceChange', {}).get('h24', 0)),
             'volume_24h': float(main_pair.get('volume', {}).get('h24', 0)),
+            'volume_1h': float(main_pair.get('volume', {}).get('h1', 0)),
             'liquidity_usd': float(main_pair.get('liquidity', {}).get('usd', 0)),
             'market_cap': float(main_pair.get('marketCap', 0)),
             'fdv': float(main_pair.get('fdv', 0)),
             'pair_address': main_pair.get('pairAddress'),
             'dex_id': main_pair.get('dexId'),
             'pair_created_at': main_pair.get('pairCreatedAt'),
+            'source': 'dexscreener',
             'all_pairs': pairs,
             'timestamp': datetime.now().isoformat()
         }
