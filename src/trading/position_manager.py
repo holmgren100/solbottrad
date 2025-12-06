@@ -598,6 +598,10 @@ class PositionManager:
         Returns:
             List of token addresses for dead positions
         """
+        # Read configurable dead token detection parameters from .env
+        dead_token_wait_minutes = float(os.getenv('DEAD_TOKEN_WAIT_MINUTES', '10'))
+        dead_token_min_movement = float(os.getenv('DEAD_TOKEN_MIN_MOVEMENT', '0.5'))
+
         # 🚫 BLUECHIP EXCLUSION - Never flag these as dead (they're stable by design)
         BLUECHIP_ADDRESSES = {
             'So11111111111111111111111111111111111111112',  # SOL - Solana native token
@@ -658,15 +662,16 @@ class PositionManager:
                 continue
 
             # Check if price hasn't actually changed (fake updates / minimal movement)
-            # If price moved less than 2% after 5+ minutes, likely honeypot/dead/manipulated
-            # NOTE: Increased from 1% in 1 minute to 2% in 5 minutes (was too aggressive)
+            # Configurable via .env: DEAD_TOKEN_WAIT_MINUTES and DEAD_TOKEN_MIN_MOVEMENT
+            # Default: 10 minutes wait, <0.5% movement = frozen/dead
             minutes_held = (datetime.now() - position.entry_time).total_seconds() / 60
-            if minutes_held >= 5:  # Wait 5 minutes before checking (was 1)
+            if minutes_held >= dead_token_wait_minutes:
                 price_change_pct = abs((position.current_price - position.entry_price) / position.entry_price) * 100
-                if price_change_pct < 2.0:  # Less than 2% movement in 5+ minutes (was 1%)
+                if price_change_pct < dead_token_min_movement:
                     logger.warning(
                         f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
-                        f"Minimal price movement ({price_change_pct:.2f}%) for {minutes_held:.1f} minutes (likely honeypot/dead/rugged)"
+                        f"Minimal price movement ({price_change_pct:.2f}%) for {minutes_held:.1f} minutes "
+                        f"(threshold: {dead_token_min_movement}% in {dead_token_wait_minutes} min - likely frozen/dead)"
                     )
                     dead_positions.append(token_address)
 
