@@ -748,7 +748,8 @@ class SolanaTradingBot:
 
                     # Use opportunity_score if available (from score-based selection), otherwise use analysis score
                     opportunity_score = decision.get('opportunity_score', analysis_data.get('score', 0))
-                    token_source = decision.get('token_source', 'unknown')
+                    # Extract source from profile data (jupiter_discovery, dexscreener, jupiter, etc.)
+                    token_source = profile.get('source', 'unknown') if profile else 'unknown'
 
                     await self.notifier.send_entry_notification(
                         token_address=decision['token_address'],

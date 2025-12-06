@@ -255,7 +255,7 @@ The Solana trading bot has been shut down.
             f"📊 Score: {score}/100 ({score:.1f})\n"
             f"\n"
             f"📍 Source: {display_source}\n"
-            f"💧 Liquidity: ${token_data.get('liquidity', 0):,.0f} ({token_data.get('confidence', 'unknown')})\n"
+            f"💧 Liquidity: ${token_data.get('liquidity_usd', 0):,.0f}\n"
             f"📈 Volume 24h: ${token_data.get('volume_24h', 0):,.0f}\n"
             f"⏰ Age: {age_hours:.1f}h\n"
             f"🔗 Data: {token_data.get('sources_count', 1)} sources\n"
@@ -271,9 +271,8 @@ The Solana trading bot has been shut down.
         if rugcheck_data:
             message += (
                 f"\n🛡️ *RugCheck:*\n"
-                f"  • Safety: {rugcheck_data.get('safety_score', 0)}/100\n"
+                f"  • Safety: {rugcheck_data.get('risk_score', 0)}/100\n"
                 f"  • Risk: {rugcheck_data.get('risk_level', 'unknown')}\n"
-                f"  • Top 10: {rugcheck_data.get('top_10_percentage', 0):.1f}%\n"
             )
 
         # Add market conditions if available
