@@ -813,6 +813,8 @@ class PaperTradingEngine:
         opportunity_score = 0.0
         token_source = 'unknown'
         dex_platform = 'unknown'
+        txns_h1_buys = 0
+        txns_h1_sells = 0
 
         if analysis_data:
             profile = analysis_data.get('profile', {})
@@ -823,6 +825,20 @@ class PaperTradingEngine:
             opportunity_score = analysis_data.get('opportunity_score', 0.0)
             token_source = profile.get('source', 'unknown')
             dex_platform = profile.get('dex_id', 'unknown')
+            # Extract transaction activity data (buys/sells from DexScreener)
+            txns = profile.get('txns', {})
+            if txns:
+                h1_data = txns.get('h1', {})
+                txns_h1_buys = h1_data.get('buys', 0)
+                txns_h1_sells = h1_data.get('sells', 0)
+
+        # Calculate configuration percentages for tracking
+        config_stop_loss_percent = 0.0
+        if actual_entry_price > 0:
+            config_stop_loss_percent = ((actual_entry_price - stop_loss) / actual_entry_price) * 100
+
+        config_trailing_activation_percent = 0.0  # Not implemented yet
+        config_trailing_distance_percent = trailing_stop_percent  # Same as trailing_stop_percent
 
         # Open position with actual entry price (after slippage) and enhanced tracking data
         position = self.position_manager.open_position(
@@ -840,7 +856,14 @@ class PaperTradingEngine:
             volume_1h=volume_1h,
             opportunity_score=opportunity_score,  # Score from _calculate_opportunity_score()
             token_source=token_source,
-            dex_platform=dex_platform
+            dex_platform=dex_platform,
+            # Configuration tracking (for CSV analysis)
+            config_stop_loss_percent=config_stop_loss_percent,
+            config_trailing_activation_percent=config_trailing_activation_percent,
+            config_trailing_distance_percent=config_trailing_distance_percent,
+            # Transaction activity tracking
+            txns_h1_buys=txns_h1_buys,
+            txns_h1_sells=txns_h1_sells
         )
 
         if not position:

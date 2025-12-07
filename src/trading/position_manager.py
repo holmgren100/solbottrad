@@ -62,6 +62,20 @@ class Position:
     # DEX platform tracking
     dex_platform: str = 'unknown'  # pump.fun, raydium, orca, meteora, jupiter, etc.
 
+    # === PEAK TRACKING FOR OPTIMIZATION ===
+    peak_time: datetime = None  # When highest_price was reached
+    peak_price_percent: float = 0.0  # Max gain % reached from entry
+
+    # === CONFIGURATION TRACKING ===
+    config_stop_loss_percent: float = 0.0  # Stop loss % used for this trade
+    config_trailing_activation_percent: float = 0.0  # Trailing activation % used
+    config_trailing_distance_percent: float = 0.0  # Trailing distance % used
+
+    # === TRANSACTION ACTIVITY TRACKING ===
+    txns_h1_buys: int = 0  # Buy transactions in last hour
+    txns_h1_sells: int = 0  # Sell transactions in last hour
+    txns_h1_total: int = 0  # Total transactions in last hour
+
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
         # Track if price ACTUALLY changed (not just API responding with same price)
@@ -89,11 +103,16 @@ class Position:
             # Update highest price if current price is higher
             if new_price > self.highest_price:
                 self.highest_price = new_price
+                # Track when peak was reached
+                self.peak_time = datetime.now()
+                # Track peak as percentage gain
+                if self.entry_price > 0:
+                    self.peak_price_percent = ((new_price - self.entry_price) / self.entry_price) * 100
                 # Calculate new trailing stop (X% below highest price)
                 self.trailing_stop_price = self.highest_price * (1 - self.trailing_stop_percent / 100)
                 logger.debug(
                     f"Trailing stop updated for {self.token_address[:8]}...: "
-                    f"Peak ${self.highest_price:.8f} → Stop ${self.trailing_stop_price:.8f}"
+                    f"Peak ${self.highest_price:.8f} (+{self.peak_price_percent:.1f}%) → Stop ${self.trailing_stop_price:.8f}"
                 )
 
     def check_profit_milestone(self, strategy_profile=None) -> Optional[int]:
@@ -207,6 +226,22 @@ class Trade:
     # DEX platform tracking
     dex_platform: str = 'unknown'  # pump.fun, raydium, orca, meteora, jupiter, etc.
 
+    # === PEAK TRACKING & OPTIMIZATION METRICS ===
+    max_gain_percent: float = 0.0  # Maximum gain % reached during trade
+    peak_to_exit_drop_percent: float = 0.0  # How much % dropped from peak to exit
+    entry_to_peak_minutes: float = 0.0  # Time from entry to peak (minutes)
+    peak_to_exit_minutes: float = 0.0  # Time from peak to exit (minutes)
+
+    # === CONFIGURATION TRACKING ===
+    config_stop_loss_percent: float = 0.0  # Stop loss % used
+    config_trailing_activation_percent: float = 0.0  # Trailing activation % used
+    config_trailing_distance_percent: float = 0.0  # Trailing distance % used
+
+    # === TRANSACTION ACTIVITY ===
+    txns_h1_buys: int = 0  # Buy transactions in last hour
+    txns_h1_sells: int = 0  # Sell transactions in last hour
+    buy_sell_ratio: float = 0.0  # Ratio of buys to sells
+
 
 class PositionManager:
     """Manages trading positions and portfolio."""
@@ -251,7 +286,14 @@ class PositionManager:
         volume_1h: float = 0.0,
         opportunity_score: float = 0.0,
         token_source: str = 'unknown',
-        dex_platform: str = 'unknown'
+        dex_platform: str = 'unknown',
+        # Configuration tracking (for CSV analysis)
+        config_stop_loss_percent: float = 0.0,
+        config_trailing_activation_percent: float = 0.0,
+        config_trailing_distance_percent: float = 0.0,
+        # Transaction activity tracking
+        txns_h1_buys: int = 0,
+        txns_h1_sells: int = 0
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -273,6 +315,11 @@ class PositionManager:
             opportunity_score: Score 0-100 from opportunity scoring
             token_source: API source (jupiter, coingecko, dexscreener, etc.)
             dex_platform: DEX platform (pump.fun, raydium, orca, etc.)
+            config_stop_loss_percent: Stop loss % configuration used for this trade
+            config_trailing_activation_percent: Trailing activation % configuration used
+            config_trailing_distance_percent: Trailing distance % configuration used
+            txns_h1_buys: Buy transactions in last hour at entry
+            txns_h1_sells: Sell transactions in last hour at entry
 
         Returns:
             Position object if successful, None otherwise
@@ -319,7 +366,15 @@ class PositionManager:
             volume_1h=volume_1h,  # 1h volume at entry
             opportunity_score=opportunity_score,  # Score 0-100 from selection
             token_source=token_source,  # API source (jupiter, coingecko, etc.)
-            dex_platform=dex_platform  # DEX platform (pump.fun, raydium, etc.)
+            dex_platform=dex_platform,  # DEX platform (pump.fun, raydium, etc.)
+            # Configuration tracking
+            config_stop_loss_percent=config_stop_loss_percent,
+            config_trailing_activation_percent=config_trailing_activation_percent,
+            config_trailing_distance_percent=config_trailing_distance_percent,
+            # Transaction activity tracking
+            txns_h1_buys=txns_h1_buys,
+            txns_h1_sells=txns_h1_sells,
+            txns_h1_total=txns_h1_buys + txns_h1_sells
         )
 
         self.open_positions[token_address] = position
@@ -375,6 +430,30 @@ class PositionManager:
         # Capture exit liquidity
         position.exit_liquidity = position.current_liquidity
 
+        # === CALCULATE PEAK TRACKING METRICS ===
+        max_gain_percent = position.peak_price_percent  # Max gain % reached during trade
+
+        # Calculate how much % dropped from peak to exit
+        peak_to_exit_drop_percent = 0.0
+        if position.peak_price_percent > 0:
+            peak_to_exit_drop_percent = position.peak_price_percent - pnl_percent
+
+        # Calculate timing metrics
+        entry_to_peak_minutes = 0.0
+        peak_to_exit_minutes = 0.0
+        if position.peak_time:
+            # Time from entry to peak
+            entry_to_peak_minutes = (position.peak_time - position.entry_time).total_seconds() / 60
+            # Time from peak to exit
+            peak_to_exit_minutes = (datetime.now() - position.peak_time).total_seconds() / 60
+
+        # === CALCULATE TRANSACTION ACTIVITY METRICS ===
+        buy_sell_ratio = 0.0
+        if position.txns_h1_sells > 0:
+            buy_sell_ratio = position.txns_h1_buys / position.txns_h1_sells
+        elif position.txns_h1_buys > 0:
+            buy_sell_ratio = 999.0  # Infinite (all buys, no sells)
+
         # Create sell trade with full details for CSV export
         sell_trade = Trade(
             token_address=token_address,
@@ -400,7 +479,20 @@ class PositionManager:
             volume_1h=position.volume_1h,
             opportunity_score=position.opportunity_score,
             token_source=position.token_source,
-            dex_platform=position.dex_platform
+            dex_platform=position.dex_platform,
+            # === PEAK TRACKING & OPTIMIZATION METRICS ===
+            max_gain_percent=max_gain_percent,
+            peak_to_exit_drop_percent=peak_to_exit_drop_percent,
+            entry_to_peak_minutes=entry_to_peak_minutes,
+            peak_to_exit_minutes=peak_to_exit_minutes,
+            # === CONFIGURATION TRACKING ===
+            config_stop_loss_percent=position.config_stop_loss_percent,
+            config_trailing_activation_percent=position.config_trailing_activation_percent,
+            config_trailing_distance_percent=position.config_trailing_distance_percent,
+            # === TRANSACTION ACTIVITY ===
+            txns_h1_buys=position.txns_h1_buys,
+            txns_h1_sells=position.txns_h1_sells,
+            buy_sell_ratio=buy_sell_ratio
         )
 
         self.closed_trades.append(sell_trade)
@@ -453,6 +545,30 @@ class PositionManager:
         # Capture exit liquidity (if available)
         position.exit_liquidity = position.current_liquidity
 
+        # === CALCULATE PEAK TRACKING METRICS ===
+        max_gain_percent = position.peak_price_percent  # Max gain % reached during trade
+
+        # Calculate how much % dropped from peak to exit
+        peak_to_exit_drop_percent = 0.0
+        if position.peak_price_percent > 0:
+            peak_to_exit_drop_percent = position.peak_price_percent - pnl_percent
+
+        # Calculate timing metrics
+        entry_to_peak_minutes = 0.0
+        peak_to_exit_minutes = 0.0
+        if position.peak_time:
+            # Time from entry to peak
+            entry_to_peak_minutes = (position.peak_time - position.entry_time).total_seconds() / 60
+            # Time from peak to exit
+            peak_to_exit_minutes = (datetime.now() - position.peak_time).total_seconds() / 60
+
+        # === CALCULATE TRANSACTION ACTIVITY METRICS ===
+        buy_sell_ratio = 0.0
+        if position.txns_h1_sells > 0:
+            buy_sell_ratio = position.txns_h1_buys / position.txns_h1_sells
+        elif position.txns_h1_buys > 0:
+            buy_sell_ratio = 999.0  # Infinite (all buys, no sells)
+
         # Create sell trade (even though we couldn't actually sell)
         sell_trade = Trade(
             token_address=token_address,
@@ -478,7 +594,20 @@ class PositionManager:
             volume_1h=position.volume_1h,
             opportunity_score=position.opportunity_score,
             token_source=position.token_source,
-            dex_platform=position.dex_platform
+            dex_platform=position.dex_platform,
+            # === PEAK TRACKING & OPTIMIZATION METRICS ===
+            max_gain_percent=max_gain_percent,
+            peak_to_exit_drop_percent=peak_to_exit_drop_percent,
+            entry_to_peak_minutes=entry_to_peak_minutes,
+            peak_to_exit_minutes=peak_to_exit_minutes,
+            # === CONFIGURATION TRACKING ===
+            config_stop_loss_percent=position.config_stop_loss_percent,
+            config_trailing_activation_percent=position.config_trailing_activation_percent,
+            config_trailing_distance_percent=position.config_trailing_distance_percent,
+            # === TRANSACTION ACTIVITY ===
+            txns_h1_buys=position.txns_h1_buys,
+            txns_h1_sells=position.txns_h1_sells,
+            buy_sell_ratio=buy_sell_ratio
         )
 
         self.closed_trades.append(sell_trade)
@@ -971,6 +1100,19 @@ class PositionManager:
             # === SOURCE DATA ===
             'Token Source',         # jupiter, coingecko, dexscreener, etc.
             'DEX Platform',         # pump.fun, raydium, orca, meteora, etc.
+            # === PEAK TRACKING & OPTIMIZATION ===
+            'Max Gain (%)',         # Maximum gain % reached during trade
+            'Peak to Exit Drop (%)', # How much % dropped from peak to exit
+            'Entry to Peak (min)',  # Time from entry to peak (minutes)
+            'Peak to Exit (min)',   # Time from peak to exit (minutes)
+            # === CONFIGURATION TRACKING ===
+            'Config Stop Loss (%)', # Stop loss % used for this trade
+            'Config Trailing Activation (%)', # Trailing activation % used
+            'Config Trailing Distance (%)',   # Trailing distance % used
+            # === TRANSACTION ACTIVITY ===
+            'Txns H1 Buys',         # Buy transactions in last hour
+            'Txns H1 Sells',        # Sell transactions in last hour
+            'Buy/Sell Ratio',       # Ratio of buys to sells
             # === OUTCOME DATA ===
             'PnL ($)',
             'PnL (%)',
@@ -1051,6 +1193,22 @@ class PositionManager:
                 token_source = getattr(trade, 'token_source', 'unknown')
                 dex_platform = getattr(trade, 'dex_platform', 'unknown')
 
+                # Get peak tracking data (with defaults for old trades)
+                max_gain_pct = getattr(trade, 'max_gain_percent', 0)
+                peak_to_exit_drop_pct = getattr(trade, 'peak_to_exit_drop_percent', 0)
+                entry_to_peak_min = getattr(trade, 'entry_to_peak_minutes', 0)
+                peak_to_exit_min = getattr(trade, 'peak_to_exit_minutes', 0)
+
+                # Get configuration data (with defaults for old trades)
+                config_sl_pct = getattr(trade, 'config_stop_loss_percent', 0)
+                config_trail_act_pct = getattr(trade, 'config_trailing_activation_percent', 0)
+                config_trail_dist_pct = getattr(trade, 'config_trailing_distance_percent', 0)
+
+                # Get transaction activity data (with defaults for old trades)
+                txns_buys = getattr(trade, 'txns_h1_buys', 0)
+                txns_sells = getattr(trade, 'txns_h1_sells', 0)
+                buy_sell_ratio = getattr(trade, 'buy_sell_ratio', 0)
+
                 # Write row
                 writer.writerow({
                     'Date': trade.timestamp.strftime('%Y-%m-%d'),
@@ -1079,6 +1237,19 @@ class PositionManager:
                     # === SOURCE DATA ===
                     'Token Source': token_source,
                     'DEX Platform': dex_platform,
+                    # === PEAK TRACKING & OPTIMIZATION ===
+                    'Max Gain (%)': f"{max_gain_pct:.2f}",
+                    'Peak to Exit Drop (%)': f"{peak_to_exit_drop_pct:.2f}",
+                    'Entry to Peak (min)': f"{entry_to_peak_min:.1f}",
+                    'Peak to Exit (min)': f"{peak_to_exit_min:.1f}",
+                    # === CONFIGURATION TRACKING ===
+                    'Config Stop Loss (%)': f"{config_sl_pct:.1f}",
+                    'Config Trailing Activation (%)': f"{config_trail_act_pct:.1f}",
+                    'Config Trailing Distance (%)': f"{config_trail_dist_pct:.1f}",
+                    # === TRANSACTION ACTIVITY ===
+                    'Txns H1 Buys': f"{txns_buys}",
+                    'Txns H1 Sells': f"{txns_sells}",
+                    'Buy/Sell Ratio': f"{buy_sell_ratio:.2f}",
                     # === OUTCOME DATA ===
                     'PnL ($)': f"{trade.pnl:+.2f}",
                     'PnL (%)': f"{trade.pnl_percent:+.2f}",
