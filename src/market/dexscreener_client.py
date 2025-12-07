@@ -1,5 +1,6 @@
 """
 DexScreener API client for market data and liquidity monitoring.
+Supports cycling through different discovery methods.
 """
 
 import aiohttp
@@ -194,6 +195,11 @@ class DexScreenerClient:
             # Cache valid price
             self.price_cache[token_address] = price_usd
 
+        # Extract transaction data for dead token / honeypot detection
+        txns = main_pair.get('txns', {})
+        txns_h1 = txns.get('h1', {})
+        txns_m5 = txns.get('m5', {})
+
         profile = {
             'address': token_address,
             'symbol': main_pair.get('baseToken', {}).get('symbol', 'UNKNOWN'),
@@ -201,12 +207,19 @@ class DexScreenerClient:
             'price_usd': price_usd,
             'price_change_24h': float(main_pair.get('priceChange', {}).get('h24', 0)),
             'volume_24h': float(main_pair.get('volume', {}).get('h24', 0)),
+            'volume_1h': float(main_pair.get('volume', {}).get('h1', 0)),
             'liquidity_usd': float(main_pair.get('liquidity', {}).get('usd', 0)),
             'market_cap': float(main_pair.get('marketCap', 0)),
             'fdv': float(main_pair.get('fdv', 0)),
             'pair_address': main_pair.get('pairAddress'),
             'dex_id': main_pair.get('dexId'),
             'pair_created_at': main_pair.get('pairCreatedAt'),
+            'source': 'dexscreener',
+            # Transaction data for dead token / honeypot detection
+            'txns_h1_buys': int(txns_h1.get('buys', 0)),
+            'txns_h1_sells': int(txns_h1.get('sells', 0)),
+            'txns_m5_buys': int(txns_m5.get('buys', 0)),
+            'txns_m5_sells': int(txns_m5.get('sells', 0)),
             'all_pairs': pairs,
             'timestamp': datetime.now().isoformat()
         }
@@ -249,55 +262,73 @@ class DexScreenerClient:
             logger.error(f"Error fetching trending tokens: {e}")
             return []
 
-    async def get_boosted_tokens(self, limit: int = 30) -> List[Dict]:
+    async def get_organic_tokens(self, limit: int = 30) -> List[Dict]:
         """
-        Get most boosted tokens (FREE endpoint - no premium required).
-        Boosted tokens are actively promoted = higher quality & liquidity.
+        Get organic (NON-BOOSTED) token profiles from latest listings.
+
+        WARNING: This method fetches latest profiles and FILTERS OUT boosted tokens.
+        Boosted = PAID PROMOTIONS = High scam risk!
+
+        NOTE: DexScreener API only supports fetching LATEST profiles, not sorted by
+        price change or volume. Cycling strategies are not available for this API.
 
         Args:
-            limit: Maximum number of tokens to return
+            limit: Maximum number of ORGANIC tokens to return (will fetch more to filter)
 
         Returns:
-            List of token dictionaries with market data
+            List of organic token dictionaries
         """
         await self._ensure_session()
 
         try:
-            # FREE endpoint: https://api.dexscreener.com/token-boosts/top/v1
-            url = "https://api.dexscreener.com/token-boosts/top/v1"
+            # Get latest token profiles (need to fetch more to filter out boosted)
+            url = "https://api.dexscreener.com/token-profiles/latest/v1"
 
             async with self.session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
 
-                    # Extract Solana tokens only
-                    tokens = []
-                    for item in data[:limit]:
-                        # Get token info
+                    # Extract Solana tokens and filter OUT boosted
+                    organic_tokens = []
+                    for item in data:
                         token_address = item.get('tokenAddress')
                         chain_id = item.get('chainId', '').lower()
 
                         # Only Solana tokens
-                        if chain_id == 'solana' and token_address:
-                            tokens.append({
-                                'address': token_address,
-                                'chainId': chain_id,
-                                'url': item.get('url'),
-                                'links': item.get('links', []),
-                                'icon': item.get('icon'),
-                                'description': item.get('description'),
-                                'totalAmount': item.get('totalAmount', 0),
-                                # Will be enriched with price/liquidity later
-                            })
+                        if chain_id != 'solana' or not token_address:
+                            continue
 
-                    logger.info(f"Retrieved {len(tokens)} boosted Solana tokens from DexScreener")
-                    return tokens
+                        # CRITICAL: Skip boosted (promoted) tokens
+                        # These are paid promotions and usually scams!
+                        boosts = item.get('boosts', {})
+                        active_boosts = boosts.get('active', 0) if boosts else 0
+
+                        if active_boosts > 0:
+                            logger.debug(f"Skipping boosted token {token_address[:8]} (boosts: {active_boosts})")
+                            continue
+
+                        organic_tokens.append({
+                            'address': token_address,
+                            'chainId': chain_id,
+                            'url': item.get('url'),
+                            'links': item.get('links', []),
+                            'icon': item.get('icon'),
+                            'description': item.get('description'),
+                            'boosts_active': 0,  # Explicitly mark as organic
+                            # Will be enriched with price/liquidity later
+                        })
+
+                        if len(organic_tokens) >= limit:
+                            break
+
+                    logger.info(f"Retrieved {len(organic_tokens)} ORGANIC (non-boosted) Solana tokens from DexScreener")
+                    return organic_tokens
                 else:
-                    logger.warning(f"DexScreener boosted tokens error: {response.status}")
+                    logger.warning(f"DexScreener organic tokens error: {response.status}")
                     return []
 
         except Exception as e:
-            logger.error(f"Error fetching boosted tokens: {e}")
+            logger.error(f"Error fetching organic tokens: {e}")
             return []
 
     async def get_latest_token_profiles(self, limit: int = 30) -> List[Dict]:

@@ -13,10 +13,18 @@ logger = get_logger(__name__)
 class JupiterClient:
     """Client for Jupiter Token API v2 to discover new tokens."""
 
+    # Cycling strategies for token discovery
+    DISCOVERY_CYCLES = [
+        'toporganicscore',  # Cycle 1: Organic activity (filters bots)
+        'toptraded',        # Cycle 2: Highest traded volume
+        'toptrending'       # Cycle 3: Trending tokens
+    ]
+
     def __init__(self):
         """Initialize Jupiter client (no API key needed)."""
         self.base_url = "https://lite-api.jup.ag/tokens/v2"
         self.session: Optional[aiohttp.ClientSession] = None
+        self.current_cycle = 0  # Track which discovery cycle we're on
 
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
@@ -92,42 +100,89 @@ class JupiterClient:
             logger.error(f"Error fetching recent tokens from Jupiter: {e}")
             return []
 
-    async def get_trending_tokens(self, category: str = 'toptraded', limit: int = 50) -> List[Dict]:
+    async def get_trending_tokens(
+        self,
+        category: str = None,  # If None, uses cycling
+        interval: str = '1h',
+        limit: int = 50
+    ) -> List[Dict]:
         """
-        Get trending/top tokens by category.
+        Get trending/top tokens using CYCLING strategy.
+
+        Rotates through 3 discovery methods:
+        1. toporganicscore - Organic activity (filters bots)
+        2. toptraded - Highest traded volume
+        3. toptrending - Trending tokens
 
         Args:
-            category: Category type ('toptraded', 'toptrending', 'toporganicscore')
+            category: Category type (if None, uses automatic cycling)
+            interval: Time interval (5m, 1h, 6h, 24h)
             limit: Maximum number of tokens to retrieve
 
         Returns:
-            List of token dictionaries
+            List of token dictionaries with full market data
         """
         await self._ensure_session()
 
         try:
-            url = f"{self.base_url}/categories/{category}"
+            # Use cycling if category not specified
+            if category is None:
+                category = self.DISCOVERY_CYCLES[self.current_cycle]
+                use_cycling = True
+                logger.info(f"Jupiter Cycle {self.current_cycle + 1}/3: Using '{category}' discovery")
+            else:
+                use_cycling = False
+
+            # Correct format: /tokens/v2/{category}/{interval}?limit={limit}
+            url = f"{self.base_url}/{category}/{interval}"
             params = {'limit': limit}
 
             async with self.session.get(url, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
-                    logger.info(f"Retrieved {len(data)} {category} tokens from Jupiter")
 
                     tokens = []
                     for token in data:
+                        # Jupiter v2 returns comprehensive data
+                        token_address = token.get('id') or token.get('address')
+                        if not token_address:
+                            continue
+
                         tokens.append({
-                            'address': token.get('address'),
+                            'address': token_address,
                             'symbol': token.get('symbol'),
-                            'name': token.get('name')
+                            'name': token.get('name'),
+                            'decimals': token.get('decimals'),
+                            'logoURI': token.get('icon') or token.get('logoURI'),
+                            'tags': token.get('tags') or [],
+                            'liquidity': token.get('liquidity', 0),  # IMPORTANT for filtering
+                            'fdv': token.get('fdv'),
+                            'mcap': token.get('mcap'),
+                            'usdPrice': token.get('usdPrice'),
+                            'holderCount': token.get('holderCount'),
+                            'organicScore': token.get('organicScore'),  # Organic activity indicator
+                            'audit': token.get('audit') or {},
+                            'launchpad': token.get('launchpad'),
+                            'createdAt': token.get('createdAt')
                         })
-                    return tokens
+
+                    # FILTER: Remove tokens with $0 liquidity (garbage data)
+                    filtered_tokens = [t for t in tokens if t.get('liquidity', 0) > 0]
+
+                    # Advance cycle if using automatic cycling
+                    if use_cycling:
+                        self.current_cycle = (self.current_cycle + 1) % len(self.DISCOVERY_CYCLES)
+                        logger.info(f"Retrieved {len(filtered_tokens)} tokens using '{category}' (Next cycle: {self.DISCOVERY_CYCLES[self.current_cycle]})")
+                    else:
+                        logger.info(f"Retrieved {len(filtered_tokens)} {category} tokens from Jupiter")
+
+                    return filtered_tokens
                 else:
-                    logger.warning(f"Jupiter categories API returned {response.status}")
+                    logger.warning(f"Jupiter {category} API returned {response.status}")
                     return []
 
         except Exception as e:
-            logger.error(f"Error fetching trending tokens from Jupiter: {e}")
+            logger.error(f"Error fetching {category} tokens from Jupiter: {e}")
             return []
 
     async def search_token(self, query: str) -> List[Dict]:
@@ -193,19 +248,31 @@ class JupiterClient:
                                 return {
                                     'price_usd': float(price_usd),
                                     'liquidity_usd': float(liquidity) if liquidity else 0.0,
+                                    'volume_24h': 0.0,  # Jupiter doesn't provide volume data
+                                    'volume_1h': 0.0,   # Jupiter doesn't provide volume data
                                     'symbol': token.get('symbol', 'UNKNOWN'),
                                     'name': token.get('name', 'Unknown'),
-                                    'source': 'jupiter'
+                                    'source': 'jupiter',
+                                    'dex_id': 'unknown',  # Jupiter doesn't provide DEX platform
+                                    # Transaction data (Jupiter doesn't provide, set to 0)
+                                    'txns_h1_buys': 0,
+                                    'txns_h1_sells': 0,
+                                    'txns_m5_buys': 0,
+                                    'txns_m5_sells': 0
                                 }
 
                     # Token not found in search results
                     logger.debug(f"Token {token_address[:8]}... not found in Jupiter search")
                     return None
                 else:
-                    # 400/404 = token not found (normal for new tokens), use debug
+                    # 400/404/429 = token not found or rate limited (expected), use debug
                     # Other errors = real issues, use warning
-                    log_level = logger.debug if response.status in [400, 404] else logger.warning
-                    log_level(f"Jupiter search API returned {response.status} for {token_address[:8]}...")
+                    if response.status in [400, 404]:
+                        logger.debug(f"Jupiter search: token {token_address[:8]}... not found ({response.status})")
+                    elif response.status == 429:
+                        logger.debug(f"Jupiter search: rate limited (429) - skipping {token_address[:8]}...")
+                    else:
+                        logger.warning(f"Jupiter search API returned {response.status} for {token_address[:8]}...")
                     return None
 
         except Exception as e:

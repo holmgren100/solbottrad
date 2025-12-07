@@ -10,6 +10,8 @@ import os
 import uuid
 from .position_manager import PositionManager, Trade, Position
 from .strategy_config import StrategySelector, StrategyProfile
+from .token_tracker import TokenPerformanceTracker
+from .token_filter import TokenFilter
 from ..blockchain.jupiter_executor import JupiterSwapExecutor
 from ..monitoring.logger import get_logger
 
@@ -39,13 +41,14 @@ class PaperTradingEngine:
         """
         # Read rug detection settings from environment
         self.rug_detection_enabled = os.getenv('RUG_DETECTION_ENABLED', 'true').lower() == 'true'
-        self.stale_price_minutes = float(os.getenv('STALE_PRICE_MINUTES', '5'))
+        self.stale_price_minutes = float(os.getenv('STALE_PRICE_MINUTES', '2'))
         self.frozen_price_minutes = float(os.getenv('FROZEN_PRICE_MINUTES', '15'))
         self.min_position_liquidity = float(os.getenv('MIN_POSITION_LIQUIDITY', '5000.0'))
 
         # Read trailing stop settings from environment
         self.use_trailing_stop = os.getenv('USE_TRAILING_STOP', 'true').lower() == 'true'
-        self.trailing_stop_percent = float(os.getenv('TRAILING_STOP_PERCENT', '15.0'))
+        self.trailing_stop_percent = float(os.getenv('TRAILING_STOP_PERCENT', '10.0'))
+        self.trailing_stop_activation = float(os.getenv('TRAILING_STOP_ACTIVATION', '5.0'))  # Activation threshold
 
         # Read partial profit taking settings from environment
         self.partial_profit_enabled = os.getenv('PARTIAL_PROFIT_ENABLED', 'false').lower() == 'true'
@@ -68,17 +71,22 @@ class PaperTradingEngine:
         self.total_fees_paid = 0.0
         self.total_slippage_cost = 0.0
 
-        # Realistic liquidity and volume filters (based on 530-trade analysis)
+        # Realistic liquidity and volume filters (Nov 30 working settings)
         # Analysis showed 29.4% trades had ZERO liquidity - this prevents those
-        self.min_entry_liquidity = float(os.getenv('MIN_ENTRY_LIQUIDITY', '100000'))  # $100k minimum at entry
-        self.min_exit_liquidity = float(os.getenv('MIN_EXIT_LIQUIDITY', '50000'))     # $50k minimum at exit
-        self.min_24h_volume = float(os.getenv('MIN_24H_VOLUME', '50000'))             # $50k daily volume
+        self.min_entry_liquidity = float(os.getenv('MIN_ENTRY_LIQUIDITY', '30000'))  # $30k minimum at entry
+        self.min_exit_liquidity = float(os.getenv('MIN_EXIT_LIQUIDITY', '15000'))     # $15k minimum at exit
+        self.min_24h_volume = float(os.getenv('MIN_24H_VOLUME', '15000'))             # $15k daily volume
         self.max_position_vs_liquidity = float(os.getenv('MAX_POSITION_VS_LIQUIDITY', '0.005'))  # Max 0.5% of pool
 
-        # TIER 2 FILTERS: Price and volume safety (prevents 80% of high-risk trades!)
-        self.min_entry_price = float(os.getenv('MIN_ENTRY_PRICE', '0.10'))           # Minimum entry price (blocks ultra-cheap scam tokens)
-        self.max_tokens_per_dollar = float(os.getenv('MAX_TOKENS_PER_DOLLAR', '10000'))  # Max tokens per dollar (blocks high-volume scams)
-        self.max_position_size = float(os.getenv('MAX_POSITION_SIZE', '50'))         # Hard cap on position size
+        # TIER 2 FILTERS: Price and volume safety (OPTIMIZED from 363-trade analysis!)
+        # Analysis: Entry price sweet spot = $0.00035, range $0.0001-0.001 (best performance)
+        # Analysis: 2.5k-5k tokens/$ = 29.8% win rate (vs 13.1% for <1k expensive tokens)
+        self.min_entry_price = float(os.getenv('MIN_ENTRY_PRICE', '0.0001'))         # Minimum entry price (cheap tokens sweet spot)
+        self.max_entry_price = float(os.getenv('MAX_ENTRY_PRICE', '0.001'))          # Maximum entry price (sweet spot range)
+        self.min_tokens_per_dollar = float(os.getenv('MIN_TOKENS_PER_DOLLAR', '2500'))  # Min volume (filters expensive tokens)
+        self.max_tokens_per_dollar = float(os.getenv('MAX_TOKENS_PER_DOLLAR', '5000'))  # Max volume (sweet spot upper)
+        self.max_position_size = float(os.getenv('MAX_POSITION_SIZE', '50'))          # Hard cap ($50 max per top trades)
+        self.min_position_size = float(os.getenv('MIN_POSITION_SIZE', '35'))          # Min position ($35 minimum per analysis)
 
         # Volume fallback (when liquidity data unavailable but volume is high)
         self.allow_volume_fallback = os.getenv('ALLOW_VOLUME_FALLBACK', 'true').lower() == 'true'
@@ -97,9 +105,12 @@ class PaperTradingEngine:
             'low_entry_liquidity': 0,
             'low_volume': 0,
             'position_too_large': 0,
+            'position_too_small': 0,      # NEW: Position < $35 (bad tokens filter)
             'low_exit_liquidity': 0,
-            'price_too_low': 0,           # NEW: Ultra-cheap tokens rejected
-            'high_volume_risk': 0,        # NEW: Too many tokens per dollar
+            'price_too_low': 0,           # NEW: Price < $0.0001 (below sweet spot)
+            'price_too_high': 0,          # NEW: Price > $0.001 (above sweet spot)
+            'low_volume_expensive': 0,    # NEW: <2.5k tokens/$ (expensive = bad)
+            'high_volume_risk': 0,        # NEW: >5k tokens/$ (above sweet spot)
             'volume_fallback_unsafe': 0,   # NEW: Volume fallback blocked by price/tokens checks
             'forced_cleanup': 0           # NEW: Stuck positions force-closed
         }
@@ -130,8 +141,39 @@ class PaperTradingEngine:
         )
         logger.info(f"✅ Jupiter executor initialized (Paper Mode, Jito: {use_jito})")
 
-        # Initialize strategy selector for age-based profit strategies
-        self.strategy_selector = StrategySelector()
+        # Age-based strategies (optional - can disable to use golden settings)
+        self.enable_age_strategies = os.getenv('ENABLE_AGE_BASED_STRATEGIES', 'false').lower() == 'true'
+        if self.enable_age_strategies:
+            self.strategy_selector = StrategySelector()
+            logger.info("✅ Age-based profit strategies ENABLED")
+        else:
+            self.strategy_selector = None
+            logger.info("🔒 Age-based strategies DISABLED - using golden settings")
+
+        # === TOKEN PERFORMANCE TRACKER (INFRASTRUCTURE - DISABLED BY DEFAULT) ===
+        # Track historical token performance for learning which tokens are consistent losers/winners
+        self.enable_token_tracker = os.getenv('ENABLE_TOKEN_TRACKER', 'false').lower() == 'true'
+        if self.enable_token_tracker:
+            self.token_tracker = TokenPerformanceTracker()
+            logger.info("✅ Token Performance Tracker ENABLED - learning from history")
+        else:
+            self.token_tracker = None
+            logger.info("📊 Token Performance Tracker DISABLED (infrastructure ready, enable when needed)")
+
+        # === BLACKLIST/WHITELIST FILTER (INFRASTRUCTURE - DISABLED BY DEFAULT) ===
+        # Manual filtering of known good/bad tokens
+        self.enable_token_filter = os.getenv('ENABLE_TOKEN_FILTER', 'false').lower() == 'true'
+        if self.enable_token_filter:
+            self.token_filter = TokenFilter()
+            logger.info("✅ Token Filter ENABLED - blacklist/whitelist active")
+        else:
+            self.token_filter = None
+            logger.info("🚫 Token Filter DISABLED (infrastructure ready, enable when needed)")
+
+        # Auto-blacklist settings (only if tracker enabled)
+        self.auto_blacklist_losers = os.getenv('AUTO_BLACKLIST_LOSERS', 'false').lower() == 'true'
+        self.auto_blacklist_min_trades = int(os.getenv('AUTO_BLACKLIST_MIN_TRADES', '3'))
+        self.auto_blacklist_max_winrate = float(os.getenv('AUTO_BLACKLIST_MAX_WINRATE', '0.0'))
 
         # Load previous state if exists
         self.load_state()
@@ -417,9 +459,9 @@ class PaperTradingEngine:
         if trailing_stop_percent is None:
             trailing_stop_percent = self.trailing_stop_percent
 
-        # Select strategy based on token age (if provided)
+        # Select strategy based on token age (if age-based strategies enabled)
         strategy = None
-        if pair_created_at and pair_created_at > 0:
+        if self.enable_age_strategies and self.strategy_selector and pair_created_at and pair_created_at > 0:
             strategy = self.strategy_selector.select_strategy(pair_created_at)
             # Apply strategy-specific adjustments
             amount_usd = amount_usd * strategy.position_size_multiplier
@@ -429,6 +471,8 @@ class PaperTradingEngine:
                 f"Trailing: {strategy.trailing_stop_percent}% | "
                 f"Position multiplier: {strategy.position_size_multiplier}x"
             )
+        elif pair_created_at:
+            logger.info("📊 Using golden settings (age-based strategies disabled)")
         else:
             # No age data, use default settings from .env
             logger.debug(f"No token age data, using default .env settings")
@@ -436,19 +480,49 @@ class PaperTradingEngine:
         # Track if this trade uses volume fallback (for analysis)
         is_volume_fallback = False
 
-        # TIER 2 FILTER: Check minimum entry price (blocks ultra-cheap scam tokens)
+        # TIER 2 FILTER: Check minimum entry price (sweet spot filter)
         if price < self.min_entry_price:
             self.rejected_trades['price_too_low'] += 1
             logger.warning(
-                f"❌ REJECTED {token_address[:8]}... - Price too low (scam risk):\n"
-                f"   Entry Price: ${price:.8f} < ${self.min_entry_price:.2f}\n"
-                f"   Ultra-cheap tokens are 6x more likely to be unsellable!"
+                f"❌ REJECTED {token_address[:8]}... - Price too low:\n"
+                f"   Entry Price: ${price:.8f} < ${self.min_entry_price:.8f}\n"
+                f"   Below sweet spot range"
             )
             return {
                 'status': 'failed',
                 'reason': 'price_too_low',
                 'price': price,
                 'min_required': self.min_entry_price
+            }
+
+        # TIER 2 FILTER: Check maximum entry price (sweet spot filter - NEW!)
+        if price > self.max_entry_price:
+            self.rejected_trades['price_too_high'] += 1
+            logger.warning(
+                f"❌ REJECTED {token_address[:8]}... - Price too high:\n"
+                f"   Entry Price: ${price:.8f} > ${self.max_entry_price:.8f}\n"
+                f"   Above sweet spot range (expensive tokens = 4.5% win rate)"
+            )
+            return {
+                'status': 'failed',
+                'reason': 'price_too_high',
+                'price': price,
+                'max_allowed': self.max_entry_price
+            }
+
+        # TIER 2 FILTER: Check minimum position size (quality filter - NEW!)
+        if amount_usd < self.min_position_size:
+            self.rejected_trades['position_too_small'] += 1
+            logger.warning(
+                f"❌ REJECTED {token_address[:8]}... - Position too small:\n"
+                f"   Position: ${amount_usd:.2f} < ${self.min_position_size:.2f}\n"
+                f"   Small positions = bad tokens (0% win rate per analysis)"
+            )
+            return {
+                'status': 'failed',
+                'reason': 'position_too_small',
+                'amount_usd': amount_usd,
+                'min_required': self.min_position_size
             }
 
         # TIER 2 FILTER: Check maximum position size (hard cap for safety)
@@ -466,18 +540,35 @@ class PaperTradingEngine:
                 'max_allowed': self.max_position_size
             }
 
-        # TIER 2 FILTER: Calculate and check tokens per dollar (blocks high-volume scam tokens)
-        # This is the CRITICAL metric that predicts 80% of risky trades!
+        # TIER 2 FILTER: Calculate and check tokens per dollar (OPTIMIZED sweet spot filter!)
+        # Analysis: 2.5k-5k tokens/$ = 29.8% win rate (BEST!)
         quantity_estimate = amount_usd / price
         tokens_per_dollar = quantity_estimate / amount_usd
 
+        # Check minimum tokens per dollar (filters expensive tokens with low win rate)
+        if tokens_per_dollar < self.min_tokens_per_dollar:
+            self.rejected_trades['low_volume_expensive'] += 1
+            logger.warning(
+                f"❌ REJECTED {token_address[:8]}... - Too expensive (low volume):\n"
+                f"   Tokens per $1: {tokens_per_dollar:,.0f} < {self.min_tokens_per_dollar:,.0f} minimum\n"
+                f"   Total tokens: {quantity_estimate:,.0f}\n"
+                f"   Expensive tokens (below minimum threshold based on analysis)"
+            )
+            return {
+                'status': 'failed',
+                'reason': 'low_volume_expensive',
+                'tokens_per_dollar': tokens_per_dollar,
+                'min_required': self.min_tokens_per_dollar
+            }
+
+        # Check maximum tokens per dollar (upper bound of sweet spot)
         if tokens_per_dollar > self.max_tokens_per_dollar:
             self.rejected_trades['high_volume_risk'] += 1
             logger.warning(
-                f"❌ REJECTED {token_address[:8]}... - High volume risk (too many tokens per dollar):\n"
-                f"   Tokens per $1: {tokens_per_dollar:,.0f} > {self.max_tokens_per_dollar:,.0f} limit\n"
+                f"❌ REJECTED {token_address[:8]}... - Volume too high (above sweet spot):\n"
+                f"   Tokens per $1: {tokens_per_dollar:,.0f} > {self.max_tokens_per_dollar:,.0f} max\n"
                 f"   Total tokens: {quantity_estimate:,.0f}\n"
-                f"   High volume cheap tokens are 80% likely to be unsellable!"
+                f"   Sweet spot: 2.5k-5k tokens/$ (29.8% win rate)"
             )
             return {
                 'status': 'failed',
@@ -565,6 +656,120 @@ class PaperTradingEngine:
                     'min_required': self.min_24h_volume
                 }
 
+            # === DEAD TOKEN / HONEYPOT DETECTION (Transaction Activity Analysis) ===
+            # Extract transaction data from profile
+            txns_h1_buys = profile.get('txns_h1_buys', 0)
+            txns_h1_sells = profile.get('txns_h1_sells', 0)
+            txns_total_h1 = txns_h1_buys + txns_h1_sells
+
+            # HONEYPOT CHECK: Lots of buys but ZERO sells = honeypot (can't sell!)
+            if txns_h1_buys > 5 and txns_h1_sells == 0:
+                if 'honeypot_detected' not in self.rejected_trades:
+                    self.rejected_trades['honeypot_detected'] = 0
+                self.rejected_trades['honeypot_detected'] += 1
+                logger.warning(
+                    f"❌ REJECTED {token_address[:8]}... - HONEYPOT DETECTED:\n"
+                    f"   Buys last 1h: {txns_h1_buys}\n"
+                    f"   Sells last 1h: {txns_h1_sells} (ZERO SELLS!)\n"
+                    f"   This token cannot be sold - honeypot scam!"
+                )
+                return {
+                    'status': 'failed',
+                    'reason': 'honeypot_detected',
+                    'txns_h1_buys': txns_h1_buys,
+                    'txns_h1_sells': txns_h1_sells
+                }
+
+            # DEAD TOKEN CHECK: Very few transactions = no activity/dead
+            if txns_total_h1 > 0 and txns_total_h1 < 20:
+                if 'dead_token_low_activity' not in self.rejected_trades:
+                    self.rejected_trades['dead_token_low_activity'] = 0
+                self.rejected_trades['dead_token_low_activity'] += 1
+                logger.warning(
+                    f"❌ REJECTED {token_address[:8]}... - DEAD TOKEN (low activity):\n"
+                    f"   Total transactions last 1h: {txns_total_h1} < 20\n"
+                    f"   Buys: {txns_h1_buys}, Sells: {txns_h1_sells}\n"
+                    f"   Token has minimal trading activity - likely dead/abandoned"
+                )
+                return {
+                    'status': 'failed',
+                    'reason': 'dead_token_low_activity',
+                    'txns_total_h1': txns_total_h1
+                }
+
+            # BUY/SELL IMBALANCE CHECK: Heavy buy pressure with almost no sells = suspicious
+            if txns_h1_sells > 0:  # Avoid division by zero
+                buy_sell_ratio = txns_h1_buys / txns_h1_sells
+                if buy_sell_ratio > 5:
+                    if 'suspicious_buy_sell_ratio' not in self.rejected_trades:
+                        self.rejected_trades['suspicious_buy_sell_ratio'] = 0
+                    self.rejected_trades['suspicious_buy_sell_ratio'] += 1
+                    logger.warning(
+                        f"❌ REJECTED {token_address[:8]}... - SUSPICIOUS buy/sell ratio:\n"
+                        f"   Buys: {txns_h1_buys}, Sells: {txns_h1_sells}\n"
+                        f"   Ratio: {buy_sell_ratio:.1f}:1 (>5:1 threshold)\n"
+                        f"   Heavy buy pressure with minimal sells - potential manipulation"
+                    )
+                    return {
+                        'status': 'failed',
+                        'reason': 'suspicious_buy_sell_ratio',
+                        'buy_sell_ratio': buy_sell_ratio
+                    }
+
+            # === RUGCHECK-BASED SECURITY FILTERS ===
+            # Extract RugCheck data if available
+            rug_check = analysis_data.get('rug_check', {}) if analysis_data else {}
+
+            if rug_check:
+                # Extract LP lock info from raw RugCheck report
+                raw_report = rug_check.get('raw_report', {})
+                markets = raw_report.get('markets', [])
+                top_holders = raw_report.get('topHolders', [])
+
+                # LP LOCK CHECK: Ensure liquidity is locked to prevent instant rugs
+                if markets:
+                    # Get first market (highest liquidity pair)
+                    main_market = markets[0] if markets else {}
+                    lp_data = main_market.get('lp', {})
+                    lp_locked_pct = float(lp_data.get('lpLockedPct', 0))
+
+                    # Reject if less than 50% LP locked
+                    if lp_locked_pct < 50:
+                        if 'lp_not_locked' not in self.rejected_trades:
+                            self.rejected_trades['lp_not_locked'] = 0
+                        self.rejected_trades['lp_not_locked'] += 1
+                        logger.warning(
+                            f"❌ REJECTED {token_address[:8]}... - LIQUIDITY NOT LOCKED:\n"
+                            f"   LP Locked: {lp_locked_pct:.1f}% < 50% minimum\n"
+                            f"   Developer can remove liquidity at any time - RUG RISK!"
+                        )
+                        return {
+                            'status': 'failed',
+                            'reason': 'lp_not_locked',
+                            'lp_locked_pct': lp_locked_pct
+                        }
+
+                # TOP 10 HOLDER CONCENTRATION CHECK: Ensure token is not too concentrated
+                if top_holders and len(top_holders) >= 10:
+                    # Calculate total % owned by top 10 holders
+                    top10_total_pct = sum(float(h.get('pct', 0)) * 100 for h in top_holders[:10])
+
+                    # Reject if top 10 own more than 80%
+                    if top10_total_pct > 80:
+                        if 'top10_concentration' not in self.rejected_trades:
+                            self.rejected_trades['top10_concentration'] = 0
+                        self.rejected_trades['top10_concentration'] += 1
+                        logger.warning(
+                            f"❌ REJECTED {token_address[:8]}... - TOO CONCENTRATED:\n"
+                            f"   Top 10 holders own: {top10_total_pct:.1f}% > 80% threshold\n"
+                            f"   Token supply is too concentrated - manipulation risk!"
+                        )
+                        return {
+                            'status': 'failed',
+                            'reason': 'top10_concentration',
+                            'top10_total_pct': top10_total_pct
+                        }
+
             # Check position size vs liquidity (prevent price impact >0.5%)
             if amount_usd > liquidity * self.max_position_vs_liquidity:
                 self.rejected_trades['position_too_large'] += 1
@@ -592,6 +797,62 @@ class PaperTradingEngine:
                 'reason': 'insufficient_capital',
                 'available_capital': self.current_capital
             }
+
+        # === TOKEN FILTER CHECK (if enabled) ===
+        if self.enable_token_filter and self.token_filter:
+            # Check whitelist first (highest priority - always allow)
+            if self.token_filter.is_whitelisted(token_address):
+                logger.info(f"✅ WHITELISTED token {token_address[:8]}... - bypassing other filters")
+            # Check blacklist (manual - never trade)
+            elif self.token_filter.is_blacklisted(token_address):
+                if 'blacklisted' not in self.rejected_trades:
+                    self.rejected_trades['blacklisted'] = 0
+                self.rejected_trades['blacklisted'] += 1
+                logger.warning(f"❌ REJECTED {token_address[:8]}... - Token is BLACKLISTED")
+                return {
+                    'status': 'failed',
+                    'reason': 'blacklisted'
+                }
+
+        # === TOKEN PERFORMANCE TRACKER CHECK (if enabled) ===
+        if self.enable_token_tracker and self.token_tracker:
+            # Check if token is a known consistent loser
+            if self.token_tracker.should_avoid_token(
+                token_address,
+                min_trades=self.auto_blacklist_min_trades,
+                max_win_rate=self.auto_blacklist_max_winrate
+            ):
+                perf = self.token_tracker.get_performance(token_address)
+                if 'repeat_loser' not in self.rejected_trades:
+                    self.rejected_trades['repeat_loser'] = 0
+                self.rejected_trades['repeat_loser'] += 1
+                logger.warning(
+                    f"❌ REJECTED {token_address[:8]}... - REPEAT LOSER: "
+                    f"{perf.total_trades} trades, {perf.win_rate:.0f}% win rate, "
+                    f"avg {perf.avg_pnl_percent:+.1f}% PnL"
+                )
+
+                # Auto-blacklist if enabled
+                if self.auto_blacklist_losers and self.enable_token_filter and self.token_filter:
+                    self.token_filter.add_to_blacklist(
+                        token_address,
+                        reason=f"{perf.total_trades} trades, {perf.win_rate:.0f}% win"
+                    )
+
+                return {
+                    'status': 'failed',
+                    'reason': 'repeat_loser',
+                    'total_trades': perf.total_trades,
+                    'win_rate': perf.win_rate
+                }
+
+            # Log if token is a repeat winner
+            if self.token_tracker.is_repeat_winner(token_address):
+                perf = self.token_tracker.get_performance(token_address)
+                logger.info(
+                    f"✅ REPEAT WINNER: {token_address[:8]}... - "
+                    f"{perf.total_trades} trades, {perf.win_rate:.0f}% win rate!"
+                )
 
         # Check if we can open more positions
         if not self.position_manager.can_open_position():
@@ -629,7 +890,39 @@ class PaperTradingEngine:
                 f"Entry ${price:.8f} → ${actual_entry_price:.8f}"
             )
 
-        # Open position with actual entry price (after slippage)
+        # Extract enhanced tracking data from analysis_data for position tracking
+        entry_liquidity = 0.0
+        tracking_volume_24h = 0.0
+        volume_1h = 0.0
+        opportunity_score = 0.0
+        token_source = 'unknown'
+        dex_platform = 'unknown'
+        txns_h1_buys = 0
+        txns_h1_sells = 0
+
+        if analysis_data:
+            profile = analysis_data.get('profile', {})
+            entry_liquidity = profile.get('liquidity_usd', 0.0)
+            tracking_volume_24h = profile.get('volume_24h', 0.0)
+            volume_1h = profile.get('volume_1h', 0.0)
+            # Extract opportunity score from analysis_data (calculated in main.py)
+            opportunity_score = analysis_data.get('opportunity_score', 0.0)
+            token_source = profile.get('source', 'unknown')
+            dex_platform = profile.get('dex_id', 'unknown')
+            # Extract transaction activity data (buys/sells from DexScreener)
+            # These are already extracted and flattened by dexscreener_client.py
+            txns_h1_buys = profile.get('txns_h1_buys', 0)
+            txns_h1_sells = profile.get('txns_h1_sells', 0)
+
+        # Calculate configuration percentages for tracking
+        config_stop_loss_percent = 0.0
+        if actual_entry_price > 0:
+            config_stop_loss_percent = ((actual_entry_price - stop_loss) / actual_entry_price) * 100
+
+        config_trailing_activation_percent = self.trailing_stop_activation  # From .env
+        config_trailing_distance_percent = trailing_stop_percent  # Same as trailing_stop_percent
+
+        # Open position with actual entry price (after slippage) and enhanced tracking data
         position = self.position_manager.open_position(
             token_address=token_address,
             entry_price=actual_entry_price,
@@ -638,7 +931,21 @@ class PaperTradingEngine:
             take_profit=take_profit,
             use_trailing_stop=use_trailing_stop,
             trailing_stop_percent=trailing_stop_percent,
-            volume_fallback=is_volume_fallback  # Mark volume fallback trades for analysis
+            volume_fallback=is_volume_fallback,  # Mark volume fallback trades for analysis
+            # Enhanced tracking fields for analysis
+            entry_liquidity=entry_liquidity,
+            volume_24h=tracking_volume_24h,
+            volume_1h=volume_1h,
+            opportunity_score=opportunity_score,  # Score from _calculate_opportunity_score()
+            token_source=token_source,
+            dex_platform=dex_platform,
+            # Configuration tracking (for CSV analysis)
+            config_stop_loss_percent=config_stop_loss_percent,
+            config_trailing_activation_percent=config_trailing_activation_percent,
+            config_trailing_distance_percent=config_trailing_distance_percent,
+            # Transaction activity tracking
+            txns_h1_buys=txns_h1_buys,
+            txns_h1_sells=txns_h1_sells
         )
 
         if not position:
@@ -826,6 +1133,16 @@ class PaperTradingEngine:
 
         # Record trade for ML training
         self._record_ml_trade(trade, position_snapshot, reason)
+
+        # === RECORD TO TOKEN PERFORMANCE TRACKER (if enabled) ===
+        if self.enable_token_tracker and self.token_tracker:
+            self.token_tracker.record_trade(
+                token_address=token_address,
+                pnl=trade.pnl,
+                pnl_percent=trade.pnl_percent,
+                symbol=trade.symbol,
+                timestamp=trade.timestamp
+            )
 
         # Add proceeds to capital (after fees)
         net_proceeds = trade.amount_usd - sell_fee

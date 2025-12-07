@@ -48,6 +48,34 @@ class Position:
     strategy_name: str = 'established'  # Which strategy is this position using
     pair_created_at: int = 0  # Unix timestamp when pair was created (for age tracking)
 
+    # === ENHANCED DATA TRACKING FOR ANALYSIS ===
+    # Liquidity tracking (entry vs exit)
+    entry_liquidity: float = 0.0  # Liquidity at entry
+    exit_liquidity: float = 0.0   # Liquidity at exit (set when closing)
+    # Volume tracking (multiple timeframes)
+    volume_24h: float = 0.0  # 24h volume at entry
+    volume_1h: float = 0.0   # 1h volume at entry (if available)
+    # Score tracking (from score-based selection)
+    opportunity_score: float = 0.0  # Score 0-100 from _calculate_opportunity_score()
+    # Source tracking (which API found this token)
+    token_source: str = 'unknown'  # jupiter, coingecko, dexscreener, birdeye, apify
+    # DEX platform tracking
+    dex_platform: str = 'unknown'  # pump.fun, raydium, orca, meteora, jupiter, etc.
+
+    # === PEAK TRACKING FOR OPTIMIZATION ===
+    peak_time: datetime = None  # When highest_price was reached
+    peak_price_percent: float = 0.0  # Max gain % reached from entry
+
+    # === CONFIGURATION TRACKING ===
+    config_stop_loss_percent: float = 0.0  # Stop loss % used for this trade
+    config_trailing_activation_percent: float = 0.0  # Trailing activation % used
+    config_trailing_distance_percent: float = 0.0  # Trailing distance % used
+
+    # === TRANSACTION ACTIVITY TRACKING ===
+    txns_h1_buys: int = 0  # Buy transactions in last hour
+    txns_h1_sells: int = 0  # Sell transactions in last hour
+    txns_h1_total: int = 0  # Total transactions in last hour
+
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
         # Track if price ACTUALLY changed (not just API responding with same price)
@@ -75,11 +103,16 @@ class Position:
             # Update highest price if current price is higher
             if new_price > self.highest_price:
                 self.highest_price = new_price
+                # Track when peak was reached
+                self.peak_time = datetime.now()
+                # Track peak as percentage gain
+                if self.entry_price > 0:
+                    self.peak_price_percent = ((new_price - self.entry_price) / self.entry_price) * 100
                 # Calculate new trailing stop (X% below highest price)
                 self.trailing_stop_price = self.highest_price * (1 - self.trailing_stop_percent / 100)
                 logger.debug(
                     f"Trailing stop updated for {self.token_address[:8]}...: "
-                    f"Peak ${self.highest_price:.8f} → Stop ${self.trailing_stop_price:.8f}"
+                    f"Peak ${self.highest_price:.8f} (+{self.peak_price_percent:.1f}%) → Stop ${self.trailing_stop_price:.8f}"
                 )
 
     def check_profit_milestone(self, strategy_profile=None) -> Optional[int]:
@@ -137,10 +170,10 @@ class Position:
         time_since_change = datetime.now() - self.last_price_change
         minutes_frozen = time_since_change.total_seconds() / 60
 
-        # Only flag as frozen if we've held for at least 5 minutes
+        # Only flag as frozen if we've held for at least 1 minute
         # (prevents false positives on new positions)
         minutes_held = (datetime.now() - self.entry_time).total_seconds() / 60
-        if minutes_held < 5:
+        if minutes_held < 1:
             return False
 
         return time_since_change > timedelta(minutes=freeze_minutes)
@@ -176,6 +209,38 @@ class Trade:
     entry_price: float = 0.0  # Entry price (for sell trades)
     entry_time: datetime = None  # Entry time (for calculating duration)
     volume_fallback: bool = False  # True if entered with volume fallback (high risk/reduced size)
+    # Strategy tracking
+    strategy_name: str = 'established'  # Which strategy was used
+    pair_created_at: int = 0  # Unix timestamp when pair was created
+    # === ENHANCED DATA TRACKING FOR ANALYSIS ===
+    # Liquidity tracking (entry vs exit)
+    entry_liquidity: float = 0.0  # Liquidity at entry
+    exit_liquidity: float = 0.0   # Liquidity at exit
+    # Volume tracking (multiple timeframes)
+    volume_24h: float = 0.0  # 24h volume at entry
+    volume_1h: float = 0.0   # 1h volume at entry (if available)
+    # Score tracking (from score-based selection)
+    opportunity_score: float = 0.0  # Score 0-100 from _calculate_opportunity_score()
+    # Source tracking (which API found this token)
+    token_source: str = 'unknown'  # jupiter, coingecko, dexscreener, birdeye, apify
+    # DEX platform tracking
+    dex_platform: str = 'unknown'  # pump.fun, raydium, orca, meteora, jupiter, etc.
+
+    # === PEAK TRACKING & OPTIMIZATION METRICS ===
+    max_gain_percent: float = 0.0  # Maximum gain % reached during trade
+    peak_to_exit_drop_percent: float = 0.0  # How much % dropped from peak to exit
+    entry_to_peak_minutes: float = 0.0  # Time from entry to peak (minutes)
+    peak_to_exit_minutes: float = 0.0  # Time from peak to exit (minutes)
+
+    # === CONFIGURATION TRACKING ===
+    config_stop_loss_percent: float = 0.0  # Stop loss % used
+    config_trailing_activation_percent: float = 0.0  # Trailing activation % used
+    config_trailing_distance_percent: float = 0.0  # Trailing distance % used
+
+    # === TRANSACTION ACTIVITY ===
+    txns_h1_buys: int = 0  # Buy transactions in last hour
+    txns_h1_sells: int = 0  # Sell transactions in last hour
+    buy_sell_ratio: float = 0.0  # Ratio of buys to sells
 
 
 class PositionManager:
@@ -214,7 +279,21 @@ class PositionManager:
         trailing_stop_percent: float = 15.0,
         volume_fallback: bool = False,
         strategy_name: str = 'established',
-        pair_created_at: int = 0
+        pair_created_at: int = 0,
+        # Enhanced tracking fields
+        entry_liquidity: float = 0.0,
+        volume_24h: float = 0.0,
+        volume_1h: float = 0.0,
+        opportunity_score: float = 0.0,
+        token_source: str = 'unknown',
+        dex_platform: str = 'unknown',
+        # Configuration tracking (for CSV analysis)
+        config_stop_loss_percent: float = 0.0,
+        config_trailing_activation_percent: float = 0.0,
+        config_trailing_distance_percent: float = 0.0,
+        # Transaction activity tracking
+        txns_h1_buys: int = 0,
+        txns_h1_sells: int = 0
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -228,6 +307,19 @@ class PositionManager:
             use_trailing_stop: Whether to use trailing stop instead of fixed take profit
             trailing_stop_percent: Percent to trail below peak (default 15%)
             volume_fallback: Whether this trade used volume fallback (high risk/reduced size)
+            strategy_name: Age-based strategy name ('ultra_new', 'new', 'established')
+            pair_created_at: Unix timestamp when pair was created (for age tracking)
+            entry_liquidity: Liquidity at entry in USD
+            volume_24h: 24h trading volume at entry
+            volume_1h: 1h trading volume at entry (if available)
+            opportunity_score: Score 0-100 from opportunity scoring
+            token_source: API source (jupiter, coingecko, dexscreener, etc.)
+            dex_platform: DEX platform (pump.fun, raydium, orca, etc.)
+            config_stop_loss_percent: Stop loss % configuration used for this trade
+            config_trailing_activation_percent: Trailing activation % configuration used
+            config_trailing_distance_percent: Trailing distance % configuration used
+            txns_h1_buys: Buy transactions in last hour at entry
+            txns_h1_sells: Sell transactions in last hour at entry
 
         Returns:
             Position object if successful, None otherwise
@@ -267,7 +359,22 @@ class PositionManager:
             last_known_price=entry_price,  # Initialize for frozen price detection
             volume_fallback=volume_fallback,  # Track if this is a high-risk volume fallback trade
             strategy_name=strategy_name,  # Age-based strategy for this token
-            pair_created_at=pair_created_at  # Token pair creation timestamp
+            pair_created_at=pair_created_at,  # Token pair creation timestamp
+            # Enhanced tracking fields
+            entry_liquidity=entry_liquidity,  # Liquidity at entry
+            volume_24h=volume_24h,  # 24h volume at entry
+            volume_1h=volume_1h,  # 1h volume at entry
+            opportunity_score=opportunity_score,  # Score 0-100 from selection
+            token_source=token_source,  # API source (jupiter, coingecko, etc.)
+            dex_platform=dex_platform,  # DEX platform (pump.fun, raydium, etc.)
+            # Configuration tracking
+            config_stop_loss_percent=config_stop_loss_percent,
+            config_trailing_activation_percent=config_trailing_activation_percent,
+            config_trailing_distance_percent=config_trailing_distance_percent,
+            # Transaction activity tracking
+            txns_h1_buys=txns_h1_buys,
+            txns_h1_sells=txns_h1_sells,
+            txns_h1_total=txns_h1_buys + txns_h1_sells
         )
 
         self.open_positions[token_address] = position
@@ -320,6 +427,33 @@ class PositionManager:
         pnl = position.unrealized_pnl
         pnl_percent = position.unrealized_pnl_percent
 
+        # Capture exit liquidity
+        position.exit_liquidity = position.current_liquidity
+
+        # === CALCULATE PEAK TRACKING METRICS ===
+        max_gain_percent = position.peak_price_percent  # Max gain % reached during trade
+
+        # Calculate how much % dropped from peak to exit
+        peak_to_exit_drop_percent = 0.0
+        if position.peak_price_percent > 0:
+            peak_to_exit_drop_percent = position.peak_price_percent - pnl_percent
+
+        # Calculate timing metrics
+        entry_to_peak_minutes = 0.0
+        peak_to_exit_minutes = 0.0
+        if position.peak_time:
+            # Time from entry to peak
+            entry_to_peak_minutes = (position.peak_time - position.entry_time).total_seconds() / 60
+            # Time from peak to exit
+            peak_to_exit_minutes = (datetime.now() - position.peak_time).total_seconds() / 60
+
+        # === CALCULATE TRANSACTION ACTIVITY METRICS ===
+        buy_sell_ratio = 0.0
+        if position.txns_h1_sells > 0:
+            buy_sell_ratio = position.txns_h1_buys / position.txns_h1_sells
+        elif position.txns_h1_buys > 0:
+            buy_sell_ratio = 999.0  # Infinite (all buys, no sells)
+
         # Create sell trade with full details for CSV export
         sell_trade = Trade(
             token_address=token_address,
@@ -334,7 +468,31 @@ class PositionManager:
             symbol=getattr(position, 'symbol', token_address[:8]),  # Token symbol or short address
             entry_price=position.entry_price,  # Store entry price for reference
             entry_time=position.entry_time,  # Store entry time for duration calculation
-            volume_fallback=position.volume_fallback  # Preserve volume fallback flag from position
+            volume_fallback=position.volume_fallback,  # Preserve volume fallback flag from position
+            # Strategy tracking
+            strategy_name=position.strategy_name,
+            pair_created_at=position.pair_created_at,
+            # Enhanced tracking fields
+            entry_liquidity=position.entry_liquidity,
+            exit_liquidity=position.exit_liquidity,
+            volume_24h=position.volume_24h,
+            volume_1h=position.volume_1h,
+            opportunity_score=position.opportunity_score,
+            token_source=position.token_source,
+            dex_platform=position.dex_platform,
+            # === PEAK TRACKING & OPTIMIZATION METRICS ===
+            max_gain_percent=max_gain_percent,
+            peak_to_exit_drop_percent=peak_to_exit_drop_percent,
+            entry_to_peak_minutes=entry_to_peak_minutes,
+            peak_to_exit_minutes=peak_to_exit_minutes,
+            # === CONFIGURATION TRACKING ===
+            config_stop_loss_percent=position.config_stop_loss_percent,
+            config_trailing_activation_percent=position.config_trailing_activation_percent,
+            config_trailing_distance_percent=position.config_trailing_distance_percent,
+            # === TRANSACTION ACTIVITY ===
+            txns_h1_buys=position.txns_h1_buys,
+            txns_h1_sells=position.txns_h1_sells,
+            buy_sell_ratio=buy_sell_ratio
         )
 
         self.closed_trades.append(sell_trade)
@@ -384,6 +542,33 @@ class PositionManager:
         pnl = -position.amount_usd  # Total loss
         pnl_percent = -100.0
 
+        # Capture exit liquidity (if available)
+        position.exit_liquidity = position.current_liquidity
+
+        # === CALCULATE PEAK TRACKING METRICS ===
+        max_gain_percent = position.peak_price_percent  # Max gain % reached during trade
+
+        # Calculate how much % dropped from peak to exit
+        peak_to_exit_drop_percent = 0.0
+        if position.peak_price_percent > 0:
+            peak_to_exit_drop_percent = position.peak_price_percent - pnl_percent
+
+        # Calculate timing metrics
+        entry_to_peak_minutes = 0.0
+        peak_to_exit_minutes = 0.0
+        if position.peak_time:
+            # Time from entry to peak
+            entry_to_peak_minutes = (position.peak_time - position.entry_time).total_seconds() / 60
+            # Time from peak to exit
+            peak_to_exit_minutes = (datetime.now() - position.peak_time).total_seconds() / 60
+
+        # === CALCULATE TRANSACTION ACTIVITY METRICS ===
+        buy_sell_ratio = 0.0
+        if position.txns_h1_sells > 0:
+            buy_sell_ratio = position.txns_h1_buys / position.txns_h1_sells
+        elif position.txns_h1_buys > 0:
+            buy_sell_ratio = 999.0  # Infinite (all buys, no sells)
+
         # Create sell trade (even though we couldn't actually sell)
         sell_trade = Trade(
             token_address=token_address,
@@ -398,7 +583,31 @@ class PositionManager:
             symbol=getattr(position, 'symbol', token_address[:8]),
             entry_price=position.entry_price,
             entry_time=position.entry_time,
-            volume_fallback=position.volume_fallback
+            volume_fallback=position.volume_fallback,
+            # Strategy tracking
+            strategy_name=position.strategy_name,
+            pair_created_at=position.pair_created_at,
+            # Enhanced tracking fields
+            entry_liquidity=position.entry_liquidity,
+            exit_liquidity=position.exit_liquidity,
+            volume_24h=position.volume_24h,
+            volume_1h=position.volume_1h,
+            opportunity_score=position.opportunity_score,
+            token_source=position.token_source,
+            dex_platform=position.dex_platform,
+            # === PEAK TRACKING & OPTIMIZATION METRICS ===
+            max_gain_percent=max_gain_percent,
+            peak_to_exit_drop_percent=peak_to_exit_drop_percent,
+            entry_to_peak_minutes=entry_to_peak_minutes,
+            peak_to_exit_minutes=peak_to_exit_minutes,
+            # === CONFIGURATION TRACKING ===
+            config_stop_loss_percent=position.config_stop_loss_percent,
+            config_trailing_activation_percent=position.config_trailing_activation_percent,
+            config_trailing_distance_percent=position.config_trailing_distance_percent,
+            # === TRANSACTION ACTIVITY ===
+            txns_h1_buys=position.txns_h1_buys,
+            txns_h1_sells=position.txns_h1_sells,
+            buy_sell_ratio=buy_sell_ratio
         )
 
         self.closed_trades.append(sell_trade)
@@ -518,9 +727,29 @@ class PositionManager:
         Returns:
             List of token addresses for dead positions
         """
+        # Read configurable dead token detection parameters from .env
+        dead_token_wait_minutes = float(os.getenv('DEAD_TOKEN_WAIT_MINUTES', '10'))
+        dead_token_min_movement = float(os.getenv('DEAD_TOKEN_MIN_MOVEMENT', '0.5'))
+
+        # 🚫 BLUECHIP EXCLUSION - Never flag these as dead (they're stable by design)
+        BLUECHIP_ADDRESSES = {
+            'So11111111111111111111111111111111111111112',  # SOL - Solana native token
+            'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+            'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+            'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',  # JUP - Jupiter
+            'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',  # BONK
+            '27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4',   # JTO - Jito
+            'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3',   # PYTH
+            '7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj',   # stSOL
+            'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',    # mSOL
+        }
+
         dead_positions = []
 
         for token_address, position in self.open_positions.items():
+            # Skip bluechip tokens - they are stable by design, not dead!
+            if token_address in BLUECHIP_ADDRESSES:
+                continue
             # Check if price is stale (no updates in X minutes)
             if position.is_price_stale(stale_minutes):
                 minutes_since = (datetime.now() - position.last_price_update).total_seconds() / 60
@@ -562,14 +791,16 @@ class PositionManager:
                 continue
 
             # Check if price hasn't actually changed (fake updates / minimal movement)
-            # If price moved less than 1% after 5+ minutes, likely honeypot/dead/manipulated
+            # Configurable via .env: DEAD_TOKEN_WAIT_MINUTES and DEAD_TOKEN_MIN_MOVEMENT
+            # Default: 10 minutes wait, <0.5% movement = frozen/dead
             minutes_held = (datetime.now() - position.entry_time).total_seconds() / 60
-            if minutes_held >= 5:
+            if minutes_held >= dead_token_wait_minutes:
                 price_change_pct = abs((position.current_price - position.entry_price) / position.entry_price) * 100
-                if price_change_pct < 1.0:  # Less than 1% movement in 5+ minutes
+                if price_change_pct < dead_token_min_movement:
                     logger.warning(
                         f"🚨 DEAD TOKEN DETECTED: {token_address[:8]}... - "
-                        f"Minimal price movement ({price_change_pct:.2f}%) for {minutes_held:.1f} minutes (likely honeypot/dead/rugged)"
+                        f"Minimal price movement ({price_change_pct:.2f}%) for {minutes_held:.1f} minutes "
+                        f"(threshold: {dead_token_min_movement}% in {dead_token_wait_minutes} min - likely frozen/dead)"
                     )
                     dead_positions.append(token_address)
 
@@ -790,16 +1021,25 @@ class PositionManager:
         self.daily_trades = []
         logger.info("Daily statistics reset")
 
-    def export_to_csv(self, filepath: str = 'data/trade_history.csv') -> int:
+    def export_to_csv(
+        self,
+        filepath: str = 'data/trade_history.csv',
+        timeframe: str = 'all',  # 'all', 'daily', 'weekly', 'monthly'
+        limit: int = None  # Limit number of trades (most recent first)
+    ) -> int:
         """
-        Export all closed trades to a CSV file for easy analysis in Excel.
+        Export closed trades to a CSV file for easy analysis in Excel.
 
         Args:
             filepath: Path to save CSV file
+            timeframe: Filter by timeframe ('all', 'daily', 'weekly', 'monthly')
+            limit: Limit to most recent N trades
 
         Returns:
             Number of trades exported
         """
+        from datetime import timedelta
+
         # Create data directory if it doesn't exist
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
@@ -810,24 +1050,79 @@ class PositionManager:
             logger.info("No trades to export")
             return 0
 
-        # Define CSV columns
+        # Sort by timestamp (most recent first)
+        sell_trades = sorted(sell_trades, key=lambda t: t.timestamp, reverse=True)
+
+        # Filter by timeframe
+        if timeframe == 'daily':
+            cutoff = datetime.now() - timedelta(hours=24)
+            sell_trades = [t for t in sell_trades if t.timestamp >= cutoff]
+        elif timeframe == 'weekly':
+            cutoff = datetime.now() - timedelta(days=7)
+            sell_trades = [t for t in sell_trades if t.timestamp >= cutoff]
+        elif timeframe == 'monthly':
+            cutoff = datetime.now() - timedelta(days=30)
+            sell_trades = [t for t in sell_trades if t.timestamp >= cutoff]
+
+        # Apply limit
+        if limit:
+            sell_trades = sell_trades[:limit]
+
+        if not sell_trades:
+            logger.info(f"No trades to export for timeframe '{timeframe}'")
+            return 0
+
+        # Enhanced CSV columns with more analysis fields
         fieldnames = [
             'Date',
             'Time',
+            'Day of Week',          # Pattern analysis
+            'Hour',                 # Time of day analysis
             'Token Address',
             'Token',
             'Symbol',
             'Entry Price',
             'Exit Price',
+            'Price Change ($)',     # Absolute price change
+            'Price Change (%)',     # Price movement during hold
             'Position Size ($)',
-            'Quantity',             # NEW - Total tokens bought
-            'Tokens per Dollar',    # NEW - Critical risk metric!
+            'Quantity',
+            'Tokens per Dollar',
+            # === LIQUIDITY DATA ===
+            'Entry Liquidity',      # Liquidity when entered
+            'Exit Liquidity',       # Liquidity when exited
+            'Liquidity Change (%)', # How much liquidity changed
+            # === VOLUME DATA ===
+            'Volume 24h',           # 24h volume at entry
+            'Volume 1h',            # 1h volume at entry (if available)
+            # === SCORE DATA ===
+            'Opportunity Score',    # Score 0-100 from selection
+            # === SOURCE DATA ===
+            'Token Source',         # jupiter, coingecko, dexscreener, etc.
+            'DEX Platform',         # pump.fun, raydium, orca, meteora, etc.
+            # === PEAK TRACKING & OPTIMIZATION ===
+            'Max Gain (%)',         # Maximum gain % reached during trade
+            'Peak to Exit Drop (%)', # How much % dropped from peak to exit
+            'Entry to Peak (min)',  # Time from entry to peak (minutes)
+            'Peak to Exit (min)',   # Time from peak to exit (minutes)
+            # === CONFIGURATION TRACKING ===
+            'Config Stop Loss (%)', # Stop loss % used for this trade
+            'Config Trailing Activation (%)', # Trailing activation % used
+            'Config Trailing Distance (%)',   # Trailing distance % used
+            # === TRANSACTION ACTIVITY ===
+            'Txns H1 Buys',         # Buy transactions in last hour
+            'Txns H1 Sells',        # Sell transactions in last hour
+            'Buy/Sell Ratio',       # Ratio of buys to sells
+            # === OUTCOME DATA ===
             'PnL ($)',
             'PnL (%)',
             'Win/Loss',
-            'Duration',
+            'Duration (hours)',
+            'Duration (minutes)',
             'Close Reason',
-            'Volume Fallback'
+            'Volume Fallback',
+            'Strategy',             # Age-based strategy used
+            'Token Age (hours)'     # How old was token at entry
         ]
 
         # Write to CSV
@@ -839,9 +1134,11 @@ class PositionManager:
                 # Calculate duration
                 if trade.entry_time:
                     duration = trade.timestamp - trade.entry_time
-                    duration_str = f"{duration.total_seconds() / 3600:.1f}h"
+                    duration_hours = duration.total_seconds() / 3600
+                    duration_minutes = duration.total_seconds() / 60
                 else:
-                    duration_str = "N/A"
+                    duration_hours = 0
+                    duration_minutes = 0
 
                 # Determine win/loss
                 win_loss = "WIN" if trade.pnl > 0 else "LOSS" if trade.pnl < 0 else "BREAK-EVEN"
@@ -854,39 +1151,116 @@ class PositionManager:
                     'manual': 'Manual Close',
                     'manual_telegram': 'Manual (Telegram)',
                     'manual_closeall': 'Close All (Telegram)',
+                    'manual_cleanup': 'Cleanup (Telegram)',
                     'rugged/dead': 'Rugged/Dead',
-                    'partial_profit': 'Partial Profit'
+                    'partial_profit': 'Partial Profit',
+                    'force_exit': 'Force Exit',
+                    'low_liquidity': 'Low Liquidity',
+                    'max_age': 'Max Age Reached'
                 }
                 close_reason = reason_map.get(trade.reason, trade.reason or 'Unknown')
 
-                # Calculate tokens per dollar (critical risk metric)
-                # Use entry price and quantity to calculate how many tokens per dollar
+                # Calculate tokens per dollar
                 if trade.entry_price > 0 and trade.quantity > 0:
-                    # Calculate original position size (before any sells)
                     original_position_usd = trade.quantity * trade.entry_price
                     tokens_per_dollar = trade.quantity / original_position_usd if original_position_usd > 0 else 0
                 else:
                     tokens_per_dollar = 0
 
+                # Calculate price change
+                price_change_usd = trade.price - trade.entry_price
+                price_change_pct = ((trade.price - trade.entry_price) / trade.entry_price * 100) if trade.entry_price > 0 else 0
+
+                # Get strategy name (if available in position attributes)
+                strategy = getattr(trade, 'strategy_name', 'unknown')
+
+                # Calculate token age at entry (if available)
+                token_age_hours = 0
+                if hasattr(trade, 'pair_created_at') and trade.pair_created_at > 0 and trade.entry_time:
+                    token_age_hours = (trade.entry_time.timestamp() - trade.pair_created_at / 1000) / 3600
+
+                # Get liquidity data (if available in trade attributes)
+                entry_liq = getattr(trade, 'entry_liquidity', 0)
+                exit_liq = getattr(trade, 'exit_liquidity', 0)
+                liq_change_pct = 0
+                if entry_liq > 0:
+                    liq_change_pct = ((exit_liq - entry_liq) / entry_liq * 100)
+
+                # Get enhanced data fields (with defaults for old trades)
+                volume_24h = getattr(trade, 'volume_24h', 0)
+                volume_1h = getattr(trade, 'volume_1h', 0)
+                opp_score = getattr(trade, 'opportunity_score', 0)
+                token_source = getattr(trade, 'token_source', 'unknown')
+                dex_platform = getattr(trade, 'dex_platform', 'unknown')
+
+                # Get peak tracking data (with defaults for old trades)
+                max_gain_pct = getattr(trade, 'max_gain_percent', 0)
+                peak_to_exit_drop_pct = getattr(trade, 'peak_to_exit_drop_percent', 0)
+                entry_to_peak_min = getattr(trade, 'entry_to_peak_minutes', 0)
+                peak_to_exit_min = getattr(trade, 'peak_to_exit_minutes', 0)
+
+                # Get configuration data (with defaults for old trades)
+                config_sl_pct = getattr(trade, 'config_stop_loss_percent', 0)
+                config_trail_act_pct = getattr(trade, 'config_trailing_activation_percent', 0)
+                config_trail_dist_pct = getattr(trade, 'config_trailing_distance_percent', 0)
+
+                # Get transaction activity data (with defaults for old trades)
+                txns_buys = getattr(trade, 'txns_h1_buys', 0)
+                txns_sells = getattr(trade, 'txns_h1_sells', 0)
+                buy_sell_ratio = getattr(trade, 'buy_sell_ratio', 0)
+
                 # Write row
                 writer.writerow({
                     'Date': trade.timestamp.strftime('%Y-%m-%d'),
                     'Time': trade.timestamp.strftime('%H:%M:%S'),
-                    'Token Address': trade.token_address,  # Full address for verification
-                    'Token': trade.token_address[:16] + '...',  # Shortened for readability
+                    'Day of Week': trade.timestamp.strftime('%A'),
+                    'Hour': trade.timestamp.strftime('%H'),
+                    'Token Address': trade.token_address,
+                    'Token': trade.token_address[:16] + '...',
                     'Symbol': trade.symbol or trade.token_address[:8],
-                    'Entry Price': f"${trade.entry_price:.8f}",
-                    'Exit Price': f"${trade.price:.8f}",
-                    'Position Size ($)': f"${trade.amount_usd:.2f}",
+                    'Entry Price': f"{trade.entry_price:.12f}",
+                    'Exit Price': f"{trade.price:.12f}",
+                    'Price Change ($)': f"{price_change_usd:+.12f}",
+                    'Price Change (%)': f"{price_change_pct:+.2f}",
+                    'Position Size ($)': f"{trade.amount_usd:.2f}",
                     'Quantity': f"{trade.quantity:,.0f}",
                     'Tokens per Dollar': f"{tokens_per_dollar:,.0f}",
-                    'PnL ($)': f"${trade.pnl:.2f}",
-                    'PnL (%)': f"{trade.pnl_percent:+.2f}%",
+                    # === LIQUIDITY DATA ===
+                    'Entry Liquidity': f"{entry_liq:,.0f}",
+                    'Exit Liquidity': f"{exit_liq:,.0f}",
+                    'Liquidity Change (%)': f"{liq_change_pct:+.1f}",
+                    # === VOLUME DATA ===
+                    'Volume 24h': f"{volume_24h:,.0f}",
+                    'Volume 1h': f"{volume_1h:,.0f}",
+                    # === SCORE DATA ===
+                    'Opportunity Score': f"{opp_score:.1f}",
+                    # === SOURCE DATA ===
+                    'Token Source': token_source,
+                    'DEX Platform': dex_platform,
+                    # === PEAK TRACKING & OPTIMIZATION ===
+                    'Max Gain (%)': f"{max_gain_pct:.2f}",
+                    'Peak to Exit Drop (%)': f"{peak_to_exit_drop_pct:.2f}",
+                    'Entry to Peak (min)': f"{entry_to_peak_min:.1f}",
+                    'Peak to Exit (min)': f"{peak_to_exit_min:.1f}",
+                    # === CONFIGURATION TRACKING ===
+                    'Config Stop Loss (%)': f"{config_sl_pct:.1f}",
+                    'Config Trailing Activation (%)': f"{config_trail_act_pct:.1f}",
+                    'Config Trailing Distance (%)': f"{config_trail_dist_pct:.1f}",
+                    # === TRANSACTION ACTIVITY ===
+                    'Txns H1 Buys': f"{txns_buys}",
+                    'Txns H1 Sells': f"{txns_sells}",
+                    'Buy/Sell Ratio': f"{buy_sell_ratio:.2f}",
+                    # === OUTCOME DATA ===
+                    'PnL ($)': f"{trade.pnl:+.2f}",
+                    'PnL (%)': f"{trade.pnl_percent:+.2f}",
                     'Win/Loss': win_loss,
-                    'Duration': duration_str,
+                    'Duration (hours)': f"{duration_hours:.1f}",
+                    'Duration (minutes)': f"{duration_minutes:.0f}",
                     'Close Reason': close_reason,
-                    'Volume Fallback': 'YES' if trade.volume_fallback else 'NO'
+                    'Volume Fallback': 'YES' if trade.volume_fallback else 'NO',
+                    'Strategy': strategy,
+                    'Token Age (hours)': f"{token_age_hours:.1f}"
                 })
 
-        logger.info(f"Exported {len(sell_trades)} trades to {filepath}")
+        logger.info(f"Exported {len(sell_trades)} trades to {filepath} (timeframe: {timeframe}, limit: {limit})")
         return len(sell_trades)

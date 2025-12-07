@@ -17,6 +17,8 @@ from .blockchain import AlchemyClient, SolSnifferClient, WalletTracker, RugCheck
 from .blockchain.jupiter_executor import JupiterSwapExecutor
 from .blockchain.wallet_manager import WalletManager
 from .market import DexScreenerClient, MarketAnalyzer, JupiterClient, VolumeAnalyzer, BirdeyeClient
+from .market.coingecko_client import CoinGeckoClient
+from .market.apify_client import ApifyDexScreenerClient
 from .social import TwitterClient, SentimentAnalyzer
 from .ai import SentimentModel, PricePredictor, RiskAssessor
 from .trading import TelegramExecutor, PositionManager, PaperTradingEngine
@@ -71,6 +73,10 @@ class SolanaTradingBot:
         self.metrics.register_api('rugcheck')
         self.metrics.register_api('whale_analyzer')
         self.metrics.register_api('movement_detector')
+        # New multi-source system APIs
+        self.metrics.register_api('coingecko')  # Market monitor (BTC/ETH/SOL)
+        self.metrics.register_api('rugcheck_holder')  # RugCheck holder analysis
+        self.metrics.register_api('birdeye')  # Birdeye API
 
         # Set up default alert rules
         alert_config = {
@@ -81,31 +87,87 @@ class SolanaTradingBot:
         }
         self.alert_manager.setup_default_rules(alert_config)
 
-        # Blockchain
+        # === FEATURE ENABLE FLAGS (Test features one by one) ===
+        self.enable_rugcheck = os.getenv('ENABLE_RUGCHECK_API', 'false').lower() == 'true'
+        self.enable_whale_tracking = os.getenv('ENABLE_WHALE_TRACKING', 'false').lower() == 'true'
+        self.enable_movement_detection = os.getenv('ENABLE_MOVEMENT_DETECTION', 'false').lower() == 'true'
+        self.enable_twitter_sentiment = os.getenv('ENABLE_TWITTER_SENTIMENT', 'false').lower() == 'true'
+        self.enable_volume_analyzer = os.getenv('ENABLE_VOLUME_ANALYZER', 'false').lower() == 'true'
+
+        # === MULTI-SOURCE SYSTEM FLAGS (New enhanced monitoring) ===
+        self.enable_multi_source_aggregator = os.getenv('ENABLE_MULTI_SOURCE_AGGREGATOR', 'false').lower() == 'true'
+        self.enable_rugcheck_holder_analysis = os.getenv('ENABLE_RUGCHECK_HOLDER_ANALYSIS', 'false').lower() == 'true'
+        self.enable_market_monitor = os.getenv('ENABLE_MARKET_MONITOR', 'false').lower() == 'true'
+        self.enable_dynamic_scorer = os.getenv('ENABLE_DYNAMIC_SCORER', 'false').lower() == 'true'
+
+        # Blockchain (core - always enabled)
         self.alchemy = AlchemyClient(settings.api.alchemy_api_key)
         self.solsniffer = SolSnifferClient(settings.api.solsniffer_api_key)
-        self.rugcheck = RugCheckClient(settings.api.rugcheck_api_key)
-        self.whale_analyzer = WhaleAnalyzer(settings.api.solscan_api_key)
-        self.movement_detector = MovementDetector(settings.api.solscan_api_key)
         self.wallet_tracker = WalletTracker()
 
-        # Market
+        # RugCheck (optional)
+        if self.enable_rugcheck:
+            self.rugcheck = RugCheckClient(settings.api.rugcheck_api_key)
+            logger.info("✅ RugCheck API ENABLED")
+        else:
+            self.rugcheck = None
+            logger.info("🔒 RugCheck API DISABLED")
+
+        # Whale Tracking (optional)
+        if self.enable_whale_tracking:
+            self.whale_analyzer = WhaleAnalyzer(settings.api.solscan_api_key)
+            logger.info("✅ Whale tracking ENABLED")
+        else:
+            self.whale_analyzer = None
+            logger.info("🔒 Whale tracking DISABLED")
+
+        # Movement Detection (optional)
+        if self.enable_movement_detection:
+            self.movement_detector = MovementDetector(settings.api.solscan_api_key)
+            logger.info("✅ Movement detection ENABLED")
+        else:
+            self.movement_detector = None
+            logger.info("🔒 Movement detection DISABLED")
+
+        # Market (core - always enabled)
         self.dexscreener = DexScreenerClient(settings.api.dexscreener_api_key)
         self.birdeye = BirdeyeClient(settings.api.birdeye_api_key) if settings.api.birdeye_api_key else None
+
+        # CoinGecko (optional - top gainers/losers)
+        coingecko_api_key = os.getenv('COINGECKO_API_KEY')
+        self.coingecko = CoinGeckoClient(coingecko_api_key) if coingecko_api_key and coingecko_api_key != 'your_coingecko_api_key_here' else None
+
+        # Apify DexScreener scraper (optional - BEST for GAINERS)
+        apify_api_token = os.getenv('APIFY_API_TOKEN')
+        self.apify = ApifyDexScreenerClient(apify_api_token) if apify_api_token and apify_api_token != 'your_apify_api_token_here' else None
+
         self.market_analyzer = MarketAnalyzer(
             min_liquidity_usd=settings.trading.min_liquidity_usd,
             min_volume_24h=settings.trading.min_volume_24h
         )
-        self.volume_analyzer = VolumeAnalyzer()
 
-        # Token Discovery
+        # Volume Analyzer (optional)
+        if self.enable_volume_analyzer:
+            self.volume_analyzer = VolumeAnalyzer()
+            logger.info("✅ Volume analyzer ENABLED")
+        else:
+            self.volume_analyzer = None
+            logger.info("🔒 Volume analyzer DISABLED")
+
+        # Token Discovery (core - always enabled)
         self.jupiter = JupiterClient()
 
-        # Social
-        self.twitter = TwitterClient(settings.api.twitter_bearer_token)
-        self.sentiment_analyzer = SentimentAnalyzer()
+        # Social (optional)
+        if self.enable_twitter_sentiment:
+            self.twitter = TwitterClient(settings.api.twitter_bearer_token)
+            self.sentiment_analyzer = SentimentAnalyzer()
+            logger.info("✅ Twitter sentiment analysis ENABLED")
+        else:
+            self.twitter = None
+            self.sentiment_analyzer = None
+            logger.info("🔒 Twitter sentiment DISABLED")
 
-        # AI Models
+        # AI Models (core - always enabled)
         self.sentiment_model = SentimentModel()
         self.price_predictor = PricePredictor()
         self.risk_assessor = RiskAssessor(
@@ -182,6 +244,28 @@ class SolanaTradingBot:
         from .trading.paper_trading import set_ml_collector
         set_ml_collector(self.ml_collector)
 
+        # === MULTI-SOURCE MONITORING SYSTEM (Optional) ===
+        # Enhanced bot with cross-validation, holder analysis, market monitoring, dynamic scoring
+        self.enhanced_bot = None
+        if self.enable_multi_source_aggregator:
+            try:
+                from .market.enhanced_bot_integration import EnhancedTradingIntegration
+                self.enhanced_bot = EnhancedTradingIntegration(
+                    jupiter_client=self.jupiter,
+                    dexscreener_client=self.dexscreener,
+                    birdeye_client=self.birdeye,
+                    position_manager=self.position_manager,
+                    trading_engine=self.trading_engine,
+                    notifier=self.notifier
+                )
+                logger.info("✅ Multi-Source Monitoring System ENABLED")
+                logger.info("   - Cross-validation across Jupiter/DexScreener/Birdeye")
+                logger.info("   - 5-second position monitoring with force exit")
+                logger.info("   - Holder analysis, market monitoring, dynamic scoring")
+            except Exception as e:
+                logger.error(f"Failed to initialize enhanced bot: {e}")
+                self.enable_multi_source_aggregator = False
+
         # Register health checks
         self._register_health_checks()
 
@@ -195,6 +279,10 @@ class SolanaTradingBot:
         self.health_checker.register_component('dexscreener', self.dexscreener.health_check)
         if self.birdeye:
             self.health_checker.register_component('birdeye', self.birdeye.health_check)
+        if self.coingecko:
+            self.health_checker.register_component('coingecko', self.coingecko.health_check)
+        if self.apify:
+            self.health_checker.register_component('apify', self.apify.health_check)
 
         # Optional components - disabled to reduce log noise
         # These components are not critical for core trading functionality
@@ -217,42 +305,46 @@ class SolanaTradingBot:
         logger.info(f"Analyzing token: {token_address}")
 
         try:
-            # 0. EARLY FILTER: RugCheck risk assessment (fast, saves expensive API calls)
+            # 0. EARLY FILTER: RugCheck risk assessment (if enabled)
             import time
-            rug_start = time.time()
-            rug_check = await self.rugcheck.quick_check(token_address)
-            rug_time_ms = (time.time() - rug_start) * 1000
-            self.metrics.record_api_call('rugcheck', success=True, response_time_ms=rug_time_ms)
+            rug_check = None
+            if self.enable_rugcheck and self.rugcheck:
+                rug_start = time.time()
+                rug_check = await self.rugcheck.quick_check(token_address)
+                rug_time_ms = (time.time() - rug_start) * 1000
+                self.metrics.record_api_call('rugcheck', success=True, response_time_ms=rug_time_ms)
 
-            # Block high-risk tokens immediately (if strict mode enabled)
-            if self.settings.trading.rugcheck_strict_mode:
-                if rug_check['risk_level'] in ['critical', 'high'] and not rug_check['is_safe']:
-                    logger.warning(
-                        f"🚫 Token {token_address[:8]}... REJECTED by RugCheck: "
-                        f"Risk={rug_check['risk_level']}, Score={rug_check['risk_score']}, "
-                        f"Risks={rug_check['risks']}"
-                    )
-                    await self.notifier.send_message(
-                        f"🚫 **RugCheck Alert**\n"
-                        f"Token: `{token_address[:8]}...`\n"
-                        f"Risk Level: **{rug_check['risk_level'].upper()}**\n"
-                        f"Score: {rug_check['risk_score']}/100\n"
-                        f"Risks: {', '.join(rug_check['risks'][:3])}"
-                    )
-                    return None
+                # Block high-risk tokens immediately (if strict mode enabled)
+                if self.settings.trading.rugcheck_strict_mode:
+                    if rug_check['risk_level'] in ['critical', 'high'] and not rug_check['is_safe']:
+                        logger.warning(
+                            f"🚫 Token {token_address[:8]}... REJECTED by RugCheck: "
+                            f"Risk={rug_check['risk_level']}, Score={rug_check['risk_score']}, "
+                            f"Risks={rug_check['risks']}"
+                        )
+                        await self.notifier.send_message(
+                            f"🚫 **RugCheck Alert**\n"
+                            f"Token: `{token_address[:8]}...`\n"
+                            f"Risk Level: **{rug_check['risk_level'].upper()}**\n"
+                            f"Score: {rug_check['risk_score']}/100\n"
+                            f"Risks: {', '.join(rug_check['risks'][:3])}"
+                        )
+                        return None
 
-                # Also check minimum score threshold
-                if rug_check['risk_score'] < self.settings.trading.rugcheck_min_score:
-                    logger.warning(
-                        f"🚫 Token {token_address[:8]}... REJECTED: "
-                        f"RugCheck score {rug_check['risk_score']} < minimum {self.settings.trading.rugcheck_min_score}"
-                    )
-                    return None
+                    # Also check minimum score threshold
+                    if rug_check['risk_score'] < self.settings.trading.rugcheck_min_score:
+                        logger.warning(
+                            f"🚫 Token {token_address[:8]}... REJECTED: "
+                            f"RugCheck score {rug_check['risk_score']} < minimum {self.settings.trading.rugcheck_min_score}"
+                        )
+                        return None
 
-            logger.info(
-                f"✅ RugCheck passed: {token_address[:8]}... "
-                f"(Risk: {rug_check['risk_level']}, Score: {rug_check['risk_score']})"
-            )
+                logger.info(
+                    f"✅ RugCheck passed: {token_address[:8]}... "
+                    f"(Risk: {rug_check['risk_level']}, Score: {rug_check['risk_score']})"
+                )
+            else:
+                logger.debug("RugCheck API disabled - skipping risk assessment")
 
             # 1. Get market data - prioritize Jupiter discovery data if available
             profile = None
@@ -267,19 +359,31 @@ class SolanaTradingBot:
                     'price_usd': float(jupiter_token_data.get('usdPrice', 0)),
                     'liquidity_usd': float(jupiter_token_data.get('liquidity', 0)),
                     'volume_24h': 0,  # Not in discovery data
+                    'volume_1h': 0,  # Not in discovery data
                     'price_change_24h': 0,  # Not in discovery data
                     'market_cap': float(jupiter_token_data.get('mcap', 0)),
                     'fdv': float(jupiter_token_data.get('fdv', 0)),
                     'pair_created_at': jupiter_token_data.get('createdAt'),
-                    'source': 'jupiter_discovery'
+                    'source': 'jupiter_discovery',
+                    'dex_id': 'unknown',  # Not in discovery data
+                    # Transaction data (not in discovery data)
+                    'txns_h1_buys': 0,
+                    'txns_h1_sells': 0,
+                    'txns_m5_buys': 0,
+                    'txns_m5_sells': 0
                 }
                 logger.info(f"✅ Using Jupiter discovery data for {token_address[:12]}... (price: ${profile['price_usd']:.8f}, liq: ${profile['liquidity_usd']:,.0f})")
 
             # ALWAYS fetch DexScreener data if liquidity or volume is missing
             # Jupiter discovery often has price but missing/zero liquidity and volume
             if not profile or profile['price_usd'] == 0 or profile.get('liquidity_usd', 0) == 0 or profile.get('volume_24h', 0) == 0:
+                # Try DexScreener first (has best liquidity + volume data)
                 dex_profile = await self.dexscreener.get_token_profile(token_address)
-                jupiter_data = await self.jupiter.get_token_price_data(token_address)
+
+                # Only call Jupiter search if DexScreener fails (reduce rate limit pressure)
+                jupiter_data = None
+                if not dex_profile:
+                    jupiter_data = await self.jupiter.get_token_price_data(token_address)
 
                 # Validate we have data from at least one source
                 if not dex_profile and not jupiter_data:
@@ -293,13 +397,18 @@ class SolanaTradingBot:
                 if profile:
                     logger.info(f"📊 Enriched with real data: {token_address[:12]}... (liq: ${profile.get('liquidity_usd', 0):,.0f}, vol: ${profile.get('volume_24h', 0):,.0f})")
 
+            # CRITICAL: Safety check - ensure we have profile data before proceeding
+            if not profile:
+                logger.warning(f"⚠️  No profile data for {token_address} - skipping analysis")
+                return None
+
             # 1.5. MULTI-LAYER SCREENING (Phase 3) - Additional smart money & risk filters
             volume_analysis = None
             whale_analysis = None
             movement_analysis = None
 
-            # Volume breakout detection (smart money tracking)
-            if self.settings.trading.enable_volume_breakout and profile:
+            # Volume breakout detection (if enabled)
+            if self.enable_volume_analyzer and self.volume_analyzer and self.settings.trading.enable_volume_breakout and profile:
                 try:
                     volume_analysis = self.volume_analyzer.detect_smart_money_accumulation(
                         token_address=token_address,
@@ -313,9 +422,11 @@ class SolanaTradingBot:
                     )
                 except Exception as e:
                     logger.debug(f"Volume analysis skipped: {e}")
+            elif not self.enable_volume_analyzer:
+                logger.debug("Volume analyzer disabled - skipping volume breakout detection")
 
-            # Whale concentration analysis
-            if self.settings.trading.enable_whale_tracking:
+            # Whale concentration analysis (if enabled)
+            if self.enable_whale_tracking and self.whale_analyzer and self.settings.trading.enable_whale_tracking:
                 try:
                     whale_start = time.time()
                     token_supply = profile.get('fdv', 0) / profile.get('price_usd', 1) if profile.get('price_usd', 0) > 0 else None
@@ -333,9 +444,11 @@ class SolanaTradingBot:
                         logger.info(f"✅ Whale check passed: {whale_analysis['whale_risk']} risk")
                 except Exception as e:
                     logger.debug(f"Whale analysis skipped: {e}")
+            elif not self.enable_whale_tracking:
+                logger.debug("Whale tracking disabled - skipping analysis")
 
-            # Unusual movement detection
-            if self.settings.trading.enable_movement_detection:
+            # Unusual movement detection (if enabled)
+            if self.enable_movement_detection and self.movement_detector and self.settings.trading.enable_movement_detection:
                 try:
                     movement_start = time.time()
                     movement_analysis = await self.movement_detector.quick_movement_check(token_address)
@@ -366,16 +479,38 @@ class SolanaTradingBot:
             # 2. Get security data
             security_data = await self.solsniffer.analyze_token(token_address)
 
-            # 3. Get social sentiment (optional - skip if rate limited)
+            # 3. Get social sentiment (if enabled)
             token_symbol = profile.get('symbol', 'UNKNOWN')
-            try:
-                social_data = await self.twitter.analyze_token_buzz(token_symbol, token_address)
-                tweets = await self.twitter.search_token_mentions(token_symbol, token_address)
-                sentiment_analysis = self.sentiment_analyzer.analyze_tweets(tweets)
-                coordination_analysis = self.sentiment_analyzer.detect_coordinated_activity(tweets)
-            except Exception as e:
-                # Twitter optional - use neutral defaults with proper structure
-                logger.debug(f"Twitter sentiment unavailable for {token_symbol}: {e}")
+            if self.enable_twitter_sentiment and self.twitter and self.sentiment_analyzer:
+                try:
+                    social_data = await self.twitter.analyze_token_buzz(token_symbol, token_address)
+                    tweets = await self.twitter.search_token_mentions(token_symbol, token_address)
+                    sentiment_analysis = self.sentiment_analyzer.analyze_tweets(tweets)
+                    coordination_analysis = self.sentiment_analyzer.detect_coordinated_activity(tweets)
+                    logger.debug(f"Twitter sentiment analyzed for {token_symbol}")
+                except Exception as e:
+                    # Twitter optional - use neutral defaults with proper structure
+                    logger.debug(f"Twitter sentiment unavailable for {token_symbol}: {e}")
+                    social_data = {
+                        'mentions': 0,
+                        'sentiment': 'neutral',
+                        'buzz_score': 0.5,
+                        'tweet_count': 0,
+                        'influential_mentions': 0
+                    }
+                    sentiment_analysis = {
+                        'sentiment': 'neutral',
+                        'score': 0.5,
+                        'normalized_score': 0.5,
+                        'confidence': 0.6  # Moderate confidence even without Twitter
+                    }
+                    coordination_analysis = {
+                        'coordinated': False,
+                        'coordination_score': 0.0
+                    }
+            else:
+                # Twitter disabled - use neutral defaults
+                logger.debug(f"Twitter sentiment disabled - using neutral scores")
                 social_data = {
                     'mentions': 0,
                     'sentiment': 'neutral',
@@ -387,7 +522,7 @@ class SolanaTradingBot:
                     'sentiment': 'neutral',
                     'score': 0.5,
                     'normalized_score': 0.5,
-                    'confidence': 0.6  # Moderate confidence even without Twitter
+                    'confidence': 0.6
                 }
                 coordination_analysis = {
                     'coordinated': False,
@@ -397,14 +532,14 @@ class SolanaTradingBot:
             # 4. Generate market signal
             market_signal = self.market_analyzer.analyze_token(profile)
 
-            # 5. Score sentiment
+            # 6. Score sentiment
             sentiment_score = self.sentiment_model.score_sentiment(
                 social_data=social_data,
                 sentiment_analysis=sentiment_analysis,
                 coordination_analysis=coordination_analysis
             )
 
-            # 6. Predict price movement
+            # 7. Predict price movement
             price_prediction = self.price_predictor.predict(
                 token_address=token_address,
                 current_price=profile['price_usd'],
@@ -413,7 +548,7 @@ class SolanaTradingBot:
                 timeframe_hours=24
             )
 
-            # 7. Assess risk
+            # 8. Assess risk
             risk_assessment = self.risk_assessor.assess_risk(
                 token_address=token_address,
                 market_data=profile,
@@ -451,9 +586,11 @@ class SolanaTradingBot:
                 'timestamp': datetime.now().isoformat()
             }
 
+            # Build log message (handle None rug_check)
+            rug_info = f"RugCheck={rug_check['risk_score']}/100" if rug_check else "RugCheck=disabled"
             logger.info(
                 f"Analysis complete for {token_symbol}: "
-                f"RugCheck={rug_check['risk_score']}/100, "
+                f"{rug_info}, "
                 f"Market={market_signal.signal_type}, "
                 f"Sentiment={sentiment_score.recommendation}, "
                 f"Risk={risk_assessment.overall_risk}"
@@ -587,22 +724,16 @@ class SolanaTradingBot:
         print(f"      💵 Amount: ${decision['position_size']:.2f} @ ${decision['entry_price']:.8f}")
 
         try:
-            # Send trade signal notification
-            print(f"      📱 Sending Telegram notification...")
-            await self.notifier.send_trade_signal(
-                token_address=decision['token_address'],
-                action=decision['action'].upper(),
-                confidence=decision['confidence'],
-                price=decision['entry_price'],
-                reasons=decision['reasons']
-            )
-
             print(f"      💰 Calling trading engine...")
             if decision['action'] == 'buy':
                 # Extract pair_created_at from analysis data for age-based strategy
                 analysis_data = decision.get('analysis_data', {})
                 profile = analysis_data.get('profile', {}) if analysis_data else {}
                 pair_created_at = profile.get('pair_created_at', 0)
+
+                # Add opportunity_score to analysis_data so it gets tracked in position
+                if 'opportunity_score' in decision:
+                    analysis_data['opportunity_score'] = decision['opportunity_score']
 
                 result = await self.trading_engine.execute_buy(
                     token_address=decision['token_address'],
@@ -614,20 +745,43 @@ class SolanaTradingBot:
                     pair_created_at=pair_created_at  # Pass for age-based strategy selection
                 )
                 print(f"      ✅ Trade result: {result}")
+
+                # ONLY send Telegram notification on SUCCESSFUL entry
+                if result.get('status') == 'success':
+                    print(f"      📱 Sending entry notification to Telegram...")
+
+                    # Use opportunity_score if available (from score-based selection), otherwise use analysis score
+                    opportunity_score = decision.get('opportunity_score', analysis_data.get('score', 0))
+                    # Extract source from profile data (jupiter_discovery, dexscreener, jupiter, etc.)
+                    token_source = profile.get('source', 'unknown') if profile else 'unknown'
+
+                    await self.notifier.send_entry_notification(
+                        token_address=decision['token_address'],
+                        symbol=decision['symbol'],
+                        entry_price=decision['entry_price'],
+                        position_size=decision['position_size'],
+                        score=opportunity_score,
+                        confidence=decision.get('confidence', 'medium'),
+                        token_data=profile or {},
+                        rugcheck_data=analysis_data.get('rug_check'),
+                        market_data=None,  # Could add market conditions here
+                        score_breakdown=analysis_data.get('score_breakdown'),
+                        warnings=decision.get('warnings', []),
+                        is_pumpfun=decision['token_address'].endswith('pump'),
+                        source=token_source  # Pass source to notification
+                    )
+                # Failures are just logged, no Telegram spam
             else:
                 result = await self.trading_engine.execute_sell(
                     token_address=decision['token_address'],
                     price=decision['entry_price']
                 )
 
-            # Send execution notification
-            await self.notifier.send_trade_execution(
-                token_address=decision['token_address'],
-                action=decision['action'].upper(),
-                amount=decision['position_size'],
-                price=decision['entry_price'],
-                status=result.get('status', 'UNKNOWN').upper()
-            )
+                # ONLY send Telegram notification on SUCCESSFUL exit
+                if result.get('status') == 'success':
+                    print(f"      📱 Sending exit notification to Telegram...")
+                    # TODO: Implement exit notification with P&L data
+                    # await self.notifier.send_exit_notification(...)
 
             return result.get('status') == 'success'
 
@@ -639,6 +793,148 @@ class SolanaTradingBot:
                 level="ERROR"
             )
             return False
+
+    def _calculate_opportunity_score(self, decision: dict, token_data: dict) -> float:
+        """
+        Calculate opportunity score based on multiple factors.
+        Higher score = better opportunity (prioritizes GAINERS).
+
+        Args:
+            decision: Trading decision dict with analyzed token info
+            token_data: Original token data from source (may contain price_change_24h, etc.)
+
+        Returns:
+            float: Score from 0-100 (higher = better opportunity)
+        """
+        score = 50.0  # Base score
+
+        # === FACTOR 1: PRICE CHANGE (CATCH PARABOLIC RUNNERS EARLY!) ===
+        # Strategy: Catch pumps at +20-100% (early momentum), NOT +150%+ (tops)
+        # CoinGecko and Apify provide price_change_24h/6h/1h
+        price_change_24h = token_data.get('price_change_24h', 0)
+        price_change_6h = token_data.get('price_change_6h', 0)
+        price_change_1h = token_data.get('price_change_1h', 0)
+
+        # ⚙️ ADJUSTABLE PARAMETERS - Prioritize 1h data (best for catching momentum)
+        # Use 1h change first (real-time momentum), then 24h as fallback
+        if price_change_1h != 0:
+            # === 1H PRICE CHANGE SCORING ===
+            # ⚙️ EXTREME PUMP PENALTIES (tokens already topped - TOO LATE!)
+            if price_change_1h >= 400:
+                score -= 20              # 400%+ in 1h = EXTREME top - AVOID
+            elif price_change_1h >= 300:
+                score -= 15              # 300% in 1h = Very extreme - likely topped
+            elif price_change_1h >= 200:
+                score -= 10              # 200% in 1h = Too hot - getting late
+            elif price_change_1h >= 150:
+                score -= 5               # 150% in 1h = Getting toppy
+            # ⚙️ SWEET SPOT - Early parabolic runners (BEST ENTRIES!)
+            elif 50 <= price_change_1h < 100:
+                score += 30              # 50-100% in 1h = SWEET SPOT! ✅
+            elif 20 <= price_change_1h < 50:
+                score += 25              # 20-50% in 1h = Good early momentum
+            elif 10 <= price_change_1h < 20:
+                score += 15              # 10-20% in 1h = Building momentum
+            elif 5 <= price_change_1h < 10:
+                score += 10              # 5-10% in 1h = Early movement
+            elif 0 < price_change_1h < 5:
+                score += 5               # 0-5% in 1h = Slight gain
+            # Negative changes get no points (looking for GAINERS only)
+        elif price_change_24h != 0:
+            # === 24H PRICE CHANGE SCORING (Fallback if no 1h data) ===
+            # ⚙️ EXTREME PUMP PENALTIES (24h timeframe - adjust thresholds higher)
+            if price_change_24h >= 400:
+                score -= 20              # 400%+ in 24h = Too late
+            elif price_change_24h >= 300:
+                score -= 15              # 300% in 24h = Very late
+            elif price_change_24h >= 200:
+                score -= 10              # 200% in 24h = Late entry
+            elif price_change_24h >= 150:
+                score -= 5               # 150% in 24h = Getting late
+            # ⚙️ SWEET SPOT - Adjust for 24h timeframe (wider range OK)
+            elif 60 <= price_change_24h < 120:
+                score += 30              # 60-120% in 24h = SWEET SPOT! ✅
+            elif 30 <= price_change_24h < 60:
+                score += 25              # 30-60% in 24h = Good momentum
+            elif 15 <= price_change_24h < 30:
+                score += 15              # 15-30% in 24h = Building
+            elif 5 <= price_change_24h < 15:
+                score += 10              # 5-15% in 24h = Early movement
+            elif 0 < price_change_24h < 5:
+                score += 5               # 0-5% in 24h = Slight gain
+            # Negative changes get no points (looking for GAINERS only)
+
+        # === FACTOR 2: LIQUIDITY (CRITICAL FOR EXITS) ===
+        liquidity = decision.get('liquidity', 0) or token_data.get('liquidity', 0)
+        if liquidity > 100000:  # >$100k liquidity
+            score += 10
+        elif liquidity > 50000:  # >$50k liquidity
+            score += 5
+        elif liquidity > 30000:  # >$30k liquidity (minimum)
+            score += 2
+        else:
+            # Penalty for low liquidity (risky!)
+            score -= 5
+
+        # === FACTOR 3: VOLUME (ACTIVITY INDICATOR) ===
+        volume_24h = decision.get('volume_24h', 0) or token_data.get('volume_24h', 0)
+        if volume_24h > 500000:  # >$500k volume
+            score += 8
+        elif volume_24h > 100000:  # >$100k volume
+            score += 5
+        elif volume_24h > 50000:  # >$50k volume
+            score += 2
+
+        # === FACTOR 4: SOURCE QUALITY (GAINERS SOURCES GET BONUS) ===
+        source = token_data.get('source', 'unknown')
+        if source == 'coingecko':
+            # CoinGecko sorted by price_change = high-quality GAINERS
+            score += 8
+        elif source == 'apify':
+            # Apify DexScreener scraper = BEST sorted data
+            score += 10
+        elif source == 'birdeye':
+            # Birdeye GAINERS focus
+            score += 6
+        elif source == 'dexscreener':
+            # DexScreener organic tokens (not sorted)
+            score += 3
+        elif source == 'jupiter':
+            # Jupiter tokens (reliable but not GAINERS-focused)
+            score += 2
+
+        # === FACTOR 5: MARKET CAP (LOWER = MORE MOONSHOT POTENTIAL) ===
+        market_cap = token_data.get('market_cap', 0)
+        if 0 < market_cap < 500000:  # Under $500k = micro-cap moonshot
+            score += 12
+        elif 500000 <= market_cap < 1000000:  # $500k-$1M
+            score += 8
+        elif 1000000 <= market_cap < 5000000:  # $1M-$5M
+            score += 5
+        elif 5000000 <= market_cap < 10000000:  # $5M-$10M
+            score += 2
+        # Above $10M = no bonus (harder to 10x-100x)
+
+        # === FACTOR 6: MARKET CAP RANK (COINGECKO SPECIFIC) ===
+        # Lower rank number = more established, higher rank = more speculative
+        market_cap_rank = token_data.get('market_cap_rank', 999)
+        if market_cap_rank > 500:  # Unranked or very low cap
+            score += 5  # More moonshot potential
+        elif market_cap_rank > 200:
+            score += 3
+
+        # === FACTOR 7: VOLUME/LIQUIDITY RATIO (HEALTHY METRIC) ===
+        if liquidity > 0 and volume_24h > 0:
+            vol_liq_ratio = volume_24h / liquidity
+            if 0.5 <= vol_liq_ratio <= 3.0:
+                # Healthy ratio (volume comparable to liquidity)
+                score += 5
+            elif vol_liq_ratio > 3.0:
+                # High volume vs liquidity = strong momentum
+                score += 8
+
+        # Cap score at 100 (perfect opportunity)
+        return min(score, 100.0)
 
     async def scan_tokens(self):
         """Scan for new tokens and trading opportunities."""
@@ -660,115 +956,289 @@ class SolanaTradingBot:
             print(f"  ❌ Token scan error: {e}")
 
     async def _scan_tokens_impl(self):
-        """Internal implementation of token scanning."""
+        """Internal implementation of token scanning - COMBINES all enabled sources."""
         logger.info("Scanning for tokens...")
         print("🔍 Starting token scan...")
 
         try:
-            new_tokens = []
-            min_liquidity = 50000  # $50k minimum
-            min_volume = 30000     # $30k minimum
+            all_tokens = []  # Will combine tokens from all sources
+            seen_addresses = set()  # Track duplicates
 
-            # PRIMARY: Try Birdeye (Solana-native, best quality!)
-            if self.birdeye:
-                print("  📡 Fetching trending + new tokens from Birdeye (Solana-native)...")
+            # Get enable flags from environment (default: Jupiter enabled, others disabled for safety)
+            enable_jupiter = os.getenv('ENABLE_JUPITER', 'true').lower() == 'true'
+            enable_dexscreener = os.getenv('ENABLE_DEXSCREENER', 'false').lower() == 'true'
+            enable_birdeye = os.getenv('ENABLE_BIRDEYE', 'false').lower() == 'true'
+            enable_coingecko = os.getenv('ENABLE_COINGECKO', 'false').lower() == 'true'
+            enable_apify = os.getenv('ENABLE_APIFY', 'false').lower() == 'true'
 
-                # Get trending tokens (high volume)
-                trending = await self.birdeye.get_trending_tokens(limit=15)
+            print(f"  🔧 Token sources: Jupiter={enable_jupiter}, DexScreener={enable_dexscreener}, Birdeye={enable_birdeye}, CoinGecko={enable_coingecko}, Apify={enable_apify}")
+            logger.info(f"Token source flags: ENABLE_JUPITER={enable_jupiter}, ENABLE_DEXSCREENER={enable_dexscreener}, ENABLE_BIRDEYE={enable_birdeye}, ENABLE_COINGECKO={enable_coingecko}, ENABLE_APIFY={enable_apify}")
 
-                # Get new listings (fresh pump.fun tokens)
-                new_listings = await self.birdeye.get_new_listings(limit=15)
+            # 🚫 BLUECHIP FILTER - Define once, use everywhere
+            # Skip these stable/high-cap tokens (won't 10x-100x)
+            BLUECHIP_SYMBOLS = {'SOL', 'USDC', 'USDT', 'JUP', 'BONK', 'WIF', 'TRUMP', 'PYTH', 'RAY', 'ORCA'}
+            BLUECHIP_ADDRESSES = {
+                'So11111111111111111111111111111111111111112',  # SOL
+                'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+                'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',  # JUP
+                'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',  # BONK
+            }
+            MAX_MARKET_CAP = 100_000_000  # $100M - tokens above this are too big to 10x
 
-                # Combine both sources
-                birdeye_tokens = trending + new_listings
+            # === SOURCE 1: JUPITER (CYCLING for gainers - finds movers!) ===
+            if enable_jupiter:
+                print("  📡 Fetching tokens from Jupiter (CYCLING discovery)...")
+                try:
+                    # 🔄 CYCLING: Rotates through toporganicscore → toptraded → toptrending
+                    # This finds GAINERS and MOVERS, not just bluechips!
+                    # category=None enables automatic cycling in jupiter_client.py
+                    jupiter_tokens = await self.jupiter.get_trending_tokens(
+                        category=None,  # Enable cycling (was hardcoded 'toporganicscore')
+                        interval='1h',
+                        limit=30
+                    )
 
-                if birdeye_tokens:
-                    # Filter for quality
-                    for token_data in birdeye_tokens:
-                        token_address = token_data.get('address')
-                        liquidity = token_data.get('liquidity', 0)
-                        volume_24h = token_data.get('volume_24h', 0)
+                    if jupiter_tokens:
+                        # 🚫 Apply bluechip filter (using constants defined above)
+                        filtered_tokens = []
+                        for token in jupiter_tokens:
+                            symbol = token.get('symbol', '').upper()
+                            addr = token.get('address')
+                            mcap = token.get('mcap', 0)
 
-                        if not token_address:
-                            continue
+                            # Skip bluechips by symbol, address, or market cap
+                            if symbol in BLUECHIP_SYMBOLS:
+                                logger.debug(f"[JUP] Filtered out bluechip: {symbol}")
+                                continue
+                            if addr in BLUECHIP_ADDRESSES:
+                                logger.debug(f"[JUP] Filtered out bluechip: {addr[:8]}...")
+                                continue
+                            if mcap and mcap > MAX_MARKET_CAP:
+                                logger.debug(f"[JUP] Filtered out high mcap: {symbol} (${mcap/1e6:.1f}M)")
+                                continue
 
-                        # Filter for liquidity and volume
-                        if liquidity >= min_liquidity and volume_24h >= min_volume:
-                            new_tokens.append({
-                                'address': token_address,
-                                'symbol': token_data.get('symbol', 'UNKNOWN'),
-                                'name': token_data.get('name', 'Unknown'),
-                                'liquidity_usd': liquidity,
-                                'volume_24h': volume_24h,
-                                'price_usd': token_data.get('price', 0),
-                            })
+                            filtered_tokens.append(token)
 
-                    if new_tokens:
-                        # Sort by volume (highest first)
-                        new_tokens.sort(key=lambda x: x.get('volume_24h', 0), reverse=True)
-                        print(f"  ✅ Birdeye: Found {len(new_tokens)} quality tokens (>${min_liquidity/1000:.0f}k liq, >${min_volume/1000:.0f}k vol)")
-                        logger.info(f"Retrieved {len(new_tokens)} filtered tokens from Birdeye")
+                        print(f"  ✅ Jupiter: Found {len(filtered_tokens)} tokens ({len(jupiter_tokens) - len(filtered_tokens)} bluechips filtered)")
+                        logger.info(f"Jupiter returned {len(filtered_tokens)} tokens after bluechip filter")
+
+                        for token in filtered_tokens:
+                            addr = token.get('address')
+                            if addr and addr not in seen_addresses:
+                                all_tokens.append(token)
+                                seen_addresses.add(addr)
                     else:
-                        print(f"  ⚠️  Birdeye returned {len(birdeye_tokens)} tokens but none met quality filters")
-                        logger.warning("No Birdeye tokens passed liquidity/volume filters")
-                else:
-                    print("  ⚠️  Birdeye returned no tokens")
-                    logger.warning("Birdeye trending/new listings returned no tokens")
+                        print("  ⚠️  Jupiter returned no tokens")
+                        logger.warning("Jupiter tokens returned empty")
+                except Exception as e:
+                    logger.error(f"Jupiter error: {e}")
+                    print(f"  ❌ Jupiter error: {e}")
 
-            # BACKUP: Try DexScreener boosted tokens if Birdeye failed
-            if not new_tokens:
-                print("  📡 Falling back to DexScreener boosted tokens...")
-                boosted = await self.dexscreener.get_boosted_tokens(limit=20)
+            # === SOURCE 2: DEXSCREENER (Organic only - NO paid promotions) ===
+            if enable_dexscreener:
+                print("  📡 Fetching tokens from DexScreener (organic only)...")
+                try:
+                    # Get ORGANIC tokens - filters out boosted (paid promotions)
+                    # Boosted tokens are usually scams!
+                    # Reduced to 20-25 for better quality focus
+                    dex_tokens = await self.dexscreener.get_organic_tokens(limit=25)
 
-                if boosted:
-                    # Enrich with price/liquidity data
-                    for token_data in boosted:
-                        token_address = token_data.get('address')
-                        if not token_address:
-                            continue
+                    if dex_tokens:
+                        # 🚫 Apply bluechip filter (using same constants as Jupiter)
+                        filtered_dex_tokens = []
+                        for token in dex_tokens:
+                            symbol = token.get('symbol', '').upper()
+                            addr = token.get('address')
+                            mcap = token.get('mcap', 0)
 
-                        profile = await self.dexscreener.get_token_profile(token_address)
-                        if not profile:
-                            continue
+                            # Skip bluechips by symbol, address, or market cap
+                            if symbol in BLUECHIP_SYMBOLS:
+                                logger.debug(f"[DEX] Filtered out bluechip: {symbol}")
+                                continue
+                            if addr in BLUECHIP_ADDRESSES:
+                                logger.debug(f"[DEX] Filtered out bluechip: {addr[:8]}...")
+                                continue
+                            if mcap and mcap > MAX_MARKET_CAP:
+                                logger.debug(f"[DEX] Filtered out high mcap: {symbol} (${mcap/1e6:.1f}M)")
+                                continue
 
-                        liquidity = profile.get('liquidity_usd', 0)
-                        volume_24h = profile.get('volume_24h', 0)
+                            filtered_dex_tokens.append(token)
 
-                        if liquidity >= min_liquidity and volume_24h >= min_volume:
-                            new_tokens.append({
-                                'address': token_address,
-                                'symbol': profile.get('symbol', 'UNKNOWN'),
-                                'name': profile.get('name', 'Unknown'),
-                                'liquidity_usd': liquidity,
-                                'volume_24h': volume_24h,
-                                'price_usd': profile.get('price_usd', 0),
-                            })
+                        print(f"  ✅ DexScreener: Found {len(filtered_dex_tokens)} tokens ({len(dex_tokens) - len(filtered_dex_tokens)} bluechips filtered)")
+                        logger.info(f"DexScreener returned {len(filtered_dex_tokens)} tokens after bluechip filter")
 
-                    if new_tokens:
-                        new_tokens.sort(key=lambda x: x.get('volume_24h', 0), reverse=True)
-                        print(f"  ✅ DexScreener: Found {len(new_tokens)} quality tokens")
-                        logger.info(f"Retrieved {len(new_tokens)} filtered tokens from DexScreener")
+                        for token in filtered_dex_tokens:
+                            addr = token.get('address')
+                            if addr and addr not in seen_addresses:
+                                all_tokens.append(token)
+                                seen_addresses.add(addr)
+                    else:
+                        print("  ⚠️  DexScreener returned no organic tokens")
+                        logger.warning("DexScreener organic tokens returned empty")
+                except Exception as e:
+                    logger.error(f"DexScreener error: {e}")
+                    print(f"  ❌ DexScreener error: {e}")
 
-            # LAST RESORT: Try Jupiter if both failed
-            if not new_tokens:
-                print("  📡 Falling back to Jupiter trending...")
-                new_tokens = await self.jupiter.get_trending_tokens(category='toptraded', limit=50)
+            # === SOURCE 3: BIRDEYE (OPTIMIZED for GAINERS - reduced CU usage) ===
+            # NOTE: Free tier is 30K CUs/month - we optimize by using SMALL limits
+            # Birdeye HAS THE BEST GAINER DATA (priceChange24h, priceChange1h sorting!)
+            # Cycling through: rank → liquidity → volume → priceChange24h → priceChange1h
+            if enable_birdeye and self.birdeye:
+                print("  📡 Fetching tokens from Birdeye (GAINERS focus)...")
+                try:
+                    # OPTIMIZED: Use limit=5 (was 12) to save CUs
+                    # The cycling in birdeye_client.py will rotate through:
+                    # - priceChange24h (24h GAINERS!)
+                    # - priceChange1h (1h MOVERS!)
+                    # - volume24hUSD (high interest)
+                    # - liquidity (liquid tokens)
+                    # - rank (trending)
+                    trending = await self.birdeye.get_trending_tokens(limit=5)  # Reduced from 12
 
-                if not new_tokens:
-                    print("  ⚠️  No trending tokens, trying recent...")
-                    new_tokens = await self.jupiter.get_recent_tokens(limit=50)
+                    # Skip new_listings call to save CUs (trending already has new movers)
+                    birdeye_tokens = trending or []
 
-                if not new_tokens:
-                    print("  ⚠️  No tokens from Jupiter, using safe fallback")
-                    logger.warning("All token sources failed, using safe fallback")
-                    # Fallback to established tokens as last resort
-                    new_tokens = [
-                        {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
-                        {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
-                    ]
-                else:
-                    print(f"  ✅ Found {len(new_tokens)} tokens from Jupiter (fallback)")
-                    logger.info(f"Retrieved {len(new_tokens)} tokens from Jupiter fallback")
+                    if birdeye_tokens:
+                        # 🚫 Apply bluechip filter (same as Jupiter/DexScreener)
+                        filtered_birdeye_tokens = []
+                        for token in birdeye_tokens:
+                            symbol = token.get('symbol', '').upper()
+                            addr = token.get('address')
+                            # Birdeye doesn't always have mcap, skip that filter
+
+                            # Skip bluechips by symbol or address
+                            if symbol in BLUECHIP_SYMBOLS:
+                                logger.debug(f"[BIRDEYE] Filtered out bluechip: {symbol}")
+                                continue
+                            if addr in BLUECHIP_ADDRESSES:
+                                logger.debug(f"[BIRDEYE] Filtered out bluechip: {addr[:8]}...")
+                                continue
+
+                            filtered_birdeye_tokens.append(token)
+
+                        print(f"  ✅ Birdeye: Found {len(filtered_birdeye_tokens)} GAINERS ({len(birdeye_tokens) - len(filtered_birdeye_tokens)} bluechips filtered)")
+                        logger.info(f"Birdeye returned {len(filtered_birdeye_tokens)} tokens after bluechip filter")
+
+                        for token in filtered_birdeye_tokens:
+                            addr = token.get('address')
+                            if addr and addr not in seen_addresses:
+                                all_tokens.append(token)
+                                seen_addresses.add(addr)
+                    else:
+                        print("  ⚠️  Birdeye returned no tokens")
+                        logger.warning("Birdeye returned no tokens")
+                except Exception as e:
+                    logger.error(f"Birdeye error: {e}")
+                    print(f"  ❌ Birdeye error: {e}")
+
+            # === SOURCE 4: COINGECKO (Top Gainers/Losers - FREE) ===
+            # CoinGecko provides top gainers across ALL chains with Solana filtering
+            # FREE tier: 30 calls/min (1,800/hour) - Perfect as supplement
+            # Cycling through: top_gainers → trending → top_losers
+            if enable_coingecko and self.coingecko:
+                print("  📡 Fetching tokens from CoinGecko (Top Gainers)...")
+                try:
+                    # Use cycling method to rotate discovery strategies
+                    coingecko_tokens = await self.coingecko.get_tokens_by_cycle(limit=10)
+
+                    if coingecko_tokens:
+                        # 🚫 Apply bluechip filter
+                        filtered_cg_tokens = []
+                        for token in coingecko_tokens:
+                            symbol = token.get('symbol', '').upper()
+                            addr = token.get('address')
+
+                            # Skip bluechips by symbol or address
+                            if symbol in BLUECHIP_SYMBOLS:
+                                logger.debug(f"[CG] Filtered out bluechip: {symbol}")
+                                continue
+                            if addr in BLUECHIP_ADDRESSES:
+                                logger.debug(f"[CG] Filtered out bluechip: {addr[:8]}...")
+                                continue
+
+                            filtered_cg_tokens.append(token)
+
+                        print(f"  ✅ CoinGecko: Found {len(filtered_cg_tokens)} GAINERS ({len(coingecko_tokens) - len(filtered_cg_tokens)} bluechips filtered)")
+                        logger.info(f"CoinGecko returned {len(filtered_cg_tokens)} tokens after bluechip filter")
+
+                        for token in filtered_cg_tokens:
+                            addr = token.get('address')
+                            if addr and addr not in seen_addresses:
+                                all_tokens.append(token)
+                                seen_addresses.add(addr)
+                    else:
+                        print("  ⚠️  CoinGecko returned no tokens")
+                        logger.warning("CoinGecko returned no tokens")
+                except Exception as e:
+                    logger.error(f"CoinGecko error: {e}")
+                    print(f"  ❌ CoinGecko error: {e}")
+
+            # === SOURCE 5: APIFY DEXSCREENER SCRAPER (BEST for GAINERS - ~$50/mo) ===
+            # Apify scraper gets SORTED DexScreener data by price change!
+            # This is the MAIN GAINER source - actual price movement sorting
+            # Cycling through: priceChange24h → priceChange6h → priceChange1h → volume → liquidity
+            if enable_apify and self.apify:
+                print("  📡 Fetching tokens from Apify DexScreener (SORTED BY GAINERS)...")
+                try:
+                    # Use cycling method to rotate discovery strategies
+                    # NOTE: Apify runs take 10-30 seconds, so this will slow down scans
+                    apify_tokens = self.apify.get_tokens_by_cycle(
+                        limit=20,
+                        min_volume=50000,
+                        min_liquidity=10000,
+                        time_frame="6h"
+                    )
+
+                    if apify_tokens:
+                        # 🚫 Apply bluechip filter
+                        filtered_apify_tokens = []
+                        for token in apify_tokens:
+                            symbol = token.get('symbol', '').upper()
+                            addr = token.get('address')
+                            mcap = token.get('mcap', 0)
+
+                            # Skip bluechips by symbol, address, or market cap
+                            if symbol in BLUECHIP_SYMBOLS:
+                                logger.debug(f"[APIFY] Filtered out bluechip: {symbol}")
+                                continue
+                            if addr in BLUECHIP_ADDRESSES:
+                                logger.debug(f"[APIFY] Filtered out bluechip: {addr[:8]}...")
+                                continue
+                            if mcap and mcap > MAX_MARKET_CAP:
+                                logger.debug(f"[APIFY] Filtered out high mcap: {symbol} (${mcap/1e6:.1f}M)")
+                                continue
+
+                            filtered_apify_tokens.append(token)
+
+                        print(f"  ✅ Apify: Found {len(filtered_apify_tokens)} SORTED GAINERS ({len(apify_tokens) - len(filtered_apify_tokens)} bluechips filtered)")
+                        logger.info(f"Apify returned {len(filtered_apify_tokens)} tokens after bluechip filter")
+
+                        for token in filtered_apify_tokens:
+                            addr = token.get('address')
+                            if addr and addr not in seen_addresses:
+                                all_tokens.append(token)
+                                seen_addresses.add(addr)
+                    else:
+                        print("  ⚠️  Apify returned no tokens")
+                        logger.warning("Apify returned no tokens")
+                except Exception as e:
+                    logger.error(f"Apify error: {e}")
+                    print(f"  ❌ Apify error: {e}")
+
+            # === COMBINE AND DEDUPLICATE ===
+            if not all_tokens:
+                print("  ⚠️  No tokens from any source - using safe fallback")
+                logger.warning("All token sources returned no tokens, using fallback")
+                all_tokens = [
+                    {'address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'},  # Bonk
+                    {'address': 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'},   # Jupiter
+                ]
+            else:
+                print(f"  ✅ Combined: {len(all_tokens)} unique tokens from {sum([enable_jupiter, enable_dexscreener, enable_birdeye])} sources")
+                logger.info(f"Combined {len(all_tokens)} unique tokens from enabled sources")
+
+            new_tokens = all_tokens
 
             # Get currently open positions
             if settings.is_paper_trading():
@@ -777,6 +1247,10 @@ class SolanaTradingBot:
                 open_positions = self.position_manager.open_positions
 
             print(f"Analyzing {len(new_tokens)} tokens ({len(open_positions)} positions already open)...")
+
+            # === PHASE 1: ANALYZE ALL TOKENS AND COLLECT SCORES ===
+            # Don't buy yet - just score all opportunities
+            scored_opportunities = []
 
             for token_data in new_tokens:
                 token_address = token_data.get('address')
@@ -797,19 +1271,55 @@ class SolanaTradingBot:
                     print(f"  ❌ No analysis data")
                     continue
 
-                print(f"  ✅ Analysis complete")
-
-                # Make trading decision
+                # Make trading decision (get score but don't buy yet)
                 decision = await self.make_trading_decision(analysis)
                 if decision:
-                    print(f"  🎯 TRADING OPPORTUNITY: {decision['symbol']}")
-                    logger.info(f"Trading opportunity found: {decision['symbol']}")
-                    await self.execute_trade(decision)
+                    # Calculate opportunity score based on multiple factors
+                    score = self._calculate_opportunity_score(decision, token_data)
+                    scored_opportunities.append({
+                        'decision': decision,
+                        'score': score,
+                        'source': token_data.get('source', 'unknown'),
+                        'address': token_address
+                    })
+                    print(f"  ✅ Opportunity found (score: {score:.2f})")
                 else:
                     print(f"  ⏸️  No trade signal")
 
-                # Delay between analyses
-                await asyncio.sleep(2)
+                # Small delay between analyses
+                await asyncio.sleep(0.5)
+
+            # === PHASE 2: SORT BY SCORE AND BUY BEST OPPORTUNITIES ===
+            if scored_opportunities:
+                # Sort by score (highest first)
+                scored_opportunities.sort(key=lambda x: x['score'], reverse=True)
+
+                print(f"\n🎯 Found {len(scored_opportunities)} opportunities, buying best ones...")
+                logger.info(f"Found {len(scored_opportunities)} opportunities, sorted by score")
+
+                # Buy top opportunities (respecting max open positions)
+                max_positions = settings.risk.max_open_positions
+                available_slots = max_positions - len(open_positions)
+
+                for i, opp in enumerate(scored_opportunities[:available_slots]):
+                    print(f"  🎯 #{i+1} BEST OPPORTUNITY (score {opp['score']:.2f}): {opp['decision']['symbol']} from {opp['source']}")
+                    logger.info(f"Trading opportunity #{i+1}: {opp['decision']['symbol']} (score: {opp['score']:.2f}, source: {opp['source']})")
+
+                    # Add score and source to decision before executing trade
+                    # This ensures Telegram notification shows the correct data
+                    opp['decision']['opportunity_score'] = opp['score']
+                    opp['decision']['token_source'] = opp['source']
+
+                    await self.execute_trade(opp['decision'])
+                    await asyncio.sleep(2)  # Delay between trades
+
+                # Log opportunities that didn't make the cut
+                if len(scored_opportunities) > available_slots:
+                    print(f"  ⏭️  Skipped {len(scored_opportunities) - available_slots} lower-scored opportunities (no slots)")
+                    for i, opp in enumerate(scored_opportunities[available_slots:]):
+                        logger.info(f"Skipped opportunity: {opp['decision']['symbol']} (score: {opp['score']:.2f}, source: {opp['source']}) - no slots available")
+            else:
+                print("  ℹ️  No trading opportunities found in this scan")
 
             print("✅ Scan cycle complete\n")
 
@@ -839,8 +1349,20 @@ class SolanaTradingBot:
         if not positions:
             return  # No positions to monitor
 
-        print(f"📊 Monitoring {len(positions)} open position(s)...")
-        logger.info(f"Monitoring {len(positions)} positions")
+        # Reduce log spam: only log header occasionally
+        # Monitor runs every 10 seconds, log header every 60 seconds
+        current_time = asyncio.get_event_loop().time()
+        if not hasattr(self, '_last_monitor_log_time'):
+            self._last_monitor_log_time = 0
+
+        should_log_header = (current_time - self._last_monitor_log_time) >= 60
+        if should_log_header:
+            print(f"📊 Monitoring {len(positions)} open position(s)...")
+            logger.info(f"Monitoring {len(positions)} positions")
+            self._last_monitor_log_time = current_time
+        else:
+            # Silent monitoring - just logger debug
+            logger.debug(f"Monitoring {len(positions)} positions")
 
         price_updates = {}
         liquidity_updates = {}  # Track liquidity for rug detection
@@ -970,26 +1492,53 @@ class SolanaTradingBot:
                 # Calculate current P&L
                 pnl_percent = ((current_price - position.entry_price) / position.entry_price) * 100
 
-                # Show price update with data source
-                symbol = profile.get('symbol', position.token_address[:8])
-                print(f"  💹 {symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%) [{data_source}]")
+                # REDUCE LOG SPAM: Only print if significant change or important event
+                # Track last printed price for each position
+                if not hasattr(self, '_last_printed_prices'):
+                    self._last_printed_prices = {}
 
-                # Check if close to stop loss or take profit/trailing stop
+                last_price = self._last_printed_prices.get(position.token_address, position.entry_price)
+                price_change_pct = abs((current_price - last_price) / last_price * 100) if last_price > 0 else 100
+
+                # Only print if:
+                # 1. Periodic header was shown (every 60 seconds), OR
+                # 2. Price changed >2% since last print, OR
+                # 3. Close to stop/target
+                symbol = profile.get('symbol', position.token_address[:8])
+
+                close_to_action = False
                 if position.use_trailing_stop:
-                    # Show trailing stop info
-                    print(f"  🔄 Trailing stop: ${position.trailing_stop_price:.8f} ({position.trailing_stop_percent:.0f}% below peak ${position.highest_price:.8f})")
-                    # Warn if close to trailing stop
-                    if current_price <= position.trailing_stop_price * 1.02:  # Within 2% of trailing stop
-                        print(f"  ⚠️  Warning: Close to trailing stop!")
+                    close_to_action = current_price <= position.trailing_stop_price * 1.02
                 else:
-                    # Fixed stop loss / take profit
                     sl_distance = ((current_price - position.stop_loss) / position.stop_loss) * 100
                     tp_distance = ((position.take_profit - current_price) / current_price) * 100
+                    close_to_action = sl_distance < 5 or tp_distance < 10
 
-                    if sl_distance < 5:  # Within 5% of stop loss
-                        print(f"  ⚠️  Warning: Close to stop loss (${position.stop_loss:.8f})")
-                    elif tp_distance < 10:  # Within 10% of take profit
-                        print(f"  🎯 Near take profit target (${position.take_profit:.8f})")
+                should_print = should_log_header or price_change_pct >= 2.0 or close_to_action
+
+                if should_print:
+                    print(f"  💹 {symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%) [{data_source}]")
+                    self._last_printed_prices[position.token_address] = current_price
+
+                    # Check if close to stop loss or take profit/trailing stop
+                    if position.use_trailing_stop:
+                        # Show trailing stop info
+                        print(f"  🔄 Trailing stop: ${position.trailing_stop_price:.8f} ({position.trailing_stop_percent:.0f}% below peak ${position.highest_price:.8f})")
+                        # Warn if close to trailing stop
+                        if current_price <= position.trailing_stop_price * 1.02:  # Within 2% of trailing stop
+                            print(f"  ⚠️  Warning: Close to trailing stop!")
+                    else:
+                        # Fixed stop loss / take profit
+                        sl_distance = ((current_price - position.stop_loss) / position.stop_loss) * 100
+                        tp_distance = ((position.take_profit - current_price) / current_price) * 100
+
+                        if sl_distance < 5:  # Within 5% of stop loss
+                            print(f"  ⚠️  Warning: Close to stop loss (${position.stop_loss:.8f})")
+                        elif tp_distance < 10:  # Within 10% of take profit
+                            print(f"  🎯 Near take profit target (${position.take_profit:.8f})")
+                else:
+                    # Silent monitoring - just debug log
+                    logger.debug(f"{symbol}: ${current_price:.8f} ({pnl_percent:+.2f}%)")
 
             except Exception as e:
                 logger.error(f"Error getting price for {position.token_address}: {e}")
@@ -1005,8 +1554,8 @@ class SolanaTradingBot:
         """Main trading loop."""
         logger.info("Starting main trading loop...")
 
-        scan_interval = 120  # 2 minutes (was working between 20:16 and 03:40)
-        monitor_interval = 20  # 20 seconds - 3x faster rug detection
+        scan_interval = 120  # 2 minutes - find new opportunities
+        monitor_interval = 10  # 10 seconds - CRITICAL for fast position monitoring and rug detection
 
         last_scan = 0
         last_monitor = 0
@@ -1025,8 +1574,8 @@ class SolanaTradingBot:
                     await self.monitor_positions()
                     last_monitor = current_time
 
-                # Sleep briefly
-                await asyncio.sleep(10)
+                # Sleep briefly - keep responsive
+                await asyncio.sleep(5)
 
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
@@ -1050,6 +1599,14 @@ class SolanaTradingBot:
 
         # Start health monitoring in background
         asyncio.create_task(self.health_checker.monitor())
+
+        # Start enhanced bot background monitoring (if enabled)
+        if self.enhanced_bot:
+            try:
+                await self.enhanced_bot.start_background_monitoring()
+                logger.info("✅ Enhanced bot background monitoring started (BTC/ETH/SOL market monitor)")
+            except Exception as e:
+                logger.error(f"Failed to start enhanced bot monitoring: {e}")
 
         # Run main loop
         await self.main_loop()
@@ -1075,7 +1632,8 @@ class SolanaTradingBot:
         await self.dexscreener.close()
         if self.birdeye:
             await self.birdeye.close()
-        await self.twitter.close()
+        if self.twitter:
+            await self.twitter.close()
 
         logger.info("Bot stopped successfully")
 

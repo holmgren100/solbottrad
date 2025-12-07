@@ -52,8 +52,14 @@ class LiveTradingEngine:
         self.starting_balance = 0.0  # Will be set from actual wallet on first check
         self.total_invested = 0.0  # Currently invested in open positions
 
-        # Strategy selector for age-based profit strategies
-        self.strategy_selector = StrategySelector()
+        # Age-based strategies (optional - can disable to use golden settings)
+        self.enable_age_strategies = os.getenv('ENABLE_AGE_BASED_STRATEGIES', 'false').lower() == 'true'
+        if self.enable_age_strategies:
+            self.strategy_selector = StrategySelector()
+            logger.info("✅ Age-based profit strategies ENABLED")
+        else:
+            self.strategy_selector = None
+            logger.info("🔒 Age-based strategies DISABLED - using golden settings")
 
         # Trailing stop settings (from environment) - used as fallback
         self.use_trailing_stop = os.getenv('USE_TRAILING_STOP', 'true').lower() == 'true'
@@ -267,9 +273,9 @@ class LiveTradingEngine:
             actual_tokens_received = swap_result.get('output_amount', 0)
             actual_sol_spent = swap_result.get('input_amount', amount_sol)
 
-            # Select strategy based on token age
+            # Select strategy based on token age (if age-based strategies enabled)
             strategy = None
-            if pair_created_at and pair_created_at > 0:
+            if self.enable_age_strategies and self.strategy_selector and pair_created_at and pair_created_at > 0:
                 strategy = self.strategy_selector.select_strategy(pair_created_at)
                 # Apply strategy-specific position size multiplier
                 adjusted_amount = actual_sol_spent * sol_price_usd * strategy.position_size_multiplier
@@ -278,11 +284,19 @@ class LiveTradingEngine:
                     f"Trailing: {strategy.trailing_stop_percent}% | "
                     f"Position multiplier: {strategy.position_size_multiplier}x"
                 )
+            elif pair_created_at:
+                logger.info("📊 Using golden settings (age-based strategies disabled)")
+                strategy = None
             else:
-                # No age data, use default established strategy
-                strategy = self.strategy_selector.established
-                adjusted_amount = actual_sol_spent * sol_price_usd
-                logger.info("📊 Using default strategy: established (no age data)")
+                # No age data
+                if self.enable_age_strategies and self.strategy_selector:
+                    strategy = self.strategy_selector.established
+                    adjusted_amount = actual_sol_spent * sol_price_usd
+                    logger.info("📊 Using default strategy: established (no age data)")
+                else:
+                    strategy = None
+                    adjusted_amount = actual_sol_spent * sol_price_usd
+                    logger.info("📊 Using golden settings (no age data)")
 
             # Open position in position manager
             position = self.position_manager.open_position(
