@@ -731,6 +731,10 @@ class SolanaTradingBot:
                 profile = analysis_data.get('profile', {}) if analysis_data else {}
                 pair_created_at = profile.get('pair_created_at', 0)
 
+                # Add opportunity_score to analysis_data so it gets tracked in position
+                if 'opportunity_score' in decision:
+                    analysis_data['opportunity_score'] = decision['opportunity_score']
+
                 result = await self.trading_engine.execute_buy(
                     token_address=decision['token_address'],
                     amount_usd=decision['position_size'],

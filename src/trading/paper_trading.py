@@ -810,6 +810,7 @@ class PaperTradingEngine:
         entry_liquidity = 0.0
         tracking_volume_24h = 0.0
         volume_1h = 0.0
+        opportunity_score = 0.0
         token_source = 'unknown'
         dex_platform = 'unknown'
 
@@ -818,6 +819,8 @@ class PaperTradingEngine:
             entry_liquidity = profile.get('liquidity_usd', 0.0)
             tracking_volume_24h = profile.get('volume_24h', 0.0)
             volume_1h = profile.get('volume_1h', 0.0)
+            # Extract opportunity score from analysis_data (calculated in main.py)
+            opportunity_score = analysis_data.get('opportunity_score', 0.0)
             token_source = profile.get('source', 'unknown')
             dex_platform = profile.get('dex_id', 'unknown')
 
@@ -835,6 +838,7 @@ class PaperTradingEngine:
             entry_liquidity=entry_liquidity,
             volume_24h=tracking_volume_24h,
             volume_1h=volume_1h,
+            opportunity_score=opportunity_score,  # Score from _calculate_opportunity_score()
             token_source=token_source,
             dex_platform=dex_platform
         )
