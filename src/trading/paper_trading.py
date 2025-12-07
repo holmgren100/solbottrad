@@ -10,6 +10,8 @@ import os
 import uuid
 from .position_manager import PositionManager, Trade, Position
 from .strategy_config import StrategySelector, StrategyProfile
+from .token_tracker import TokenPerformanceTracker
+from .token_filter import TokenFilter
 from ..blockchain.jupiter_executor import JupiterSwapExecutor
 from ..monitoring.logger import get_logger
 
@@ -146,6 +148,31 @@ class PaperTradingEngine:
         else:
             self.strategy_selector = None
             logger.info("🔒 Age-based strategies DISABLED - using golden settings")
+
+        # === TOKEN PERFORMANCE TRACKER (INFRASTRUCTURE - DISABLED BY DEFAULT) ===
+        # Track historical token performance for learning which tokens are consistent losers/winners
+        self.enable_token_tracker = os.getenv('ENABLE_TOKEN_TRACKER', 'false').lower() == 'true'
+        if self.enable_token_tracker:
+            self.token_tracker = TokenPerformanceTracker()
+            logger.info("✅ Token Performance Tracker ENABLED - learning from history")
+        else:
+            self.token_tracker = None
+            logger.info("📊 Token Performance Tracker DISABLED (infrastructure ready, enable when needed)")
+
+        # === BLACKLIST/WHITELIST FILTER (INFRASTRUCTURE - DISABLED BY DEFAULT) ===
+        # Manual filtering of known good/bad tokens
+        self.enable_token_filter = os.getenv('ENABLE_TOKEN_FILTER', 'false').lower() == 'true'
+        if self.enable_token_filter:
+            self.token_filter = TokenFilter()
+            logger.info("✅ Token Filter ENABLED - blacklist/whitelist active")
+        else:
+            self.token_filter = None
+            logger.info("🚫 Token Filter DISABLED (infrastructure ready, enable when needed)")
+
+        # Auto-blacklist settings (only if tracker enabled)
+        self.auto_blacklist_losers = os.getenv('AUTO_BLACKLIST_LOSERS', 'false').lower() == 'true'
+        self.auto_blacklist_min_trades = int(os.getenv('AUTO_BLACKLIST_MIN_TRADES', '3'))
+        self.auto_blacklist_max_winrate = float(os.getenv('AUTO_BLACKLIST_MAX_WINRATE', '0.0'))
 
         # Load previous state if exists
         self.load_state()
@@ -770,6 +797,62 @@ class PaperTradingEngine:
                 'available_capital': self.current_capital
             }
 
+        # === TOKEN FILTER CHECK (if enabled) ===
+        if self.enable_token_filter and self.token_filter:
+            # Check whitelist first (highest priority - always allow)
+            if self.token_filter.is_whitelisted(token_address):
+                logger.info(f"✅ WHITELISTED token {token_address[:8]}... - bypassing other filters")
+            # Check blacklist (manual - never trade)
+            elif self.token_filter.is_blacklisted(token_address):
+                if 'blacklisted' not in self.rejected_trades:
+                    self.rejected_trades['blacklisted'] = 0
+                self.rejected_trades['blacklisted'] += 1
+                logger.warning(f"❌ REJECTED {token_address[:8]}... - Token is BLACKLISTED")
+                return {
+                    'status': 'failed',
+                    'reason': 'blacklisted'
+                }
+
+        # === TOKEN PERFORMANCE TRACKER CHECK (if enabled) ===
+        if self.enable_token_tracker and self.token_tracker:
+            # Check if token is a known consistent loser
+            if self.token_tracker.should_avoid_token(
+                token_address,
+                min_trades=self.auto_blacklist_min_trades,
+                max_win_rate=self.auto_blacklist_max_winrate
+            ):
+                perf = self.token_tracker.get_performance(token_address)
+                if 'repeat_loser' not in self.rejected_trades:
+                    self.rejected_trades['repeat_loser'] = 0
+                self.rejected_trades['repeat_loser'] += 1
+                logger.warning(
+                    f"❌ REJECTED {token_address[:8]}... - REPEAT LOSER: "
+                    f"{perf.total_trades} trades, {perf.win_rate:.0f}% win rate, "
+                    f"avg {perf.avg_pnl_percent:+.1f}% PnL"
+                )
+
+                # Auto-blacklist if enabled
+                if self.auto_blacklist_losers and self.enable_token_filter and self.token_filter:
+                    self.token_filter.add_to_blacklist(
+                        token_address,
+                        reason=f"{perf.total_trades} trades, {perf.win_rate:.0f}% win"
+                    )
+
+                return {
+                    'status': 'failed',
+                    'reason': 'repeat_loser',
+                    'total_trades': perf.total_trades,
+                    'win_rate': perf.win_rate
+                }
+
+            # Log if token is a repeat winner
+            if self.token_tracker.is_repeat_winner(token_address):
+                perf = self.token_tracker.get_performance(token_address)
+                logger.info(
+                    f"✅ REPEAT WINNER: {token_address[:8]}... - "
+                    f"{perf.total_trades} trades, {perf.win_rate:.0f}% win rate!"
+                )
+
         # Check if we can open more positions
         if not self.position_manager.can_open_position():
             logger.warning("Max positions reached")
@@ -1051,6 +1134,16 @@ class PaperTradingEngine:
 
         # Record trade for ML training
         self._record_ml_trade(trade, position_snapshot, reason)
+
+        # === RECORD TO TOKEN PERFORMANCE TRACKER (if enabled) ===
+        if self.enable_token_tracker and self.token_tracker:
+            self.token_tracker.record_trade(
+                token_address=token_address,
+                pnl=trade.pnl,
+                pnl_percent=trade.pnl_percent,
+                symbol=trade.symbol,
+                timestamp=trade.timestamp
+            )
 
         # Add proceeds to capital (after fees)
         net_proceeds = trade.amount_usd - sell_fee
