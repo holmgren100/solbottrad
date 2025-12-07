@@ -808,23 +808,61 @@ class SolanaTradingBot:
         """
         score = 50.0  # Base score
 
-        # === FACTOR 1: PRICE CHANGE (HIGHEST PRIORITY FOR GAINERS) ===
+        # === FACTOR 1: PRICE CHANGE (CATCH PARABOLIC RUNNERS EARLY!) ===
+        # Strategy: Catch pumps at +20-100% (early momentum), NOT +150%+ (tops)
         # CoinGecko and Apify provide price_change_24h/6h/1h
         price_change_24h = token_data.get('price_change_24h', 0)
         price_change_6h = token_data.get('price_change_6h', 0)
         price_change_1h = token_data.get('price_change_1h', 0)
 
-        # Use best available price change metric (24h > 6h > 1h)
-        if price_change_24h > 0:
-            # Up to +30 points for high 24h gains
-            # +10% = +5pts, +50% = +25pts, +100%+ = +30pts
-            score += min(price_change_24h / 2, 30)
-        elif price_change_6h > 0:
-            # Up to +25 points for 6h gains (slightly less weight)
-            score += min(price_change_6h / 2.5, 25)
-        elif price_change_1h > 0:
-            # Up to +20 points for 1h gains (lowest weight)
-            score += min(price_change_1h / 3, 20)
+        # ⚙️ ADJUSTABLE PARAMETERS - Prioritize 1h data (best for catching momentum)
+        # Use 1h change first (real-time momentum), then 24h as fallback
+        if price_change_1h != 0:
+            # === 1H PRICE CHANGE SCORING ===
+            # ⚙️ EXTREME PUMP PENALTIES (tokens already topped - TOO LATE!)
+            if price_change_1h >= 400:
+                score -= 20              # 400%+ in 1h = EXTREME top - AVOID
+            elif price_change_1h >= 300:
+                score -= 15              # 300% in 1h = Very extreme - likely topped
+            elif price_change_1h >= 200:
+                score -= 10              # 200% in 1h = Too hot - getting late
+            elif price_change_1h >= 150:
+                score -= 5               # 150% in 1h = Getting toppy
+            # ⚙️ SWEET SPOT - Early parabolic runners (BEST ENTRIES!)
+            elif 50 <= price_change_1h < 100:
+                score += 30              # 50-100% in 1h = SWEET SPOT! ✅
+            elif 20 <= price_change_1h < 50:
+                score += 25              # 20-50% in 1h = Good early momentum
+            elif 10 <= price_change_1h < 20:
+                score += 15              # 10-20% in 1h = Building momentum
+            elif 5 <= price_change_1h < 10:
+                score += 10              # 5-10% in 1h = Early movement
+            elif 0 < price_change_1h < 5:
+                score += 5               # 0-5% in 1h = Slight gain
+            # Negative changes get no points (looking for GAINERS only)
+        elif price_change_24h != 0:
+            # === 24H PRICE CHANGE SCORING (Fallback if no 1h data) ===
+            # ⚙️ EXTREME PUMP PENALTIES (24h timeframe - adjust thresholds higher)
+            if price_change_24h >= 400:
+                score -= 20              # 400%+ in 24h = Too late
+            elif price_change_24h >= 300:
+                score -= 15              # 300% in 24h = Very late
+            elif price_change_24h >= 200:
+                score -= 10              # 200% in 24h = Late entry
+            elif price_change_24h >= 150:
+                score -= 5               # 150% in 24h = Getting late
+            # ⚙️ SWEET SPOT - Adjust for 24h timeframe (wider range OK)
+            elif 60 <= price_change_24h < 120:
+                score += 30              # 60-120% in 24h = SWEET SPOT! ✅
+            elif 30 <= price_change_24h < 60:
+                score += 25              # 30-60% in 24h = Good momentum
+            elif 15 <= price_change_24h < 30:
+                score += 15              # 15-30% in 24h = Building
+            elif 5 <= price_change_24h < 15:
+                score += 10              # 5-15% in 24h = Early movement
+            elif 0 < price_change_24h < 5:
+                score += 5               # 0-5% in 24h = Slight gain
+            # Negative changes get no points (looking for GAINERS only)
 
         # === FACTOR 2: LIQUIDITY (CRITICAL FOR EXITS) ===
         liquidity = decision.get('liquidity', 0) or token_data.get('liquidity', 0)
