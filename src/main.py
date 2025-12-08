@@ -98,6 +98,25 @@ class SolanaTradingBot:
         self.enable_multi_source_aggregator = os.getenv('ENABLE_MULTI_SOURCE_AGGREGATOR', 'false').lower() == 'true'
         self.enable_rugcheck_holder_analysis = os.getenv('ENABLE_RUGCHECK_HOLDER_ANALYSIS', 'false').lower() == 'true'
         self.enable_market_monitor = os.getenv('ENABLE_MARKET_MONITOR', 'false').lower() == 'true'
+
+        # === SCORING STRICTNESS MODULE (Gradual optimization) ===
+        # Controls how aggressive the scoring is in filtering tokens
+        # Level 1 or disabled = Current behavior (very open, good for data collection)
+        # Level 5 = Very strict (only early parabolic runners)
+        self.enable_scoring_strictness = os.getenv('ENABLE_SCORING_STRICTNESS', 'false').lower() == 'true'
+        self.scoring_strictness_level = int(os.getenv('SCORING_STRICTNESS_LEVEL', '1'))
+
+        if self.enable_scoring_strictness and self.scoring_strictness_level > 1:
+            logger.info(f"📊 Scoring Strictness ENABLED: Level {self.scoring_strictness_level}/5")
+            logger.info(
+                f"   Level {self.scoring_strictness_level} adjustments:\n"
+                f"   • Liquidity: {'Moderate' if self.scoring_strictness_level == 2 else 'Strict' if self.scoring_strictness_level >= 3 else 'Current'}\n"
+                f"   • Volume: {'Moderate' if self.scoring_strictness_level == 2 else 'Strict' if self.scoring_strictness_level >= 3 else 'Current'}\n"
+                f"   • Focus: {'Balanced' if self.scoring_strictness_level <= 3 else 'Early tokens only' if self.scoring_strictness_level >= 4 else 'Current'}"
+            )
+        else:
+            self.scoring_strictness_level = 1  # Force to 1 if disabled
+            logger.info("📊 Scoring Strictness DISABLED - using current open scoring (good for data collection)")
         self.enable_dynamic_scorer = os.getenv('ENABLE_DYNAMIC_SCORER', 'false').lower() == 'true'
 
         # Blockchain (core - always enabled)
@@ -865,25 +884,152 @@ class SolanaTradingBot:
             # Negative changes get no points (looking for GAINERS only)
 
         # === FACTOR 2: LIQUIDITY (CRITICAL FOR EXITS) ===
+        # ⚙️ STRICTNESS MODULE: Adjusts based on SCORING_STRICTNESS_LEVEL
+        # Data shows: $30-100k = 39.4% win, $500k+ = 2.4% win (inverted!)
         liquidity = decision.get('liquidity', 0) or token_data.get('liquidity', 0)
-        if liquidity > 100000:  # >$100k liquidity
-            score += 10
-        elif liquidity > 50000:  # >$50k liquidity
-            score += 5
-        elif liquidity > 30000:  # >$30k liquidity (minimum)
-            score += 2
-        else:
-            # Penalty for low liquidity (risky!)
-            score -= 5
+
+        # Apply strictness-based liquidity scoring
+        if self.scoring_strictness_level == 1:
+            # LEVEL 1: CURRENT (open, for data collection)
+            if liquidity > 100000:
+                score += 10
+            elif liquidity > 50000:
+                score += 5
+            elif liquidity > 30000:
+                score += 2
+            else:
+                score -= 5
+
+        elif self.scoring_strictness_level == 2:
+            # LEVEL 2: SLIGHTLY STRICTER (reduce reward for high liquidity)
+            if liquidity > 500000:
+                score += 5  # Less reward
+            elif liquidity > 100000:
+                score += 8
+            elif liquidity > 50000:
+                score += 10  # Reverse - mid range better
+            elif liquidity > 30000:
+                score += 8
+            else:
+                score -= 5
+
+        elif self.scoring_strictness_level == 3:
+            # LEVEL 3: MODERATE (reward golden range)
+            if liquidity > 500000:
+                score += 0  # No reward for high
+            elif liquidity > 200000:
+                score += 5
+            elif liquidity > 100000:
+                score += 10
+            elif 50000 <= liquidity <= 100000:
+                score += 15  # Golden range starts
+            elif 30000 <= liquidity < 50000:
+                score += 12  # Best range from data!
+            else:
+                score -= 5
+
+        elif self.scoring_strictness_level == 4:
+            # LEVEL 4: STRICT (penalize high, reward golden range)
+            if liquidity > 500000:
+                score -= 10  # PENALTY for already pumped
+            elif liquidity > 200000:
+                score += 0  # No reward
+            elif liquidity > 100000:
+                score += 5
+            elif 50000 <= liquidity <= 100000:
+                score += 18  # Golden range
+            elif 30000 <= liquidity < 50000:
+                score += 20  # BEST range! (39.4% win from data)
+            else:
+                score -= 5
+
+        elif self.scoring_strictness_level >= 5:
+            # LEVEL 5: VERY STRICT (heavily penalize high, max reward golden)
+            if liquidity > 500000:
+                score -= 20  # HEAVY PENALTY (2.4% win rate!)
+            elif liquidity > 200000:
+                score -= 5  # Mild penalty
+            elif liquidity > 100000:
+                score += 3
+            elif 50000 <= liquidity <= 100000:
+                score += 22  # High reward
+            elif 30000 <= liquidity < 50000:
+                score += 25  # MAXIMUM reward (proven golden spot!)
+            else:
+                score -= 8  # Stronger penalty for too low
 
         # === FACTOR 3: VOLUME (ACTIVITY INDICATOR) ===
+        # ⚙️ STRICTNESS MODULE: Adjusts based on SCORING_STRICTNESS_LEVEL
+        # Data shows: $100k-1M = 31.6% win, $500k-1M = 11.8% win, $5M+ = pumped
         volume_24h = decision.get('volume_24h', 0) or token_data.get('volume_24h', 0)
-        if volume_24h > 500000:  # >$500k volume
-            score += 8
-        elif volume_24h > 100000:  # >$100k volume
-            score += 5
-        elif volume_24h > 50000:  # >$50k volume
-            score += 2
+
+        # Apply strictness-based volume scoring
+        if self.scoring_strictness_level == 1:
+            # LEVEL 1: CURRENT (open, for data collection)
+            if volume_24h > 500000:
+                score += 8
+            elif volume_24h > 100000:
+                score += 5
+            elif volume_24h > 50000:
+                score += 2
+
+        elif self.scoring_strictness_level == 2:
+            # LEVEL 2: SLIGHTLY STRICTER (reduce reward for very high volume)
+            if volume_24h > 5000000:
+                score += 5  # Less reward for too high
+            elif volume_24h > 1000000:
+                score += 8
+            elif volume_24h > 500000:
+                score += 10  # Mid range better
+            elif volume_24h > 100000:
+                score += 8
+            elif volume_24h > 50000:
+                score += 3
+
+        elif self.scoring_strictness_level == 3:
+            # LEVEL 3: MODERATE (reward moderate volume, avoid extremes)
+            if volume_24h > 5000000:
+                score += 0  # No reward for very high
+            elif volume_24h > 2000000:
+                score += 5
+            elif volume_24h > 1000000:
+                score += 10
+            elif 500000 <= volume_24h <= 1000000:
+                score += 12  # Building momentum
+            elif 100000 <= volume_24h < 500000:
+                score += 15  # BEST range (31.6% win from data!)
+            elif volume_24h > 50000:
+                score += 5
+
+        elif self.scoring_strictness_level == 4:
+            # LEVEL 4: STRICT (penalize very high, reward golden range)
+            if volume_24h > 5000000:
+                score -= 10  # PENALTY for already peaked
+            elif volume_24h > 2000000:
+                score += 0  # No reward
+            elif volume_24h > 1000000:
+                score += 5
+            elif 500000 <= volume_24h <= 1000000:
+                score += 12
+            elif 100000 <= volume_24h < 500000:
+                score += 18  # Golden range for building tokens
+            elif volume_24h > 50000:
+                score += 8
+
+        elif self.scoring_strictness_level >= 5:
+            # LEVEL 5: VERY STRICT (heavily penalize extremes, max reward golden)
+            if volume_24h > 5000000:
+                score -= 15  # HEAVY PENALTY (too hot!)
+            elif volume_24h > 2000000:
+                score -= 5  # Mild penalty
+            elif volume_24h > 1000000:
+                score += 3
+            elif 500000 <= volume_24h <= 1000000:
+                score += 15
+            elif 100000 <= volume_24h < 500000:
+                score += 20  # MAXIMUM reward (proven best range!)
+            elif volume_24h > 50000:
+                score += 10
 
         # === FACTOR 4: SOURCE QUALITY (GAINERS SOURCES GET BONUS) ===
         source = token_data.get('source', 'unknown')
