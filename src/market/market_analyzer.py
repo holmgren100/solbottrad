@@ -141,133 +141,36 @@ class MarketAnalyzer:
 
     def analyze_token(self, profile: Dict) -> MarketSignal:
         """
-        Analyze a token and generate a market signal.
+        Analyze a token using SIMPLIFIED BINARY TIER 2 filters.
+
+        Replaces complex scoring with simple pass/fail logic.
 
         Args:
             profile: Token profile from DexScreener
 
         Returns:
-            MarketSignal with analysis results
+            MarketSignal with binary buy/hold decision
         """
-        token_address = profile['address']
-        price = profile['price_usd']
-        volume_24h = profile['volume_24h']
-        liquidity = profile['liquidity_usd']
-        price_change_24h = profile['price_change_24h']
+        token_address = profile.get('address', '')
+        price = profile.get('price_usd', 0)
+        volume_24h = profile.get('volume_24h', 0)
+        liquidity = profile.get('liquidity_usd', 0)
 
-        reasons = []
-        score = 0.5  # Neutral starting point
+        # === APPLY TIER 2 FILTERS (BINARY PASS/FAIL) ===
+        should_trade, reason = self.apply_tier2_filters(profile)
 
-        # Liquidity check
-        if liquidity < self.min_liquidity_usd:
-            reasons.append(f"Low liquidity (${liquidity:,.0f})")
-            signal_type = 'hold'
-            confidence = 0.3
-            return MarketSignal(
-                token_address=token_address,
-                signal_type=signal_type,
-                strength=0.0,
-                confidence=confidence,
-                reasons=reasons,
-                timestamp=datetime.now(),
-                price=price,
-                volume_24h=volume_24h,
-                liquidity=liquidity
-            )
-
-        # Check if token has actual trading volume
-        # CRITICAL: Tokens with 0 volume are usually honeypots (can't sell)
-        if volume_24h == 0:
-            reasons.append("No trading volume - likely honeypot/dead token")
-            signal_type = 'hold'
-            confidence = 0.1
-            return MarketSignal(
-                token_address=token_address,
-                signal_type=signal_type,
-                strength=0.0,
-                confidence=confidence,
-                reasons=reasons,
-                timestamp=datetime.now(),
-                price=price,
-                volume_24h=volume_24h,
-                liquidity=liquidity
-            )
-
-        # CRITICAL: Check minimum volume threshold
-        # BO honeypot fix: Must have minimum volume to ensure tradability
-        if volume_24h < self.min_volume_24h:
-            reasons.append(f"Insufficient volume (${volume_24h:,.0f} < ${self.min_volume_24h:,.0f})")
-            signal_type = 'hold'
-            confidence = 0.2
-            return MarketSignal(
-                token_address=token_address,
-                signal_type=signal_type,
-                strength=0.0,
-                confidence=confidence,
-                reasons=reasons,
-                timestamp=datetime.now(),
-                price=price,
-                volume_24h=volume_24h,
-                liquidity=liquidity
-            )
-
-        # Volume analysis - require minimum trading activity
-        volume_to_liquidity_ratio = volume_24h / liquidity if liquidity > 0 else 0
-
-        # Require at least SOME volume relative to liquidity
-        if volume_to_liquidity_ratio < 0.01:  # Less than 1% turnover = suspicious
-            reasons.append(f"Very low volume/liquidity ratio ({volume_to_liquidity_ratio:.4f}) - likely fake/honeypot")
-            score -= 0.3  # Heavy penalty
-        elif volume_to_liquidity_ratio > 0.5:
-            reasons.append(f"Strong volume/liquidity ratio ({volume_to_liquidity_ratio:.2f})")
-            score += 0.15
-        elif volume_to_liquidity_ratio < 0.1:
-            reasons.append(f"Low volume/liquidity ratio ({volume_to_liquidity_ratio:.2f})")
-            score -= 0.1
-
-        # Price change analysis
-        if price_change_24h > 20:
-            reasons.append(f"Strong upward momentum (+{price_change_24h:.1f}%)")
-            score += 0.2
-        elif price_change_24h > 5:
-            reasons.append(f"Positive price action (+{price_change_24h:.1f}%)")
-            score += 0.1
-        elif price_change_24h < -20:
-            reasons.append(f"Sharp decline ({price_change_24h:.1f}%)")
-            score -= 0.2
-        elif price_change_24h < -5:
-            reasons.append(f"Negative price action ({price_change_24h:.1f}%)")
-            score -= 0.1
-
-        # Liquidity assessment
-        if liquidity > 100000:
-            reasons.append(f"Excellent liquidity (${liquidity:,.0f})")
-            score += 0.1
-        elif liquidity > 50000:
-            reasons.append(f"Good liquidity (${liquidity:,.0f})")
-            score += 0.05
-
-        # Market cap analysis
-        market_cap = profile.get('market_cap', 0)
-        if 0 < market_cap < 1000000:  # Small cap
-            reasons.append("Small cap with growth potential")
-            score += 0.05
-
-        # Determine signal type and strength
-        # Lowered to 0.40 for aggressive buying (was 0.50, too conservative)
-        # We have good protections: trailing stops, partial profits, rug detection
-        if score >= 0.40:
+        if should_trade:
+            # PASSED ALL FILTERS → BUY SIGNAL
             signal_type = 'buy'
-            strength = min((score - 0.40) / 0.60, 1.0)
-            confidence = 0.5 + (strength * 0.4)
-        elif score <= 0.30:
-            signal_type = 'sell'
-            strength = min((0.30 - score) / 0.30, 1.0)
-            confidence = 0.6 + (strength * 0.3)
+            strength = 1.0  # Binary: either buy (1.0) or don't
+            confidence = 0.8  # High confidence when filters pass
+            reasons = [reason]  # "TIER2: ✅ All checks passed"
         else:
+            # FAILED FILTER → HOLD
             signal_type = 'hold'
             strength = 0.0
-            confidence = 0.5
+            confidence = 0.2  # Low confidence, don't trade
+            reasons = [reason]  # Specific failure reason from filter
 
         return MarketSignal(
             token_address=token_address,
