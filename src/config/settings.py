@@ -18,6 +18,12 @@ class TradingConfig:
     max_position_size: float
     min_liquidity_usd: float
     min_volume_24h: float
+    # === OPTION B: ENHANCED TIER 2 FILTERS ===
+    min_volume_liquidity_ratio: float  # Minimum volume/liquidity ratio (0.1 = 10% turnover)
+    max_entry_price: float             # Maximum token price for entry
+    min_tokens_per_dollar: float       # Minimum tokens per $1 (avoid too expensive)
+    max_tokens_per_dollar: float       # Maximum tokens per $1 (avoid worthless)
+    # === EXISTING CONFIG ===
     max_slippage_percent: float
     min_confidence_score: float
     paper_trading_mode: bool
@@ -61,8 +67,14 @@ class Settings:
         """Initialize settings from environment variables."""
         self.trading = TradingConfig(
             max_position_size=float(os.getenv('MAX_POSITION_SIZE', '100')),
+            # === TIER 2 FILTERS (OPTION B) ===
             min_liquidity_usd=float(os.getenv('MIN_ENTRY_LIQUIDITY', '40000')),
             min_volume_24h=float(os.getenv('MIN_24H_VOLUME', '20000')),
+            min_volume_liquidity_ratio=float(os.getenv('MIN_VOLUME_LIQUIDITY_RATIO', '0.1')),
+            max_entry_price=float(os.getenv('MAX_ENTRY_PRICE', '10.0')),
+            min_tokens_per_dollar=float(os.getenv('MIN_TOKENS_PER_DOLLAR', '0.1')),
+            max_tokens_per_dollar=float(os.getenv('MAX_TOKENS_PER_DOLLAR', '10000')),
+            # === OTHER SETTINGS ===
             max_slippage_percent=float(os.getenv('MAX_SLIPPAGE_PERCENT', '5')),
             min_confidence_score=float(os.getenv('MIN_CONFIDENCE_SCORE', '0.7')),
             paper_trading_mode=os.getenv('PAPER_TRADING_MODE', 'true').lower() == 'true',

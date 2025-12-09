@@ -28,16 +28,34 @@ class MarketSignal:
 class MarketAnalyzer:
     """Analyzes market data to generate trading signals."""
 
-    def __init__(self, min_liquidity_usd: float = 10000, min_volume_24h: float = 20000):
+    def __init__(
+        self,
+        min_liquidity_usd: float = 40000,
+        min_volume_24h: float = 20000,
+        min_volume_liquidity_ratio: float = 0.1,
+        max_entry_price: float = 10.0,
+        min_tokens_per_dollar: float = 0.1,
+        max_tokens_per_dollar: float = 10000
+    ):
         """
-        Initialize market analyzer.
+        Initialize market analyzer with OPTION B TIER 2 filters.
 
         Args:
-            min_liquidity_usd: Minimum liquidity threshold in USD
-            min_volume_24h: Minimum 24h volume threshold in USD
+            min_liquidity_usd: Minimum liquidity threshold in USD ($40k default)
+            min_volume_24h: Minimum 24h volume threshold in USD ($20k default)
+            min_volume_liquidity_ratio: Minimum volume/liquidity ratio (0.1 = 10% turnover)
+            max_entry_price: Maximum token price for entry ($10 max)
+            min_tokens_per_dollar: Minimum tokens per $1 (0.1 = avoid expensive tokens)
+            max_tokens_per_dollar: Maximum tokens per $1 (10k = avoid worthless tokens)
         """
+        # OPTION B: 6 COMPREHENSIVE FILTERS
         self.min_liquidity_usd = min_liquidity_usd
         self.min_volume_24h = min_volume_24h
+        self.min_volume_liquidity_ratio = min_volume_liquidity_ratio
+        self.max_entry_price = max_entry_price
+        self.min_tokens_per_dollar = min_tokens_per_dollar
+        self.max_tokens_per_dollar = max_tokens_per_dollar
+
         self.price_history: Dict[str, List[Dict]] = {}
 
     def record_price(self, token_address: str, price: float, volume: float):
@@ -61,6 +79,65 @@ class MarketAnalyzer:
         # Keep only last 100 data points per token
         if len(self.price_history[token_address]) > 100:
             self.price_history[token_address] = self.price_history[token_address][-100:]
+
+    def apply_tier2_filters(self, profile: Dict) -> tuple[bool, str]:
+        """
+        Apply OPTION B TIER 2 filters - 6 comprehensive binary checks.
+
+        This replaces complex scoring with simple pass/fail filters.
+
+        Args:
+            profile: Token profile with price, liquidity, volume data
+
+        Returns:
+            Tuple of (should_trade: bool, reason: str)
+        """
+        liquidity = profile.get('liquidity_usd', 0)
+        volume_24h = profile.get('volume_24h', 0)
+        price = profile.get('price_usd', 0)
+
+        # === FILTER 1: LIQUIDITY (blocks low-quality tokens) ===
+        if liquidity < self.min_liquidity_usd:
+            return False, f"TIER2: Liquidity ${liquidity:,.0f} < ${self.min_liquidity_usd:,.0f}"
+
+        # === FILTER 2: VOLUME - ZERO CHECK (blocks dead/honeypot tokens) ===
+        if volume_24h == 0:
+            return False, "TIER2: Zero volume - honeypot/dead token"
+
+        # === FILTER 3: VOLUME - MINIMUM THRESHOLD (blocks inactive tokens) ===
+        if volume_24h < self.min_volume_24h:
+            return False, f"TIER2: Volume ${volume_24h:,.0f} < ${self.min_volume_24h:,.0f}"
+
+        # === FILTER 4: VOLUME/LIQUIDITY RATIO (blocks wash trading) ===
+        ratio = volume_24h / liquidity if liquidity > 0 else 0
+        if ratio < self.min_volume_liquidity_ratio:
+            return False, f"TIER2: V/L ratio {ratio:.3f} < {self.min_volume_liquidity_ratio} - wash trading"
+
+        # === FILTER 5: PRICE - INVALID/TOO HIGH (blocks expensive tokens) ===
+        if price <= 0:
+            return False, "TIER2: Invalid price"
+
+        if price > self.max_entry_price:
+            return False, f"TIER2: Price ${price:.4f} > ${self.max_entry_price} - too expensive"
+
+        # === FILTER 6: TOKENS PER DOLLAR RANGE (blocks worthless/overpriced tokens) ===
+        tokens_per_dollar = 1 / price if price > 0 else 0
+
+        if tokens_per_dollar < self.min_tokens_per_dollar:
+            return False, f"TIER2: Only {tokens_per_dollar:.4f} tokens/$1 - too expensive"
+
+        if tokens_per_dollar > self.max_tokens_per_dollar:
+            return False, f"TIER2: {tokens_per_dollar:,.0f} tokens/$1 - worthless token"
+
+        # === ALL FILTERS PASSED ===
+        logger.info(
+            f"TIER2: ✅ PASS - Liq ${liquidity:,.0f}, "
+            f"Vol ${volume_24h:,.0f}, "
+            f"V/L {ratio:.2f}, "
+            f"Price ${price:.6f}, "
+            f"{tokens_per_dollar:.2f} tokens/$1"
+        )
+        return True, "TIER2: ✅ All checks passed"
 
     def analyze_token(self, profile: Dict) -> MarketSignal:
         """
