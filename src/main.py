@@ -160,9 +160,14 @@ class SolanaTradingBot:
         apify_api_token = os.getenv('APIFY_API_TOKEN')
         self.apify = ApifyDexScreenerClient(apify_api_token) if apify_api_token and apify_api_token != 'your_apify_api_token_here' else None
 
+        # Market Analyzer with OPTION B TIER 2 filters
         self.market_analyzer = MarketAnalyzer(
             min_liquidity_usd=settings.trading.min_liquidity_usd,
-            min_volume_24h=settings.trading.min_volume_24h
+            min_volume_24h=settings.trading.min_volume_24h,
+            min_volume_liquidity_ratio=settings.trading.min_volume_liquidity_ratio,
+            max_entry_price=settings.trading.max_entry_price,
+            min_tokens_per_dollar=settings.trading.min_tokens_per_dollar,
+            max_tokens_per_dollar=settings.trading.max_tokens_per_dollar
         )
 
         # Volume Analyzer (optional)
@@ -813,275 +818,6 @@ class SolanaTradingBot:
             )
             return False
 
-    def _calculate_opportunity_score(self, decision: dict, token_data: dict) -> float:
-        """
-        Calculate opportunity score based on multiple factors.
-        Higher score = better opportunity (prioritizes GAINERS).
-
-        Args:
-            decision: Trading decision dict with analyzed token info
-            token_data: Original token data from source (may contain price_change_24h, etc.)
-
-        Returns:
-            float: Score from 0-100 (higher = better opportunity)
-        """
-        score = 50.0  # Base score
-
-        # === FACTOR 1: PRICE CHANGE (CATCH PARABOLIC RUNNERS EARLY!) ===
-        # Strategy: Catch pumps at +20-100% (early momentum), NOT +150%+ (tops)
-        # CoinGecko and Apify provide price_change_24h/6h/1h
-        price_change_24h = token_data.get('price_change_24h', 0)
-        price_change_6h = token_data.get('price_change_6h', 0)
-        price_change_1h = token_data.get('price_change_1h', 0)
-
-        # ⚙️ ADJUSTABLE PARAMETERS - Prioritize 1h data (best for catching momentum)
-        # Use 1h change first (real-time momentum), then 24h as fallback
-        if price_change_1h != 0:
-            # === 1H PRICE CHANGE SCORING ===
-            # ⚙️ EXTREME PUMP PENALTIES (tokens already topped - TOO LATE!)
-            if price_change_1h >= 400:
-                score -= 20              # 400%+ in 1h = EXTREME top - AVOID
-            elif price_change_1h >= 300:
-                score -= 15              # 300% in 1h = Very extreme - likely topped
-            elif price_change_1h >= 200:
-                score -= 10              # 200% in 1h = Too hot - getting late
-            elif price_change_1h >= 150:
-                score -= 5               # 150% in 1h = Getting toppy
-            # ⚙️ SWEET SPOT - Early parabolic runners (BEST ENTRIES!)
-            elif 50 <= price_change_1h < 100:
-                score += 30              # 50-100% in 1h = SWEET SPOT! ✅
-            elif 20 <= price_change_1h < 50:
-                score += 25              # 20-50% in 1h = Good early momentum
-            elif 10 <= price_change_1h < 20:
-                score += 15              # 10-20% in 1h = Building momentum
-            elif 5 <= price_change_1h < 10:
-                score += 10              # 5-10% in 1h = Early movement
-            elif 0 < price_change_1h < 5:
-                score += 5               # 0-5% in 1h = Slight gain
-            # Negative changes get no points (looking for GAINERS only)
-        elif price_change_24h != 0:
-            # === 24H PRICE CHANGE SCORING (Fallback if no 1h data) ===
-            # ⚙️ EXTREME PUMP PENALTIES (24h timeframe - adjust thresholds higher)
-            if price_change_24h >= 400:
-                score -= 20              # 400%+ in 24h = Too late
-            elif price_change_24h >= 300:
-                score -= 15              # 300% in 24h = Very late
-            elif price_change_24h >= 200:
-                score -= 10              # 200% in 24h = Late entry
-            elif price_change_24h >= 150:
-                score -= 5               # 150% in 24h = Getting late
-            # ⚙️ SWEET SPOT - Adjust for 24h timeframe (wider range OK)
-            elif 60 <= price_change_24h < 120:
-                score += 30              # 60-120% in 24h = SWEET SPOT! ✅
-            elif 30 <= price_change_24h < 60:
-                score += 25              # 30-60% in 24h = Good momentum
-            elif 15 <= price_change_24h < 30:
-                score += 15              # 15-30% in 24h = Building
-            elif 5 <= price_change_24h < 15:
-                score += 10              # 5-15% in 24h = Early movement
-            elif 0 < price_change_24h < 5:
-                score += 5               # 0-5% in 24h = Slight gain
-            # Negative changes get no points (looking for GAINERS only)
-
-        # === FACTOR 2: LIQUIDITY (CRITICAL FOR EXITS) ===
-        # ⚙️ STRICTNESS MODULE: Adjusts based on SCORING_STRICTNESS_LEVEL
-        # Data shows: $30-100k = 39.4% win, $500k+ = 2.4% win (inverted!)
-        liquidity = decision.get('liquidity', 0) or token_data.get('liquidity', 0)
-
-        # Apply strictness-based liquidity scoring
-        if self.scoring_strictness_level == 1:
-            # LEVEL 1: CURRENT (open, for data collection)
-            if liquidity > 100000:
-                score += 10
-            elif liquidity > 50000:
-                score += 5
-            elif liquidity > 30000:
-                score += 2
-            else:
-                score -= 5
-
-        elif self.scoring_strictness_level == 2:
-            # LEVEL 2: SLIGHTLY STRICTER (reduce reward for high liquidity)
-            if liquidity > 500000:
-                score += 5  # Less reward
-            elif liquidity > 100000:
-                score += 8
-            elif liquidity > 50000:
-                score += 10  # Reverse - mid range better
-            elif liquidity > 30000:
-                score += 8
-            else:
-                score -= 5
-
-        elif self.scoring_strictness_level == 3:
-            # LEVEL 3: MODERATE (reward golden range)
-            if liquidity > 500000:
-                score += 0  # No reward for high
-            elif liquidity > 200000:
-                score += 5
-            elif liquidity > 100000:
-                score += 10
-            elif 50000 <= liquidity <= 100000:
-                score += 15  # Golden range starts
-            elif 30000 <= liquidity < 50000:
-                score += 12  # Best range from data!
-            else:
-                score -= 5
-
-        elif self.scoring_strictness_level == 4:
-            # LEVEL 4: STRICT (penalize high, reward golden range)
-            if liquidity > 500000:
-                score -= 10  # PENALTY for already pumped
-            elif liquidity > 200000:
-                score += 0  # No reward
-            elif liquidity > 100000:
-                score += 5
-            elif 50000 <= liquidity <= 100000:
-                score += 18  # Golden range
-            elif 30000 <= liquidity < 50000:
-                score += 20  # BEST range! (39.4% win from data)
-            else:
-                score -= 5
-
-        elif self.scoring_strictness_level >= 5:
-            # LEVEL 5: VERY STRICT (heavily penalize high, max reward golden)
-            if liquidity > 500000:
-                score -= 20  # HEAVY PENALTY (2.4% win rate!)
-            elif liquidity > 200000:
-                score -= 5  # Mild penalty
-            elif liquidity > 100000:
-                score += 3
-            elif 50000 <= liquidity <= 100000:
-                score += 22  # High reward
-            elif 30000 <= liquidity < 50000:
-                score += 25  # MAXIMUM reward (proven golden spot!)
-            else:
-                score -= 8  # Stronger penalty for too low
-
-        # === FACTOR 3: VOLUME (ACTIVITY INDICATOR) ===
-        # ⚙️ STRICTNESS MODULE: Adjusts based on SCORING_STRICTNESS_LEVEL
-        # Data shows: $100k-1M = 31.6% win, $500k-1M = 11.8% win, $5M+ = pumped
-        volume_24h = decision.get('volume_24h', 0) or token_data.get('volume_24h', 0)
-
-        # Apply strictness-based volume scoring
-        if self.scoring_strictness_level == 1:
-            # LEVEL 1: CURRENT (open, for data collection)
-            if volume_24h > 500000:
-                score += 8
-            elif volume_24h > 100000:
-                score += 5
-            elif volume_24h > 50000:
-                score += 2
-
-        elif self.scoring_strictness_level == 2:
-            # LEVEL 2: SLIGHTLY STRICTER (reduce reward for very high volume)
-            if volume_24h > 5000000:
-                score += 5  # Less reward for too high
-            elif volume_24h > 1000000:
-                score += 8
-            elif volume_24h > 500000:
-                score += 10  # Mid range better
-            elif volume_24h > 100000:
-                score += 8
-            elif volume_24h > 50000:
-                score += 3
-
-        elif self.scoring_strictness_level == 3:
-            # LEVEL 3: MODERATE (reward moderate volume, avoid extremes)
-            if volume_24h > 5000000:
-                score += 0  # No reward for very high
-            elif volume_24h > 2000000:
-                score += 5
-            elif volume_24h > 1000000:
-                score += 10
-            elif 500000 <= volume_24h <= 1000000:
-                score += 12  # Building momentum
-            elif 100000 <= volume_24h < 500000:
-                score += 15  # BEST range (31.6% win from data!)
-            elif volume_24h > 50000:
-                score += 5
-
-        elif self.scoring_strictness_level == 4:
-            # LEVEL 4: STRICT (penalize very high, reward golden range)
-            if volume_24h > 5000000:
-                score -= 10  # PENALTY for already peaked
-            elif volume_24h > 2000000:
-                score += 0  # No reward
-            elif volume_24h > 1000000:
-                score += 5
-            elif 500000 <= volume_24h <= 1000000:
-                score += 12
-            elif 100000 <= volume_24h < 500000:
-                score += 18  # Golden range for building tokens
-            elif volume_24h > 50000:
-                score += 8
-
-        elif self.scoring_strictness_level >= 5:
-            # LEVEL 5: VERY STRICT (heavily penalize extremes, max reward golden)
-            if volume_24h > 5000000:
-                score -= 15  # HEAVY PENALTY (too hot!)
-            elif volume_24h > 2000000:
-                score -= 5  # Mild penalty
-            elif volume_24h > 1000000:
-                score += 3
-            elif 500000 <= volume_24h <= 1000000:
-                score += 15
-            elif 100000 <= volume_24h < 500000:
-                score += 20  # MAXIMUM reward (proven best range!)
-            elif volume_24h > 50000:
-                score += 10
-
-        # === FACTOR 4: SOURCE QUALITY (GAINERS SOURCES GET BONUS) ===
-        source = token_data.get('source', 'unknown')
-        if source == 'coingecko':
-            # CoinGecko sorted by price_change = high-quality GAINERS
-            score += 8
-        elif source == 'apify':
-            # Apify DexScreener scraper = BEST sorted data
-            score += 10
-        elif source == 'birdeye':
-            # Birdeye GAINERS focus
-            score += 6
-        elif source == 'dexscreener':
-            # DexScreener organic tokens (not sorted)
-            score += 3
-        elif source == 'jupiter':
-            # Jupiter tokens (reliable but not GAINERS-focused)
-            score += 2
-
-        # === FACTOR 5: MARKET CAP (LOWER = MORE MOONSHOT POTENTIAL) ===
-        market_cap = token_data.get('market_cap', 0)
-        if 0 < market_cap < 500000:  # Under $500k = micro-cap moonshot
-            score += 12
-        elif 500000 <= market_cap < 1000000:  # $500k-$1M
-            score += 8
-        elif 1000000 <= market_cap < 5000000:  # $1M-$5M
-            score += 5
-        elif 5000000 <= market_cap < 10000000:  # $5M-$10M
-            score += 2
-        # Above $10M = no bonus (harder to 10x-100x)
-
-        # === FACTOR 6: MARKET CAP RANK (COINGECKO SPECIFIC) ===
-        # Lower rank number = more established, higher rank = more speculative
-        market_cap_rank = token_data.get('market_cap_rank', 999)
-        if market_cap_rank > 500:  # Unranked or very low cap
-            score += 5  # More moonshot potential
-        elif market_cap_rank > 200:
-            score += 3
-
-        # === FACTOR 7: VOLUME/LIQUIDITY RATIO (HEALTHY METRIC) ===
-        if liquidity > 0 and volume_24h > 0:
-            vol_liq_ratio = volume_24h / liquidity
-            if 0.5 <= vol_liq_ratio <= 3.0:
-                # Healthy ratio (volume comparable to liquidity)
-                score += 5
-            elif vol_liq_ratio > 3.0:
-                # High volume vs liquidity = strong momentum
-                score += 8
-
-        # Cap score at 100 (perfect opportunity)
-        return min(score, 100.0)
-
     async def scan_tokens(self):
         """Scan for new tokens and trading opportunities."""
         # Check if trading is paused
@@ -1394,11 +1130,20 @@ class SolanaTradingBot:
 
             print(f"Analyzing {len(new_tokens)} tokens ({len(open_positions)} positions already open)...")
 
-            # === PHASE 1: ANALYZE ALL TOKENS AND COLLECT SCORES ===
-            # Don't buy yet - just score all opportunities
-            scored_opportunities = []
+            # === SIMPLIFIED: ANALYZE AND BUY IMMEDIATELY (NO SCORING) ===
+            # Binary TIER 2 filters: pass → buy, fail → skip
+            max_positions = settings.risk.max_open_positions
+            available_slots = max_positions - len(open_positions)
+            trades_executed = 0
 
             for token_data in new_tokens:
+                # Stop if we've filled all available slots
+                if trades_executed >= available_slots:
+                    remaining = len(new_tokens) - new_tokens.index(token_data)
+                    print(f"  ⏭️  Skipping remaining {remaining} tokens (all position slots filled)")
+                    logger.info(f"Skipping {remaining} tokens - max positions reached")
+                    break
+
                 token_address = token_data.get('address')
                 if not token_address:
                     logger.warning(f"Skipping token with no address: {token_data}")
@@ -1411,61 +1156,36 @@ class SolanaTradingBot:
 
                 print(f"  → Analyzing {token_address[:8]}...")
 
-                # Analyze token (trending tokens don't have price data, will fetch from DexScreener)
+                # Analyze token (TIER 2 filters applied in market_analyzer)
                 analysis = await self.analyze_token(token_address)
                 if not analysis:
                     print(f"  ❌ No analysis data")
                     continue
 
-                # Make trading decision (get score but don't buy yet)
+                # Make trading decision (binary: buy or hold)
                 decision = await self.make_trading_decision(analysis)
                 if decision:
-                    # Calculate opportunity score based on multiple factors
-                    score = self._calculate_opportunity_score(decision, token_data)
-                    scored_opportunities.append({
-                        'decision': decision,
-                        'score': score,
-                        'source': token_data.get('source', 'unknown'),
-                        'address': token_address
-                    })
-                    print(f"  ✅ Opportunity found (score: {score:.2f})")
+                    # PASSED TIER 2 FILTERS → BUY IMMEDIATELY (no scoring!)
+                    source = token_data.get('source', 'unknown')
+                    print(f"  ✅ BUY SIGNAL: {decision.get('symbol', 'N/A')} from {source}")
+                    logger.info(f"TIER2 PASS: {decision.get('symbol')} from {source} - executing trade")
+
+                    # Add source to decision for tracking
+                    decision['token_source'] = source
+
+                    await self.execute_trade(decision)
+                    trades_executed += 1
+                    await asyncio.sleep(2)  # Delay between trades
                 else:
-                    print(f"  ⏸️  No trade signal")
+                    print(f"  ⏸️  No trade signal (TIER2 filter rejection)")
 
                 # Small delay between analyses
                 await asyncio.sleep(0.5)
 
-            # === PHASE 2: SORT BY SCORE AND BUY BEST OPPORTUNITIES ===
-            if scored_opportunities:
-                # Sort by score (highest first)
-                scored_opportunities.sort(key=lambda x: x['score'], reverse=True)
-
-                print(f"\n🎯 Found {len(scored_opportunities)} opportunities, buying best ones...")
-                logger.info(f"Found {len(scored_opportunities)} opportunities, sorted by score")
-
-                # Buy top opportunities (respecting max open positions)
-                max_positions = settings.risk.max_open_positions
-                available_slots = max_positions - len(open_positions)
-
-                for i, opp in enumerate(scored_opportunities[:available_slots]):
-                    print(f"  🎯 #{i+1} BEST OPPORTUNITY (score {opp['score']:.2f}): {opp['decision']['symbol']} from {opp['source']}")
-                    logger.info(f"Trading opportunity #{i+1}: {opp['decision']['symbol']} (score: {opp['score']:.2f}, source: {opp['source']})")
-
-                    # Add score and source to decision before executing trade
-                    # This ensures Telegram notification shows the correct data
-                    opp['decision']['opportunity_score'] = opp['score']
-                    opp['decision']['token_source'] = opp['source']
-
-                    await self.execute_trade(opp['decision'])
-                    await asyncio.sleep(2)  # Delay between trades
-
-                # Log opportunities that didn't make the cut
-                if len(scored_opportunities) > available_slots:
-                    print(f"  ⏭️  Skipped {len(scored_opportunities) - available_slots} lower-scored opportunities (no slots)")
-                    for i, opp in enumerate(scored_opportunities[available_slots:]):
-                        logger.info(f"Skipped opportunity: {opp['decision']['symbol']} (score: {opp['score']:.2f}, source: {opp['source']}) - no slots available")
+            if trades_executed == 0:
+                print("  ℹ️  No trading opportunities found in this scan (all tokens filtered)")
             else:
-                print("  ℹ️  No trading opportunities found in this scan")
+                print(f"  ✅ Executed {trades_executed} trade(s) this cycle")
 
             print("✅ Scan cycle complete\n")
 
