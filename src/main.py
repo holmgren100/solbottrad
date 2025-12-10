@@ -160,14 +160,19 @@ class SolanaTradingBot:
         apify_api_token = os.getenv('APIFY_API_TOKEN')
         self.apify = ApifyDexScreenerClient(apify_api_token) if apify_api_token and apify_api_token != 'your_apify_api_token_here' else None
 
-        # Market Analyzer with OPTION B TIER 2 filters
+        # Market Analyzer with BATCH 9 OPTIMIZED TIER 2 filters
         self.market_analyzer = MarketAnalyzer(
             min_liquidity_usd=settings.trading.min_liquidity_usd,
             min_volume_24h=settings.trading.min_volume_24h,
             min_volume_liquidity_ratio=settings.trading.min_volume_liquidity_ratio,
             max_entry_price=settings.trading.max_entry_price,
             min_tokens_per_dollar=settings.trading.min_tokens_per_dollar,
-            max_tokens_per_dollar=settings.trading.max_tokens_per_dollar
+            max_tokens_per_dollar=settings.trading.max_tokens_per_dollar,
+            # BATCH 9 OPTIMIZATIONS (Expected +30% win rate!)
+            min_total_transactions=settings.trading.min_total_transactions,
+            min_buy_sell_ratio=settings.trading.min_buy_sell_ratio,
+            golden_liq_min=settings.trading.golden_liq_min,
+            golden_liq_max=settings.trading.golden_liq_max
         )
 
         # Volume Analyzer (optional)

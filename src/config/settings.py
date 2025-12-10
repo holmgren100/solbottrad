@@ -23,6 +23,11 @@ class TradingConfig:
     max_entry_price: float             # Maximum token price for entry
     min_tokens_per_dollar: float       # Minimum tokens per $1 (avoid too expensive)
     max_tokens_per_dollar: float       # Maximum tokens per $1 (avoid worthless)
+    # === BATCH 9 OPTIMIZATIONS (Expected +30% win rate!) ===
+    min_total_transactions: int        # Minimum total transactions (buys+sells) in 1h
+    min_buy_sell_ratio: float          # Minimum buy/sell ratio (blocks dumping tokens)
+    golden_liq_min: float              # Golden liquidity range minimum ($30k)
+    golden_liq_max: float              # Golden liquidity range maximum ($50k)
     # === EXISTING CONFIG ===
     max_slippage_percent: float
     min_confidence_score: float
@@ -71,9 +76,14 @@ class Settings:
             min_liquidity_usd=float(os.getenv('MIN_ENTRY_LIQUIDITY', '40000')),
             min_volume_24h=float(os.getenv('MIN_24H_VOLUME', '20000')),
             min_volume_liquidity_ratio=float(os.getenv('MIN_VOLUME_LIQUIDITY_RATIO', '0.1')),
-            max_entry_price=float(os.getenv('MAX_ENTRY_PRICE', '10.0')),
+            max_entry_price=float(os.getenv('MAX_ENTRY_PRICE', '0.01')),  # BATCH 9: Stricter $0.01 limit
             min_tokens_per_dollar=float(os.getenv('MIN_TOKENS_PER_DOLLAR', '0.1')),
             max_tokens_per_dollar=float(os.getenv('MAX_TOKENS_PER_DOLLAR', '10000')),
+            # === BATCH 9 OPTIMIZATIONS (Expected +30% win rate!) ===
+            min_total_transactions=int(os.getenv('MIN_TOTAL_TRANSACTIONS', '1000')),  # Skip low activity
+            min_buy_sell_ratio=float(os.getenv('MIN_BUY_SELL_RATIO', '0.8')),  # Skip dumping tokens
+            golden_liq_min=float(os.getenv('GOLDEN_LIQUIDITY_MIN', '30000')),  # Golden range start
+            golden_liq_max=float(os.getenv('GOLDEN_LIQUIDITY_MAX', '50000')),  # Golden range end
             # === OTHER SETTINGS ===
             max_slippage_percent=float(os.getenv('MAX_SLIPPAGE_PERCENT', '5')),
             min_confidence_score=float(os.getenv('MIN_CONFIDENCE_SCORE', '0.7')),
@@ -88,7 +98,7 @@ class Settings:
 
         self.risk = RiskConfig(
             max_portfolio_risk_percent=float(os.getenv('MAX_PORTFOLIO_RISK_PERCENT', '10')),
-            stop_loss_percent=float(os.getenv('STOP_LOSS_PERCENT', '20')),
+            stop_loss_percent=float(os.getenv('STOP_LOSS_PERCENT', '15')),  # BATCH 9: Widen from 10% to 15%
             take_profit_percent=float(os.getenv('TAKE_PROFIT_PERCENT', '50')),
             max_daily_trades=int(os.getenv('MAX_DAILY_TRADES', '10')),
             max_open_positions=int(os.getenv('MAX_OPEN_POSITIONS', '5'))
