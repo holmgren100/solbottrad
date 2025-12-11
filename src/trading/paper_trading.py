@@ -45,6 +45,11 @@ class PaperTradingEngine:
         self.frozen_price_minutes = float(os.getenv('FROZEN_PRICE_MINUTES', '15'))
         self.min_position_liquidity = float(os.getenv('MIN_POSITION_LIQUIDITY', '5000.0'))
 
+        # BATCH 10 FIX: Early liquidity drop detection
+        # Analysis showed 100% of trades ended with 0 exit liquidity - exit earlier!
+        self.liquidity_drop_threshold = float(os.getenv('LIQUIDITY_DROP_THRESHOLD', '50.0'))  # Exit if liq drops >50%
+        self.enable_liquidity_monitoring = os.getenv('ENABLE_LIQUIDITY_MONITORING', 'true').lower() == 'true'
+
         # Read trailing stop settings from environment
         self.use_trailing_stop = os.getenv('USE_TRAILING_STOP', 'true').lower() == 'true'
         self.trailing_stop_percent = float(os.getenv('TRAILING_STOP_PERCENT', '10.0'))
@@ -201,6 +206,16 @@ class PaperTradingEngine:
             )
         else:
             logger.warning("⚠️  Rug protection DISABLED")
+
+        # BATCH 10: Log liquidity monitoring settings
+        if self.enable_liquidity_monitoring:
+            logger.info(
+                f"💧 LIQUIDITY MONITORING ENABLED (BATCH 10 FIX): "
+                f"Exit if liquidity drops >{self.liquidity_drop_threshold:.0f}% from entry\n"
+                f"   🎯 Prevents 100% liquidity drop issue (exits early at -50% instead of waiting for -100%)"
+            )
+        else:
+            logger.warning("⚠️  Liquidity monitoring DISABLED")
 
         # Log partial profit taking settings
         if self.partial_profit_enabled:
@@ -1222,6 +1237,44 @@ class PaperTradingEngine:
                     f"Potential loss: ${potential_loss:.2f}"
                 )
                 await self.execute_sell(token_address, exit_price, reason='low_liquidity')
+
+        # BATCH 10 FIX: Check for rapid liquidity drops (exit before 100% drop!)
+        # Analysis showed ALL trades ended with 0 exit liquidity - catch them early!
+        if self.enable_liquidity_monitoring:
+            for token_address in list(self.position_manager.open_positions.keys()):
+                position = self.position_manager.get_position(token_address)
+                if not position:
+                    continue
+
+                # Calculate liquidity drop % from entry
+                if position.entry_liquidity > 0 and position.current_liquidity > 0:
+                    liquidity_drop_pct = ((position.entry_liquidity - position.current_liquidity) / position.entry_liquidity) * 100
+
+                    # Early exit if liquidity dropping fast (prevents 100% drop!)
+                    if liquidity_drop_pct >= self.liquidity_drop_threshold:
+                        exit_price = position.current_price if position.current_price > 0 else 0.00000001
+
+                        logger.warning(
+                            f"⚠️ LIQUIDITY DROP ALERT: {token_address[:8]}... "
+                            f"Entry liq: ${position.entry_liquidity:,.0f}, "
+                            f"Current liq: ${position.current_liquidity:,.0f}, "
+                            f"Drop: {liquidity_drop_pct:.1f}% (threshold: {self.liquidity_drop_threshold:.0f}%)\n"
+                            f"   🚨 EXITING EARLY to avoid 100% liquidity drop!"
+                        )
+
+                        await self.execute_sell(token_address, exit_price, reason='liquidity_drop')
+
+                # Also check if liquidity went to 0 (catch even if entry_liquidity was 0)
+                elif position.current_liquidity == 0 and position.entry_liquidity > 0:
+                    exit_price = position.current_price if position.current_price > 0 else 0.00000001
+
+                    logger.error(
+                        f"🚨 LIQUIDITY DISAPPEARED: {token_address[:8]}... "
+                        f"Entry liq: ${position.entry_liquidity:,.0f} → Current: $0\n"
+                        f"   💀 Token completely rugged!"
+                    )
+
+                    await self.execute_sell(token_address, exit_price, reason='liquidity_disappeared')
 
         # Check for partial profit milestones (before stop loss/take profit checks)
         if self.partial_profit_enabled:
