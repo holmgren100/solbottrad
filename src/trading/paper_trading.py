@@ -1101,6 +1101,92 @@ class PaperTradingEngine:
         config_trailing_activation_percent = self.trailing_stop_activation  # From .env
         config_trailing_distance_percent = trailing_stop_percent  # Same as trailing_stop_percent
 
+        # === EXTRACT 455-TRADE OPTIMIZATION DATA FOR CSV TRACKING ===
+        # Position sizing tracking
+        golden_range_bonus = False
+        preferred_price_bonus = False
+        if self.prefer_golden_range and analysis_data:
+            profile = analysis_data.get('profile', {})
+            liquidity = profile.get('liquidity_usd', 0)
+            if self.golden_liq_min <= liquidity <= self.golden_liq_max:
+                golden_range_bonus = True
+        if price <= self.preferred_price_max:
+            preferred_price_bonus = True
+
+        # LP lock data (extract from markets)
+        lp_locked = False
+        lp_burned = False
+        lp_lock_days = 0
+        if analysis_data:
+            markets = analysis_data.get('markets', [])
+            if markets:
+                main_market = markets[0]
+                lp_data = main_market.get('lp', {})
+                lp_burned = lp_data.get('lpBurned', False)
+                lp_locked_pct = float(lp_data.get('lpLockedPct', 0))
+                lp_locked = lp_locked_pct >= 100 or lp_burned
+                lp_lock_timestamp = lp_data.get('lpLockedUntil', 0)
+                if lp_lock_timestamp > 0:
+                    from datetime import timedelta
+                    lock_until = datetime.fromtimestamp(lp_lock_timestamp / 1000)
+                    lp_lock_days = (lock_until - datetime.now()).days
+
+        # Holder concentration data
+        top10_concentration = 0.0
+        top1_concentration = 0.0
+        if analysis_data:
+            top_holders = analysis_data.get('top_holders', [])
+            if top_holders and len(top_holders) >= 10:
+                top10_concentration = sum(float(h.get('pct', 0)) * 100 for h in top_holders[:10])
+            if top_holders:
+                top1_concentration = float(top_holders[0].get('pct', 0)) * 100
+
+        # Contract safety data
+        mint_authority_active = False
+        freeze_authority_active = False
+        ownership_renounced = True
+        if analysis_data:
+            raw_report = analysis_data.get('raw_report', {})
+            token_meta = raw_report.get('tokenMeta', {})
+            mint_authority = token_meta.get('mintAuthority')
+            freeze_authority = token_meta.get('freezeAuthority')
+            update_authority = token_meta.get('updateAuthority')
+            mint_authority_active = bool(mint_authority and mint_authority != 'null' and mint_authority != '')
+            freeze_authority_active = bool(freeze_authority and freeze_authority != 'null' and freeze_authority != '')
+            ownership_renounced = not bool(update_authority and update_authority != 'null' and update_authority != '')
+
+        # Momentum data (extract from profile)
+        price_change_1h = 0.0
+        price_change_5min = 0.0
+        price_change_1min = 0.0
+        volume_spike_ratio = 0.0
+        buy_pressure_recent = 0.0
+        momentum_accelerating = False
+        if analysis_data:
+            profile = analysis_data.get('profile', {})
+            price_change_1h = profile.get('price_change_h1', 0.0)
+            price_change_5min = profile.get('price_change_m5', 0.0)
+            price_change_1min = profile.get('price_change_m1', 0.0)
+
+            # Calculate volume spike ratio
+            volume_1h_calc = profile.get('volume_1h', 0)
+            volume_24h_calc = profile.get('volume', 0)
+            volume_24h_avg_hourly = volume_24h_calc / 24 if volume_24h_calc > 0 else 0
+            volume_spike_ratio = volume_1h_calc / volume_24h_avg_hourly if volume_24h_avg_hourly > 0 else 0
+
+            # Calculate buy pressure
+            txns_m5_buys = profile.get('txns_m5_buys', profile.get('txns_h1_buys', 0) / 12)
+            txns_m5_sells = profile.get('txns_m5_sells', profile.get('txns_h1_sells', 0) / 12)
+            total_recent = txns_m5_buys + txns_m5_sells
+            buy_pressure_recent = (txns_m5_buys / total_recent * 100) if total_recent > 0 else 0
+
+            # Check momentum acceleration
+            if price_change_1h > 0 and price_change_5min > 0 and price_change_1min > 0:
+                rate_1m = price_change_1min / 1
+                rate_5m = price_change_5min / 5
+                rate_1h = price_change_1h / 60
+                momentum_accelerating = (rate_1m >= rate_5m >= rate_1h)
+
         # Open position with actual entry price (after slippage) and enhanced tracking data
         position = self.position_manager.open_position(
             token_address=token_address,
@@ -1124,7 +1210,26 @@ class PaperTradingEngine:
             config_trailing_distance_percent=config_trailing_distance_percent,
             # Transaction activity tracking
             txns_h1_buys=txns_h1_buys,
-            txns_h1_sells=txns_h1_sells
+            txns_h1_sells=txns_h1_sells,
+            # === 455-TRADE OPTIMIZATION TRACKING ===
+            position_multiplier_applied=position_multiplier,
+            golden_range_bonus=golden_range_bonus,
+            preferred_price_bonus=preferred_price_bonus,
+            original_position_size=original_amount,
+            lp_locked=lp_locked,
+            lp_burned=lp_burned,
+            lp_lock_days=lp_lock_days,
+            top10_concentration=top10_concentration,
+            top1_concentration=top1_concentration,
+            mint_authority_active=mint_authority_active,
+            freeze_authority_active=freeze_authority_active,
+            ownership_renounced=ownership_renounced,
+            price_change_1h=price_change_1h,
+            price_change_5min=price_change_5min,
+            price_change_1min=price_change_1min,
+            volume_spike_ratio=volume_spike_ratio,
+            buy_pressure_recent=buy_pressure_recent,
+            momentum_accelerating=momentum_accelerating
         )
 
         if not position:

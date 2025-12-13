@@ -76,6 +76,34 @@ class Position:
     txns_h1_sells: int = 0  # Sell transactions in last hour
     txns_h1_total: int = 0  # Total transactions in last hour
 
+    # === 455-TRADE OPTIMIZATION: POSITION SIZING ===
+    position_multiplier_applied: float = 1.0  # Combined multiplier applied to position
+    golden_range_bonus: bool = False  # In golden liquidity range ($30-75k)
+    preferred_price_bonus: bool = False  # In preferred price range (<$0.0005)
+    original_position_size: float = 0.0  # Original size before multipliers
+
+    # === 455-TRADE OPTIMIZATION: LP LOCK & RUG PREVENTION ===
+    lp_locked: bool = False  # Is LP locked?
+    lp_burned: bool = False  # Is LP burned?
+    lp_lock_days: int = 0  # Days LP is locked for
+
+    # === 455-TRADE OPTIMIZATION: HOLDER CONCENTRATION ===
+    top10_concentration: float = 0.0  # Top 10 holders % (0-100)
+    top1_concentration: float = 0.0  # Top 1 holder % (0-100)
+
+    # === 455-TRADE OPTIMIZATION: CONTRACT SAFETY ===
+    mint_authority_active: bool = False  # Has mint authority (dangerous)
+    freeze_authority_active: bool = False  # Has freeze authority (dangerous)
+    ownership_renounced: bool = True  # Ownership renounced (safe)
+
+    # === 455-TRADE OPTIMIZATION: MOMENTUM DATA ===
+    price_change_1h: float = 0.0  # 1h price change % at entry
+    price_change_5min: float = 0.0  # 5min price change % at entry
+    price_change_1min: float = 0.0  # 1min price change % at entry
+    volume_spike_ratio: float = 0.0  # 1h volume / avg ratio
+    buy_pressure_recent: float = 0.0  # Recent buy pressure % (0-100)
+    momentum_accelerating: bool = False  # Is momentum accelerating?
+
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
         # Track if price ACTUALLY changed (not just API responding with same price)
@@ -242,6 +270,34 @@ class Trade:
     txns_h1_sells: int = 0  # Sell transactions in last hour
     buy_sell_ratio: float = 0.0  # Ratio of buys to sells
 
+    # === 455-TRADE OPTIMIZATION: POSITION SIZING ===
+    position_multiplier_applied: float = 1.0  # Combined multiplier applied to position
+    golden_range_bonus: bool = False  # In golden liquidity range ($30-75k)
+    preferred_price_bonus: bool = False  # In preferred price range (<$0.0005)
+    original_position_size: float = 0.0  # Original size before multipliers
+
+    # === 455-TRADE OPTIMIZATION: LP LOCK & RUG PREVENTION ===
+    lp_locked: bool = False  # Is LP locked?
+    lp_burned: bool = False  # Is LP burned?
+    lp_lock_days: int = 0  # Days LP is locked for
+
+    # === 455-TRADE OPTIMIZATION: HOLDER CONCENTRATION ===
+    top10_concentration: float = 0.0  # Top 10 holders % (0-100)
+    top1_concentration: float = 0.0  # Top 1 holder % (0-100)
+
+    # === 455-TRADE OPTIMIZATION: CONTRACT SAFETY ===
+    mint_authority_active: bool = False  # Has mint authority (dangerous)
+    freeze_authority_active: bool = False  # Has freeze authority (dangerous)
+    ownership_renounced: bool = True  # Ownership renounced (safe)
+
+    # === 455-TRADE OPTIMIZATION: MOMENTUM DATA ===
+    price_change_1h: float = 0.0  # 1h price change % at entry
+    price_change_5min: float = 0.0  # 5min price change % at entry
+    price_change_1min: float = 0.0  # 1min price change % at entry
+    volume_spike_ratio: float = 0.0  # 1h volume / avg ratio
+    buy_pressure_recent: float = 0.0  # Recent buy pressure % (0-100)
+    momentum_accelerating: bool = False  # Is momentum accelerating?
+
 
 class PositionManager:
     """Manages trading positions and portfolio."""
@@ -293,7 +349,31 @@ class PositionManager:
         config_trailing_distance_percent: float = 0.0,
         # Transaction activity tracking
         txns_h1_buys: int = 0,
-        txns_h1_sells: int = 0
+        txns_h1_sells: int = 0,
+        # === 455-TRADE OPTIMIZATION TRACKING ===
+        # Position sizing
+        position_multiplier_applied: float = 1.0,
+        golden_range_bonus: bool = False,
+        preferred_price_bonus: bool = False,
+        original_position_size: float = 0.0,
+        # LP lock & rug prevention
+        lp_locked: bool = False,
+        lp_burned: bool = False,
+        lp_lock_days: int = 0,
+        # Holder concentration
+        top10_concentration: float = 0.0,
+        top1_concentration: float = 0.0,
+        # Contract safety
+        mint_authority_active: bool = False,
+        freeze_authority_active: bool = False,
+        ownership_renounced: bool = True,
+        # Momentum data
+        price_change_1h: float = 0.0,
+        price_change_5min: float = 0.0,
+        price_change_1min: float = 0.0,
+        volume_spike_ratio: float = 0.0,
+        buy_pressure_recent: float = 0.0,
+        momentum_accelerating: bool = False
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -374,7 +454,26 @@ class PositionManager:
             # Transaction activity tracking
             txns_h1_buys=txns_h1_buys,
             txns_h1_sells=txns_h1_sells,
-            txns_h1_total=txns_h1_buys + txns_h1_sells
+            txns_h1_total=txns_h1_buys + txns_h1_sells,
+            # === 455-TRADE OPTIMIZATION TRACKING ===
+            position_multiplier_applied=position_multiplier_applied,
+            golden_range_bonus=golden_range_bonus,
+            preferred_price_bonus=preferred_price_bonus,
+            original_position_size=original_position_size,
+            lp_locked=lp_locked,
+            lp_burned=lp_burned,
+            lp_lock_days=lp_lock_days,
+            top10_concentration=top10_concentration,
+            top1_concentration=top1_concentration,
+            mint_authority_active=mint_authority_active,
+            freeze_authority_active=freeze_authority_active,
+            ownership_renounced=ownership_renounced,
+            price_change_1h=price_change_1h,
+            price_change_5min=price_change_5min,
+            price_change_1min=price_change_1min,
+            volume_spike_ratio=volume_spike_ratio,
+            buy_pressure_recent=buy_pressure_recent,
+            momentum_accelerating=momentum_accelerating
         )
 
         self.open_positions[token_address] = position
@@ -492,7 +591,26 @@ class PositionManager:
             # === TRANSACTION ACTIVITY ===
             txns_h1_buys=position.txns_h1_buys,
             txns_h1_sells=position.txns_h1_sells,
-            buy_sell_ratio=buy_sell_ratio
+            buy_sell_ratio=buy_sell_ratio,
+            # === 455-TRADE OPTIMIZATION TRACKING ===
+            position_multiplier_applied=position.position_multiplier_applied,
+            golden_range_bonus=position.golden_range_bonus,
+            preferred_price_bonus=position.preferred_price_bonus,
+            original_position_size=position.original_position_size,
+            lp_locked=position.lp_locked,
+            lp_burned=position.lp_burned,
+            lp_lock_days=position.lp_lock_days,
+            top10_concentration=position.top10_concentration,
+            top1_concentration=position.top1_concentration,
+            mint_authority_active=position.mint_authority_active,
+            freeze_authority_active=position.freeze_authority_active,
+            ownership_renounced=position.ownership_renounced,
+            price_change_1h=position.price_change_1h,
+            price_change_5min=position.price_change_5min,
+            price_change_1min=position.price_change_1min,
+            volume_spike_ratio=position.volume_spike_ratio,
+            buy_pressure_recent=position.buy_pressure_recent,
+            momentum_accelerating=position.momentum_accelerating
         )
 
         self.closed_trades.append(sell_trade)
@@ -607,7 +725,26 @@ class PositionManager:
             # === TRANSACTION ACTIVITY ===
             txns_h1_buys=position.txns_h1_buys,
             txns_h1_sells=position.txns_h1_sells,
-            buy_sell_ratio=buy_sell_ratio
+            buy_sell_ratio=buy_sell_ratio,
+            # === 455-TRADE OPTIMIZATION TRACKING ===
+            position_multiplier_applied=position.position_multiplier_applied,
+            golden_range_bonus=position.golden_range_bonus,
+            preferred_price_bonus=position.preferred_price_bonus,
+            original_position_size=position.original_position_size,
+            lp_locked=position.lp_locked,
+            lp_burned=position.lp_burned,
+            lp_lock_days=position.lp_lock_days,
+            top10_concentration=position.top10_concentration,
+            top1_concentration=position.top1_concentration,
+            mint_authority_active=position.mint_authority_active,
+            freeze_authority_active=position.freeze_authority_active,
+            ownership_renounced=position.ownership_renounced,
+            price_change_1h=position.price_change_1h,
+            price_change_5min=position.price_change_5min,
+            price_change_1min=position.price_change_1min,
+            volume_spike_ratio=position.volume_spike_ratio,
+            buy_pressure_recent=position.buy_pressure_recent,
+            momentum_accelerating=position.momentum_accelerating
         )
 
         self.closed_trades.append(sell_trade)
@@ -1113,6 +1250,29 @@ class PositionManager:
             'Txns H1 Buys',         # Buy transactions in last hour
             'Txns H1 Sells',        # Sell transactions in last hour
             'Buy/Sell Ratio',       # Ratio of buys to sells
+            # === 455-TRADE OPTIMIZATION: POSITION SIZING ===
+            'Position Multiplier',  # Combined multiplier applied
+            'Golden Range Bonus',   # In golden liquidity range
+            'Preferred Price Bonus', # In preferred price range
+            'Original Position Size', # Size before multipliers
+            # === 455-TRADE OPTIMIZATION: LP LOCK & RUG PREVENTION ===
+            'LP Locked',            # Is LP locked?
+            'LP Burned',            # Is LP burned?
+            'LP Lock Days',         # Days LP is locked for
+            # === 455-TRADE OPTIMIZATION: HOLDER CONCENTRATION ===
+            'Top 10 Holders (%)',   # Top 10 holders concentration
+            'Top 1 Holder (%)',     # Top 1 holder concentration
+            # === 455-TRADE OPTIMIZATION: CONTRACT SAFETY ===
+            'Mint Authority',       # Has mint authority (dangerous)
+            'Freeze Authority',     # Has freeze authority (dangerous)
+            'Ownership Renounced',  # Ownership renounced (safe)
+            # === 455-TRADE OPTIMIZATION: MOMENTUM DATA ===
+            'Price Change 1h (%)',  # 1h price change at entry
+            'Price Change 5min (%)', # 5min price change at entry
+            'Price Change 1min (%)', # 1min price change at entry
+            'Volume Spike Ratio',   # 1h volume / avg ratio
+            'Buy Pressure (%)',     # Recent buy pressure
+            'Momentum Accelerating', # Is momentum accelerating?
             # === OUTCOME DATA ===
             'PnL ($)',
             'PnL (%)',
@@ -1209,6 +1369,31 @@ class PositionManager:
                 txns_sells = getattr(trade, 'txns_h1_sells', 0)
                 buy_sell_ratio = getattr(trade, 'buy_sell_ratio', 0)
 
+                # === 455-TRADE OPTIMIZATION DATA (with defaults for old trades) ===
+                # Position sizing
+                pos_multiplier = getattr(trade, 'position_multiplier_applied', 1.0)
+                golden_bonus = getattr(trade, 'golden_range_bonus', False)
+                price_bonus = getattr(trade, 'preferred_price_bonus', False)
+                orig_pos_size = getattr(trade, 'original_position_size', 0.0)
+                # LP lock & rug prevention
+                lp_locked = getattr(trade, 'lp_locked', False)
+                lp_burned = getattr(trade, 'lp_burned', False)
+                lp_days = getattr(trade, 'lp_lock_days', 0)
+                # Holder concentration
+                top10_conc = getattr(trade, 'top10_concentration', 0.0)
+                top1_conc = getattr(trade, 'top1_concentration', 0.0)
+                # Contract safety
+                mint_auth = getattr(trade, 'mint_authority_active', False)
+                freeze_auth = getattr(trade, 'freeze_authority_active', False)
+                ownership_ren = getattr(trade, 'ownership_renounced', True)
+                # Momentum data
+                price_1h = getattr(trade, 'price_change_1h', 0.0)
+                price_5m = getattr(trade, 'price_change_5min', 0.0)
+                price_1m = getattr(trade, 'price_change_1min', 0.0)
+                vol_spike = getattr(trade, 'volume_spike_ratio', 0.0)
+                buy_press = getattr(trade, 'buy_pressure_recent', 0.0)
+                momentum_accel = getattr(trade, 'momentum_accelerating', False)
+
                 # Write row
                 writer.writerow({
                     'Date': trade.timestamp.strftime('%Y-%m-%d'),
@@ -1250,6 +1435,29 @@ class PositionManager:
                     'Txns H1 Buys': f"{txns_buys}",
                     'Txns H1 Sells': f"{txns_sells}",
                     'Buy/Sell Ratio': f"{buy_sell_ratio:.2f}",
+                    # === 455-TRADE OPTIMIZATION: POSITION SIZING ===
+                    'Position Multiplier': f"{pos_multiplier:.2f}",
+                    'Golden Range Bonus': 'YES' if golden_bonus else 'NO',
+                    'Preferred Price Bonus': 'YES' if price_bonus else 'NO',
+                    'Original Position Size': f"{orig_pos_size:.2f}",
+                    # === 455-TRADE OPTIMIZATION: LP LOCK & RUG PREVENTION ===
+                    'LP Locked': 'YES' if lp_locked else 'NO',
+                    'LP Burned': 'YES' if lp_burned else 'NO',
+                    'LP Lock Days': f"{lp_days}",
+                    # === 455-TRADE OPTIMIZATION: HOLDER CONCENTRATION ===
+                    'Top 10 Holders (%)': f"{top10_conc:.1f}",
+                    'Top 1 Holder (%)': f"{top1_conc:.1f}",
+                    # === 455-TRADE OPTIMIZATION: CONTRACT SAFETY ===
+                    'Mint Authority': 'YES' if mint_auth else 'NO',
+                    'Freeze Authority': 'YES' if freeze_auth else 'NO',
+                    'Ownership Renounced': 'YES' if ownership_ren else 'NO',
+                    # === 455-TRADE OPTIMIZATION: MOMENTUM DATA ===
+                    'Price Change 1h (%)': f"{price_1h:+.2f}",
+                    'Price Change 5min (%)': f"{price_5m:+.2f}",
+                    'Price Change 1min (%)': f"{price_1m:+.2f}",
+                    'Volume Spike Ratio': f"{vol_spike:.2f}",
+                    'Buy Pressure (%)': f"{buy_press:.1f}",
+                    'Momentum Accelerating': 'YES' if momentum_accel else 'NO',
                     # === OUTCOME DATA ===
                     'PnL ($)': f"{trade.pnl:+.2f}",
                     'PnL (%)': f"{trade.pnl_percent:+.2f}",
