@@ -1127,7 +1127,6 @@ class PaperTradingEngine:
                 lp_locked = lp_locked_pct >= 100 or lp_burned
                 lp_lock_timestamp = lp_data.get('lpLockedUntil', 0)
                 if lp_lock_timestamp > 0:
-                    from datetime import timedelta
                     lock_until = datetime.fromtimestamp(lp_lock_timestamp / 1000)
                     lp_lock_days = (lock_until - datetime.now()).days
 
