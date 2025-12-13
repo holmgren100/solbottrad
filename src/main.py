@@ -163,6 +163,7 @@ class SolanaTradingBot:
         # Market Analyzer with BATCH 9 OPTIMIZED TIER 2 filters
         self.market_analyzer = MarketAnalyzer(
             min_liquidity_usd=settings.trading.min_liquidity_usd,
+            max_liquidity_usd=settings.trading.max_liquidity_usd,
             min_volume_24h=settings.trading.min_volume_24h,
             min_volume_liquidity_ratio=settings.trading.min_volume_liquidity_ratio,
             max_entry_price=settings.trading.max_entry_price,
@@ -172,7 +173,16 @@ class SolanaTradingBot:
             min_total_transactions=settings.trading.min_total_transactions,
             min_buy_sell_ratio=settings.trading.min_buy_sell_ratio,
             golden_liq_min=settings.trading.golden_liq_min,
-            golden_liq_max=settings.trading.golden_liq_max
+            golden_liq_max=settings.trading.golden_liq_max,
+            # 455-TRADE MOMENTUM FILTERS (Now using .env values!)
+            enable_momentum_filters=settings.trading.enable_momentum_filters,
+            min_price_change_1h=settings.trading.min_price_change_1h,
+            min_price_change_5min=settings.trading.min_price_change_5min,
+            min_price_change_1min=settings.trading.min_price_change_1min,
+            max_price_change_1h=settings.trading.max_price_change_1h,
+            min_volume_spike_ratio=settings.trading.min_volume_spike_ratio,
+            min_buy_pressure_recent=settings.trading.min_buy_pressure_recent,
+            require_acceleration=settings.trading.require_acceleration
         )
 
         # Volume Analyzer (optional)
