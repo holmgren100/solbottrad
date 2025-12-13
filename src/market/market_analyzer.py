@@ -30,52 +30,84 @@ class MarketAnalyzer:
 
     def __init__(
         self,
-        min_liquidity_usd: float = 40000,
+        min_liquidity_usd: float = 30000,
+        max_liquidity_usd: float = 100000,
         min_volume_24h: float = 20000,
         min_volume_liquidity_ratio: float = 0.1,
-        max_entry_price: float = 0.01,  # BATCH 9: Stricter $0.01 limit
+        max_entry_price: float = 0.001,
         min_tokens_per_dollar: float = 0.1,
         max_tokens_per_dollar: float = 10000,
         # BATCH 9 OPTIMIZATIONS
         min_total_transactions: int = 1000,  # Skip low activity tokens
         min_buy_sell_ratio: float = 0.8,     # Skip dumping tokens
         golden_liq_min: float = 30000,       # Golden range minimum
-        golden_liq_max: float = 50000        # Golden range maximum
+        golden_liq_max: float = 75000,       # Golden range maximum
+        # MOMENTUM FILTERS (455-trade research)
+        enable_momentum_filters: bool = True,
+        min_price_change_1h: float = 10,
+        min_price_change_5min: float = 3,
+        min_price_change_1min: float = 1,
+        max_price_change_1h: float = 50,
+        min_volume_spike_ratio: float = 3.0,
+        min_buy_pressure_recent: float = 60,
+        require_acceleration: bool = True
     ):
         """
-        Initialize market analyzer with BATCH 9 OPTIMIZED TIER 2 filters.
+        Initialize market analyzer with 455-TRADE OPTIMIZED filters.
 
-        BATCH 9 IMPROVEMENTS (Expected +30% win rate):
+        BATCH 9 + 455-TRADE IMPROVEMENTS (Path to 60%+ win rate):
         - Activity filter: Skip tokens with <1000 txns/hour (+12-15% win rate)
         - Buy/sell ratio: Skip dumping tokens (<0.8 ratio) (+3-5% win rate)
-        - Stricter price: Max $0.01 instead of $10 (+3-5% win rate)
-        - Golden liquidity: Prioritize $30-50k range (+5-8% win rate)
+        - Stricter price: Max $0.001 instead of $0.01 (+3-5% win rate)
+        - Golden liquidity: Prioritize $30-75k range (+5-8% win rate)
+        - Momentum filters: Require climbing tokens (+8-12% win rate)
+        - Max liquidity cap: Block $200k+ crowded tokens (+2-4% win rate)
 
         Args:
-            min_liquidity_usd: Minimum liquidity threshold in USD ($40k default)
-            min_volume_24h: Minimum 24h volume threshold in USD ($20k default)
-            min_volume_liquidity_ratio: Minimum volume/liquidity ratio (0.1 = 10% turnover)
-            max_entry_price: Maximum token price for entry ($0.01 max - BATCH 9 stricter!)
-            min_tokens_per_dollar: Minimum tokens per $1 (0.1 = avoid expensive tokens)
-            max_tokens_per_dollar: Maximum tokens per $1 (10k = avoid worthless tokens)
-            min_total_transactions: Minimum total txns in 1h (1000 = active tokens only)
-            min_buy_sell_ratio: Minimum buy/sell ratio (0.8 = avoid dumps)
-            golden_liq_min: Golden liquidity range start ($30k)
-            golden_liq_max: Golden liquidity range end ($50k)
+            min_liquidity_usd: Minimum liquidity threshold ($30k)
+            max_liquidity_usd: Maximum liquidity threshold ($100k - avoid crowded)
+            min_volume_24h: Minimum 24h volume ($20k)
+            min_volume_liquidity_ratio: Minimum volume/liquidity ratio (0.1 = 10%)
+            max_entry_price: Maximum token price ($0.001 max - 455-trade research!)
+            min_tokens_per_dollar: Minimum tokens per $1 (avoid expensive)
+            max_tokens_per_dollar: Maximum tokens per $1 (avoid worthless)
+            min_total_transactions: Minimum total txns in 1h (1000)
+            min_buy_sell_ratio: Minimum buy/sell ratio (0.8)
+            golden_liq_min: Golden liquidity minimum ($30k)
+            golden_liq_max: Golden liquidity maximum ($75k)
+            enable_momentum_filters: Enable momentum checks
+            min_price_change_1h: Minimum 1h price change (10%)
+            min_price_change_5min: Minimum 5min price change (3%)
+            min_price_change_1min: Minimum 1min price change (1%)
+            max_price_change_1h: Maximum 1h price change (50% - avoid exhausted)
+            min_volume_spike_ratio: Minimum 1h/avg volume ratio (3.0x)
+            min_buy_pressure_recent: Minimum recent buy pressure (60%)
+            require_acceleration: Require accelerating momentum
         """
-        # OPTION B: 6 ORIGINAL FILTERS
+        # TIER 2 FILTERS
         self.min_liquidity_usd = min_liquidity_usd
+        self.max_liquidity_usd = max_liquidity_usd
         self.min_volume_24h = min_volume_24h
         self.min_volume_liquidity_ratio = min_volume_liquidity_ratio
         self.max_entry_price = max_entry_price
         self.min_tokens_per_dollar = min_tokens_per_dollar
         self.max_tokens_per_dollar = max_tokens_per_dollar
 
-        # BATCH 9: 4 NEW OPTIMIZATION FILTERS
+        # BATCH 9 OPTIMIZATIONS
         self.min_total_transactions = min_total_transactions
         self.min_buy_sell_ratio = min_buy_sell_ratio
         self.golden_liq_min = golden_liq_min
         self.golden_liq_max = golden_liq_max
+
+        # MOMENTUM FILTERS (455-trade research)
+        self.enable_momentum_filters = enable_momentum_filters
+        self.min_price_change_1h = min_price_change_1h
+        self.min_price_change_5min = min_price_change_5min
+        self.min_price_change_1min = min_price_change_1min
+        self.max_price_change_1h = max_price_change_1h
+        self.min_volume_spike_ratio = min_volume_spike_ratio
+        self.min_buy_pressure_recent = min_buy_pressure_recent
+        self.require_acceleration = require_acceleration
 
         self.price_history: Dict[str, List[Dict]] = {}
 
@@ -118,11 +150,17 @@ class MarketAnalyzer:
         volume_24h = profile.get('volume_24h', 0)
         price = profile.get('price_usd', 0)
 
-        # === FILTER 1: LIQUIDITY (blocks low-quality tokens) ===
+        # === FILTER 1: MINIMUM LIQUIDITY (blocks low-quality tokens) ===
         if liquidity < self.min_liquidity_usd:
             return False, f"TIER2: Liquidity ${liquidity:,.0f} < ${self.min_liquidity_usd:,.0f}"
 
-        # === FILTER 2: VOLUME - ZERO CHECK (blocks dead/honeypot tokens) ===
+        # === FILTER 2: MAXIMUM LIQUIDITY (blocks crowded tokens) ===
+        # 455-trade research: Winners avg $63k, Losers avg $329k (-80.7%!)
+        # $200k+ tokens had only 9.1% win rate
+        if liquidity > self.max_liquidity_usd:
+            return False, f"TIER2: Liquidity ${liquidity:,.0f} > ${self.max_liquidity_usd:,.0f} - too crowded"
+
+        # === FILTER 3: VOLUME - ZERO CHECK (blocks dead/honeypot tokens) ===
         if volume_24h == 0:
             return False, "TIER2: Zero volume - honeypot/dead token"
 
@@ -170,14 +208,64 @@ class MarketAnalyzer:
             return False, f"TIER2: Buy/sell ratio {buy_sell_ratio:.2f} < {self.min_buy_sell_ratio} - dumping"
 
         # === BATCH 9 FILTER 9 & 10: GOLDEN LIQUIDITY PRIORITY ===
-        # Analysis showed $30-50k liquidity had 43.3% win rate (best range!)
+        # Analysis showed $30-75k liquidity had 40.8% win rate (best range!)
         # This doesn't block, but will be used for prioritization
         in_golden_range = self.golden_liq_min <= liquidity <= self.golden_liq_max
 
+        # === 455-TRADE MOMENTUM FILTERS (Reduce no-momentum 50% → 30%) ===
+        # Research: 50.4% no momentum (1.8% win) vs 30.1% runners (94.1% win)
+        # Max gain difference: 1036% (61.8% vs 5.4%)!
+        if self.enable_momentum_filters:
+            # FILTER 11: 1H PRICE CHANGE - Must be climbing
+            price_change_1h = profile.get('price_change_h1', 0)
+            if price_change_1h < self.min_price_change_1h:
+                return False, f"TIER2: Price change 1h {price_change_1h:.1f}% < {self.min_price_change_1h}% - not climbing"
+
+            # FILTER 12: 1H PRICE CHANGE - Not exhausted
+            if price_change_1h > self.max_price_change_1h:
+                return False, f"TIER2: Price change 1h {price_change_1h:.1f}% > {self.max_price_change_1h}% - exhausted"
+
+            # FILTER 13: 5MIN PRICE CHANGE - Recent momentum required
+            price_change_5m = profile.get('price_change_m5', 0)
+            if price_change_5m < self.min_price_change_5min:
+                return False, f"TIER2: Price change 5min {price_change_5m:.1f}% < {self.min_price_change_5min}% - no recent momentum"
+
+            # FILTER 14: 1MIN PRICE CHANGE - Active climbing required
+            price_change_1m = profile.get('price_change_m1', 0)
+            if price_change_1m < self.min_price_change_1min:
+                return False, f"TIER2: Price change 1min {price_change_1m:.1f}% < {self.min_price_change_1min}% - not actively climbing"
+
+            # FILTER 15: VOLUME SPIKE - High activity required
+            volume_1h = profile.get('volume_1h', 0)
+            volume_24h_avg_hourly = volume_24h / 24 if volume_24h > 0 else 0
+            volume_spike_ratio = volume_1h / volume_24h_avg_hourly if volume_24h_avg_hourly > 0 else 0
+            if volume_spike_ratio < self.min_volume_spike_ratio:
+                return False, f"TIER2: Volume spike ratio {volume_spike_ratio:.1f}x < {self.min_volume_spike_ratio}x - low activity"
+
+            # FILTER 16: BUY PRESSURE - Recent buying required
+            # Calculate recent buy pressure from last 10min of transactions
+            buys_recent = profile.get('txns_m5_buys', txns_h1_buys / 12)  # Fallback to 5min estimate
+            sells_recent = profile.get('txns_m5_sells', txns_h1_sells / 12)
+            total_recent = buys_recent + sells_recent
+            buy_pressure = (buys_recent / total_recent * 100) if total_recent > 0 else 0
+            if buy_pressure < self.min_buy_pressure_recent:
+                return False, f"TIER2: Recent buy pressure {buy_pressure:.1f}% < {self.min_buy_pressure_recent}% - weak buying"
+
+            # FILTER 17: ACCELERATION - Momentum must be increasing (optional)
+            if self.require_acceleration:
+                # Check if 1min > 5min > 1h momentum rate (accelerating)
+                # Rate = % change / time period
+                rate_1m = price_change_1m / 1
+                rate_5m = price_change_5m / 5
+                rate_1h = price_change_1h / 60
+                if not (rate_1m >= rate_5m >= rate_1h):
+                    return False, f"TIER2: Momentum not accelerating (1m:{rate_1m:.2f} 5m:{rate_5m:.2f} 1h:{rate_1h:.2f})"
+
         # === ALL FILTERS PASSED ===
         golden_emoji = "🌟" if in_golden_range else "✅"
+        momentum_emoji = "🚀" if self.enable_momentum_filters else ""
         logger.info(
-            f"TIER2: {golden_emoji} PASS - Liq ${liquidity:,.0f}{' (GOLDEN!)' if in_golden_range else ''}, "
+            f"TIER2: {golden_emoji}{momentum_emoji} PASS - Liq ${liquidity:,.0f}{' (GOLDEN!)' if in_golden_range else ''}, "
             f"Vol ${volume_24h:,.0f}, "
             f"V/L {ratio:.2f}, "
             f"Price ${price:.6f}, "
@@ -185,7 +273,7 @@ class MarketAnalyzer:
             f"{total_txns} txns, "
             f"B/S {buy_sell_ratio:.2f}"
         )
-        return True, f"TIER2: {golden_emoji} All checks passed{' - GOLDEN RANGE!' if in_golden_range else ''}"
+        return True, f"TIER2: {golden_emoji}{momentum_emoji} All checks passed{' - GOLDEN RANGE!' if in_golden_range else ''}"
 
     def analyze_token(self, profile: Dict) -> MarketSignal:
         """

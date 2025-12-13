@@ -45,10 +45,36 @@ class PaperTradingEngine:
         self.frozen_price_minutes = float(os.getenv('FROZEN_PRICE_MINUTES', '15'))
         self.min_position_liquidity = float(os.getenv('MIN_POSITION_LIQUIDITY', '5000.0'))
 
-        # BATCH 10 FIX: Early liquidity drop detection
+        # BATCH 10 FIX + 455-TRADE OPTIMIZATION: Early liquidity drop detection
         # Analysis showed 100% of trades ended with 0 exit liquidity - exit earlier!
-        self.liquidity_drop_threshold = float(os.getenv('LIQUIDITY_DROP_THRESHOLD', '50.0'))  # Exit if liq drops >50%
+        # 455-trade research: Tighten from 50% to 30% for faster exits
+        self.liquidity_drop_threshold = float(os.getenv('LIQUIDITY_DROP_THRESHOLD', '30.0'))  # Exit if liq drops >30%
         self.enable_liquidity_monitoring = os.getenv('ENABLE_LIQUIDITY_MONITORING', 'true').lower() == 'true'
+
+        # 455-TRADE OPTIMIZATION: LP Lock & Rug Prevention
+        self.enable_lp_lock_check = os.getenv('ENABLE_LP_LOCK_CHECK', 'true').lower() == 'true'
+        self.min_lp_lock_days = int(os.getenv('MIN_LP_LOCK_DAYS', '30'))
+        self.allow_lp_burned = os.getenv('ALLOW_LP_BURNED', 'true').lower() == 'true'
+        self.skip_unlocked_lp = os.getenv('SKIP_UNLOCKED_LP', 'true').lower() == 'true'
+
+        # 455-TRADE OPTIMIZATION: Holder Concentration
+        self.enable_holder_check = os.getenv('ENABLE_HOLDER_CHECK', 'true').lower() == 'true'
+        self.max_top_10_concentration = float(os.getenv('MAX_TOP_10_CONCENTRATION', '50'))
+        self.max_top_1_concentration = float(os.getenv('MAX_TOP_1_CONCENTRATION', '20'))
+        self.max_dev_wallet = float(os.getenv('MAX_DEV_WALLET', '10'))
+
+        # 455-TRADE OPTIMIZATION: Contract Safety
+        self.block_mint_authority = os.getenv('BLOCK_MINT_AUTHORITY', 'true').lower() == 'true'
+        self.block_freeze_authority = os.getenv('BLOCK_FREEZE_AUTHORITY', 'true').lower() == 'true'
+        self.require_renounced = os.getenv('REQUIRE_RENOUNCED', 'false').lower() == 'true'
+
+        # 455-TRADE OPTIMIZATION: Position Sizing Multipliers
+        self.prefer_golden_range = os.getenv('PREFER_GOLDEN_RANGE', 'true').lower() == 'true'
+        self.golden_range_multiplier = float(os.getenv('GOLDEN_RANGE_MULTIPLIER', '1.2'))
+        self.golden_liq_min = float(os.getenv('GOLDEN_LIQUIDITY_MIN', '30000'))
+        self.golden_liq_max = float(os.getenv('GOLDEN_LIQUIDITY_MAX', '75000'))
+        self.preferred_price_max = float(os.getenv('PREFERRED_PRICE_MAX', '0.0005'))
+        self.preferred_price_multiplier = float(os.getenv('PREFERRED_PRICE_MULTIPLIER', '1.3'))
 
         # Read trailing stop settings from environment
         self.use_trailing_stop = os.getenv('USE_TRAILING_STOP', 'true').lower() == 'true'
@@ -741,42 +767,69 @@ class PaperTradingEngine:
                 markets = raw_report.get('markets', [])
                 top_holders = raw_report.get('topHolders', [])
 
-                # LP LOCK CHECK: Ensure liquidity is locked to prevent instant rugs
-                if markets:
+                # === 455-TRADE: LP LOCK CHECK (Save $120-150 per 100 trades!) ===
+                # Research: 28.3% rug exits (-$199), LP lock prevents ~70%
+                if self.enable_lp_lock_check and markets:
                     # Get first market (highest liquidity pair)
                     main_market = markets[0] if markets else {}
                     lp_data = main_market.get('lp', {})
                     lp_locked_pct = float(lp_data.get('lpLockedPct', 0))
 
-                    # Reject if less than 50% LP locked
-                    if lp_locked_pct < 50:
-                        if 'lp_not_locked' not in self.rejected_trades:
-                            self.rejected_trades['lp_not_locked'] = 0
-                        self.rejected_trades['lp_not_locked'] += 1
-                        logger.warning(
-                            f"❌ REJECTED {token_address[:8]}... - LIQUIDITY NOT LOCKED:\n"
-                            f"   LP Locked: {lp_locked_pct:.1f}% < 50% minimum\n"
-                            f"   Developer can remove liquidity at any time - RUG RISK!"
-                        )
-                        return {
-                            'status': 'failed',
-                            'reason': 'lp_not_locked',
-                            'lp_locked_pct': lp_locked_pct
-                        }
+                    # Check if LP is burned (best case - 100% locked forever)
+                    lp_burned = lp_data.get('lpBurned', False)
+                    if lp_burned and self.allow_lp_burned:
+                        logger.info(f"✅ LP BURNED {token_address[:8]}... - Safest option!")
+                    # Check if LP is locked for minimum duration
+                    elif lp_locked_pct < 100 and self.skip_unlocked_lp:
+                        # Check lock duration
+                        lp_lock_timestamp = lp_data.get('lpLockedUntil', 0)
+                        if lp_lock_timestamp > 0:
+                            from datetime import datetime, timedelta
+                            lock_until = datetime.fromtimestamp(lp_lock_timestamp / 1000)
+                            days_locked = (lock_until - datetime.now()).days
+                            if days_locked < self.min_lp_lock_days:
+                                if 'lp_lock_too_short' not in self.rejected_trades:
+                                    self.rejected_trades['lp_lock_too_short'] = 0
+                                self.rejected_trades['lp_lock_too_short'] += 1
+                                logger.warning(
+                                    f"❌ REJECTED {token_address[:8]}... - LP LOCK TOO SHORT:\n"
+                                    f"   LP Locked: {days_locked} days < {self.min_lp_lock_days} days minimum\n"
+                                    f"   Developer can remove liquidity soon - RUG RISK!"
+                                )
+                                return {
+                                    'status': 'failed',
+                                    'reason': 'lp_lock_too_short',
+                                    'days_locked': days_locked
+                                }
+                        else:
+                            # LP not locked at all
+                            if 'lp_not_locked' not in self.rejected_trades:
+                                self.rejected_trades['lp_not_locked'] = 0
+                            self.rejected_trades['lp_not_locked'] += 1
+                            logger.warning(
+                                f"❌ REJECTED {token_address[:8]}... - LIQUIDITY NOT LOCKED:\n"
+                                f"   LP Locked: {lp_locked_pct:.1f}% (not permanently locked)\n"
+                                f"   Developer can remove liquidity at any time - RUG RISK!"
+                            )
+                            return {
+                                'status': 'failed',
+                                'reason': 'lp_not_locked',
+                                'lp_locked_pct': lp_locked_pct
+                            }
 
-                # TOP 10 HOLDER CONCENTRATION CHECK: Ensure token is not too concentrated
-                if top_holders and len(top_holders) >= 10:
+                # === 455-TRADE: HOLDER CONCENTRATION CHECK ===
+                if self.enable_holder_check and top_holders and len(top_holders) >= 10:
                     # Calculate total % owned by top 10 holders
                     top10_total_pct = sum(float(h.get('pct', 0)) * 100 for h in top_holders[:10])
 
-                    # Reject if top 10 own more than 80%
-                    if top10_total_pct > 80:
+                    # Check top 10 concentration
+                    if top10_total_pct > self.max_top_10_concentration:
                         if 'top10_concentration' not in self.rejected_trades:
                             self.rejected_trades['top10_concentration'] = 0
                         self.rejected_trades['top10_concentration'] += 1
                         logger.warning(
-                            f"❌ REJECTED {token_address[:8]}... - TOO CONCENTRATED:\n"
-                            f"   Top 10 holders own: {top10_total_pct:.1f}% > 80% threshold\n"
+                            f"❌ REJECTED {token_address[:8]}... - TOP 10 TOO CONCENTRATED:\n"
+                            f"   Top 10 holders own: {top10_total_pct:.1f}% > {self.max_top_10_concentration}% threshold\n"
                             f"   Token supply is too concentrated - manipulation risk!"
                         )
                         return {
@@ -784,6 +837,80 @@ class PaperTradingEngine:
                             'reason': 'top10_concentration',
                             'top10_total_pct': top10_total_pct
                         }
+
+                    # Check top 1 holder concentration
+                    if top_holders:
+                        top1_pct = float(top_holders[0].get('pct', 0)) * 100
+                        if top1_pct > self.max_top_1_concentration:
+                            if 'top1_concentration' not in self.rejected_trades:
+                                self.rejected_trades['top1_concentration'] = 0
+                            self.rejected_trades['top1_concentration'] += 1
+                            logger.warning(
+                                f"❌ REJECTED {token_address[:8]}... - TOP HOLDER TOO LARGE:\n"
+                                f"   Top holder owns: {top1_pct:.1f}% > {self.max_top_1_concentration}% threshold\n"
+                                f"   Single whale control - extreme manipulation risk!"
+                            )
+                            return {
+                                'status': 'failed',
+                                'reason': 'top1_concentration',
+                                'top1_pct': top1_pct
+                            }
+
+                # === 455-TRADE: CONTRACT SAFETY CHECKS ===
+                if rug_check:
+                    raw_report = rug_check.get('raw_report', {})
+                    token_meta = raw_report.get('tokenMeta', {})
+
+                    # Check mint authority
+                    if self.block_mint_authority:
+                        mint_authority = token_meta.get('mintAuthority')
+                        if mint_authority and mint_authority != 'null' and mint_authority != '':
+                            if 'mint_authority_active' not in self.rejected_trades:
+                                self.rejected_trades['mint_authority_active'] = 0
+                            self.rejected_trades['mint_authority_active'] += 1
+                            logger.warning(
+                                f"❌ REJECTED {token_address[:8]}... - MINT AUTHORITY ACTIVE:\n"
+                                f"   Mint Authority: {mint_authority[:20]}...\n"
+                                f"   Developer can create unlimited tokens - DILUTION RISK!"
+                            )
+                            return {
+                                'status': 'failed',
+                                'reason': 'mint_authority_active'
+                            }
+
+                    # Check freeze authority
+                    if self.block_freeze_authority:
+                        freeze_authority = token_meta.get('freezeAuthority')
+                        if freeze_authority and freeze_authority != 'null' and freeze_authority != '':
+                            if 'freeze_authority_active' not in self.rejected_trades:
+                                self.rejected_trades['freeze_authority_active'] = 0
+                            self.rejected_trades['freeze_authority_active'] += 1
+                            logger.warning(
+                                f"❌ REJECTED {token_address[:8]}... - FREEZE AUTHORITY ACTIVE:\n"
+                                f"   Freeze Authority: {freeze_authority[:20]}...\n"
+                                f"   Developer can freeze your tokens - LOCK RISK!"
+                            )
+                            return {
+                                'status': 'failed',
+                                'reason': 'freeze_authority_active'
+                            }
+
+                    # Check ownership renounced (optional - not required by default)
+                    if self.require_renounced:
+                        update_authority = token_meta.get('updateAuthority')
+                        if update_authority and update_authority != 'null' and update_authority != '':
+                            if 'ownership_not_renounced' not in self.rejected_trades:
+                                self.rejected_trades['ownership_not_renounced'] = 0
+                            self.rejected_trades['ownership_not_renounced'] += 1
+                            logger.warning(
+                                f"❌ REJECTED {token_address[:8]}... - OWNERSHIP NOT RENOUNCED:\n"
+                                f"   Update Authority: {update_authority[:20]}...\n"
+                                f"   Developer retains control - modification risk!"
+                            )
+                            return {
+                                'status': 'failed',
+                                'reason': 'ownership_not_renounced'
+                            }
 
             # Check position size vs liquidity (prevent price impact >0.5%)
             if amount_usd > liquidity * self.max_position_vs_liquidity:
@@ -876,6 +1003,43 @@ class PaperTradingEngine:
                 'status': 'failed',
                 'reason': 'max_positions_reached'
             }
+
+        # === 455-TRADE: POSITION SIZING MULTIPLIERS ===
+        # Research: Golden range ($30-75k) had 40.8% win, Preferred price (<$0.0005) had 41% win
+        original_amount = amount_usd
+        position_multiplier = 1.0
+
+        # Apply golden range multiplier
+        if self.prefer_golden_range and analysis_data:
+            profile = analysis_data.get('profile', {})
+            liquidity = profile.get('liquidity_usd', 0)
+            if self.golden_liq_min <= liquidity <= self.golden_liq_max:
+                position_multiplier *= self.golden_range_multiplier
+                logger.info(
+                    f"💰 GOLDEN RANGE {token_address[:8]}... - Position multiplier: {self.golden_range_multiplier}x"
+                )
+
+        # Apply preferred price multiplier
+        if price <= self.preferred_price_max:
+            position_multiplier *= self.preferred_price_multiplier
+            logger.info(
+                f"💎 PREFERRED PRICE {token_address[:8]}... - Price ${price:.8f} ≤ ${self.preferred_price_max:.4f}, "
+                f"multiplier: {self.preferred_price_multiplier}x"
+            )
+
+        # Apply combined multiplier
+        if position_multiplier > 1.0:
+            amount_usd = amount_usd * position_multiplier
+            # Respect max position size
+            if amount_usd > self.max_position_size:
+                amount_usd = self.max_position_size
+                logger.warning(
+                    f"⚠️  Position capped at ${self.max_position_size:.2f} (was ${original_amount * position_multiplier:.2f})"
+                )
+            else:
+                logger.info(
+                    f"📈 Position sized up: ${original_amount:.2f} → ${amount_usd:.2f} ({position_multiplier:.2f}x multiplier)"
+                )
 
         # Store analysis context for ML data collection
         if analysis_data:
