@@ -784,7 +784,6 @@ class PaperTradingEngine:
                         # Check lock duration
                         lp_lock_timestamp = lp_data.get('lpLockedUntil', 0)
                         if lp_lock_timestamp > 0:
-                            from datetime import datetime, timedelta
                             lock_until = datetime.fromtimestamp(lp_lock_timestamp / 1000)
                             days_locked = (lock_until - datetime.now()).days
                             if days_locked < self.min_lp_lock_days:
