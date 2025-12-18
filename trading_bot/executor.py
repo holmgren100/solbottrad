@@ -24,15 +24,15 @@ class PaperTradingExecutor:
     - Trade history
     """
 
-    def __init__(self, initial_balance: float = 1000.0):
+    def __init__(self, initial_capital: float = 1000.0):
         """
         Initialize paper trading executor.
 
         Args:
-            initial_balance: Starting balance in SOL
+            initial_capital: Starting capital in USD
         """
-        self.initial_balance = initial_balance
-        self.available_balance = initial_balance
+        self.initial_capital = initial_capital
+        self.current_capital = initial_capital
         self.total_invested = 0.0
 
         # Simulated transaction fees
@@ -41,12 +41,12 @@ class PaperTradingExecutor:
         self.buy_slippage_percent = 0.5
         self.sell_slippage_percent = 1.0
 
-        logger.info(f"Paper trading initialized with ${initial_balance:.2f} SOL balance")
+        logger.info(f"Paper trading initialized with ${initial_capital:.2f} USD capital")
 
     async def execute_buy(
         self,
         token_address: str,
-        amount_sol: float,
+        amount_usd: float,
         price_usd: float,
         symbol: str = ""
     ) -> Optional[Dict]:
@@ -55,7 +55,7 @@ class PaperTradingExecutor:
 
         Args:
             token_address: Token to buy
-            amount_sol: Amount in SOL to spend
+            amount_usd: Amount in USD to spend
             price_usd: Current token price
             symbol: Token symbol
 
@@ -63,11 +63,11 @@ class PaperTradingExecutor:
             Trade details dict or None if failed
         """
         try:
-            # Check available balance
-            if amount_sol > self.available_balance:
+            # Check available capital
+            if amount_usd > self.current_capital:
                 logger.warning(
-                    f"Insufficient balance: Need ${amount_sol:.2f}, "
-                    f"Have ${self.available_balance:.2f}"
+                    f"Insufficient capital: Need ${amount_usd:.2f} USD, "
+                    f"Have ${self.current_capital:.2f} USD"
                 )
                 return None
 
@@ -76,18 +76,18 @@ class PaperTradingExecutor:
             effective_price = price_usd * (1 + total_fee_percent / 100)
 
             # Calculate tokens received
-            amount_after_fees = amount_sol * (1 - total_fee_percent / 100)
+            amount_after_fees = amount_usd * (1 - total_fee_percent / 100)
             tokens_received = amount_after_fees / effective_price
 
-            # Update balances
-            self.available_balance -= amount_sol
-            self.total_invested += amount_sol
+            # Update capital
+            self.current_capital -= amount_usd
+            self.total_invested += amount_usd
 
             trade_details = {
                 'type': 'buy',
                 'token_address': token_address,
                 'symbol': symbol,
-                'amount_sol': amount_sol,
+                'amount_usd': amount_usd,
                 'price_usd': price_usd,
                 'effective_price': effective_price,
                 'tokens_received': tokens_received,
@@ -98,7 +98,7 @@ class PaperTradingExecutor:
 
             logger.info(
                 f"📈 BUY executed (paper): {symbol or token_address[:8]}... "
-                f"${amount_sol:.2f} @ ${price_usd:.8f} "
+                f"${amount_usd:.2f} USD @ ${price_usd:.8f} "
                 f"(effective: ${effective_price:.8f}, fees: {total_fee_percent:.1f}%)"
             )
 
@@ -132,12 +132,12 @@ class PaperTradingExecutor:
             total_fee_percent = self.sell_fee_percent + self.sell_slippage_percent
             effective_price = price_usd * (1 - total_fee_percent / 100)
 
-            # Calculate SOL received
+            # Calculate USD received
             gross_amount = tokens_amount * effective_price
             amount_after_fees = gross_amount * (1 - total_fee_percent / 100)
 
-            # Update balances
-            self.available_balance += amount_after_fees
+            # Update capital
+            self.current_capital += amount_after_fees
             self.total_invested -= amount_after_fees
 
             trade_details = {
@@ -147,7 +147,7 @@ class PaperTradingExecutor:
                 'tokens_amount': tokens_amount,
                 'price_usd': price_usd,
                 'effective_price': effective_price,
-                'sol_received': amount_after_fees,
+                'usd_received': amount_after_fees,
                 'fees_percent': total_fee_percent,
                 'timestamp': datetime.now().isoformat(),
                 'paper_trading': True
@@ -156,7 +156,7 @@ class PaperTradingExecutor:
             logger.info(
                 f"📉 SELL executed (paper): {symbol or token_address[:8]}... "
                 f"{tokens_amount:.2f} tokens @ ${price_usd:.8f} "
-                f"→ ${amount_after_fees:.2f} SOL "
+                f"→ ${amount_after_fees:.2f} USD "
                 f"(fees: {total_fee_percent:.1f}%)"
             )
 
@@ -174,14 +174,14 @@ class PaperTradingExecutor:
             Balance details dict
         """
         return {
-            'available_balance': self.available_balance,
+            'available_balance': self.current_capital,
             'total_invested': self.total_invested,
-            'initial_balance': self.initial_balance,
-            'total_pnl': self.available_balance + self.total_invested - self.initial_balance,
+            'initial_capital': self.initial_capital,
+            'total_pnl': self.current_capital + self.total_invested - self.initial_capital,
             'total_pnl_percent': (
-                (self.available_balance + self.total_invested - self.initial_balance) /
-                self.initial_balance * 100
-            ) if self.initial_balance > 0 else 0
+                (self.current_capital + self.total_invested - self.initial_capital) /
+                self.initial_capital * 100
+            ) if self.initial_capital > 0 else 0
         }
 
     def print_balance(self):
@@ -191,8 +191,8 @@ class PaperTradingExecutor:
         logger.info("=" * 60)
         logger.info("PAPER TRADING BALANCE")
         logger.info("=" * 60)
-        logger.info(f"Available: ${balance['available_balance']:.2f} SOL")
-        logger.info(f"Invested: ${balance['total_invested']:.2f} SOL")
+        logger.info(f"Available: ${balance['available_balance']:.2f} USD")
+        logger.info(f"Invested: ${balance['total_invested']:.2f} USD")
         logger.info(f"Total PnL: ${balance['total_pnl']:.2f} ({balance['total_pnl_percent']:+.1f}%)")
         logger.info("=" * 60)
 

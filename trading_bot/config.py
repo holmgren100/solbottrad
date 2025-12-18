@@ -39,8 +39,8 @@ class BotConfig:
 
     # Mode
     paper_trading: bool = True
-    paper_sol_balance: float = 1000.0
-    default_position_size: float = 0.5  # Position size in SOL
+    paper_initial_capital: float = 1000.0  # Starting capital in USD
+    default_position_size: float = 70.0  # Position size in USD
 
     # Protected core config
     core_config: MLBot2Config = None
@@ -180,8 +180,8 @@ def load_config(env_file: str = '.env') -> BotConfig:
     config = BotConfig(
         # Mode
         paper_trading=_get_bool('PAPER_TRADING_MODE', True),
-        paper_sol_balance=_get_float('PAPER_SOL_BALANCE', 1000.0),
-        default_position_size=_get_float('DEFAULT_POSITION_SIZE', 0.5),
+        paper_initial_capital=_get_float('PAPER_INITIAL_CAPITAL', 1000.0),
+        default_position_size=_get_float('DEFAULT_POSITION_SIZE', 70.0),
 
         # Core
         core_config=core_config,
@@ -224,7 +224,8 @@ def load_config(env_file: str = '.env') -> BotConfig:
     logger.info("ML BOT 2 CONFIGURATION LOADED")
     logger.info("=" * 60)
     logger.info(f"Mode: {'PAPER TRADING' if config.paper_trading else 'LIVE TRADING ⚠️'}")
-    logger.info(f"Paper Balance: ${config.paper_sol_balance:.2f} SOL")
+    logger.info(f"Paper Capital: ${config.paper_initial_capital:.2f} USD")
+    logger.info(f"Position Size: ${config.default_position_size:.2f} USD")
     logger.info(f"Max Positions: {config.core_config.max_open_positions}")
     logger.info(f"Trailing Stop: {config.core_config.trailing_stop_percent}% below peak")
     logger.info(f"Rug Detection: {config.core_config.stale_price_minutes}min, ${config.core_config.min_position_liquidity:,.0f}")

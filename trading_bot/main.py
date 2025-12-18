@@ -60,7 +60,7 @@ class MLBot2Foundation:
         logger.info("Initializing protected core...")
 
         self.risk_assessor = RiskAssessor(
-            max_position_size=config.paper_sol_balance / config.core_config.max_open_positions
+            max_position_size=config.default_position_size
         )
         logger.info("  ✅ RiskAssessor initialized")
 
@@ -107,6 +107,18 @@ class MLBot2Foundation:
             self.safety_filters = None
             logger.info("  ℹ️  SafetyFilters disabled (ML Bot 2 baseline mode)")
 
+        # === 📱 TELEGRAM NOTIFICATIONS ===
+        if config.telegram_bot_token and config.telegram_chat_id:
+            from ml_bot_core.monitoring.telegram_notifier import TelegramNotifier
+            self.notifier = TelegramNotifier(
+                bot_token=config.telegram_bot_token,
+                chat_id=config.telegram_chat_id
+            )
+            logger.info("  ✅ Telegram notifications enabled")
+        else:
+            self.notifier = None
+            logger.info("  ℹ️  Telegram notifications disabled (no credentials)")
+
         # === 🔍 TOKEN SCANNER ===
         from trading_bot.scanner import TokenScanner
         self.scanner = TokenScanner(
@@ -119,8 +131,8 @@ class MLBot2Foundation:
         # === 💰 TRADE EXECUTOR ===
         from trading_bot.executor import PaperTradingExecutor
         if config.paper_trading:
-            self.executor = PaperTradingExecutor(initial_balance=config.paper_sol_balance)
-            logger.info(f"  ✅ PaperTradingExecutor initialized (${config.paper_sol_balance:.2f} SOL)")
+            self.executor = PaperTradingExecutor(initial_capital=config.paper_initial_capital)
+            logger.info(f"  ✅ PaperTradingExecutor initialized (${config.paper_initial_capital:.2f} USD)")
         else:
             raise NotImplementedError("Live trading not implemented yet! Use PAPER_TRADING_MODE=true")
 
@@ -470,6 +482,10 @@ class MLBot2Foundation:
 
         self.running = True
 
+        # Send startup notification
+        if self.notifier:
+            await self.notifier.send_startup_message()
+
         # Initialize API clients
         await self.scanner.__aenter__()
 
@@ -590,38 +606,62 @@ class MLBot2Foundation:
                 logger.debug(f"Token rejected: {symbol} - {reason}")
                 return
 
+            # === SEND TRADE SIGNAL NOTIFICATION ===
+            if self.notifier:
+                await self.notifier.send_trade_signal(
+                    token_address=token_address,
+                    action='BUY',
+                    confidence=risk_score,
+                    price=market_data['price_usd'],
+                    reasons=[reason]
+                )
+
             # === EXECUTE TRADE ===
             entry_price = market_data['price_usd']
-            position_size_sol = self.config.default_position_size  # Position size in SOL
+            position_size_usd = self.config.default_position_size  # Position size in USD
 
-            # Check executor balance (both in SOL)
+            # Check executor capital
             balance = self.executor.get_balance()
-            if balance['available_balance'] < position_size_sol:
-                logger.warning(f"Insufficient balance: {balance['available_balance']:.2f} SOL < {position_size_sol:.2f} SOL")
+            if balance['available_balance'] < position_size_usd:
+                logger.warning(f"Insufficient capital: {balance['available_balance']:.2f} USD < {position_size_usd:.2f} USD")
                 return
 
             # Execute buy
             trade_result = await self.executor.execute_buy(
                 token_address=token_address,
-                amount_sol=position_size_sol,
+                amount_usd=position_size_usd,
                 price_usd=entry_price,
                 symbol=symbol
             )
 
             if not trade_result:
                 logger.error(f"Failed to execute buy for {symbol}")
+                # Send failure notification
+                if self.notifier:
+                    await self.notifier.send_trade_execution(
+                        token_address=token_address,
+                        action='BUY',
+                        amount=position_size_usd,
+                        price=entry_price,
+                        status='FAILED'
+                    )
                 return
 
-            # === 🔒 OPEN POSITION IN PROTECTED CORE ===
-            # Calculate USD value of SOL position (approximately)
-            # Note: This is paper trading, actual USD value = position_size_sol * SOL_price_in_USD
-            # For now, using a rough estimate based on entry price
-            amount_usd = position_size_sol * 200  # Rough: 1 SOL ~ $200
+            # Send success notification
+            if self.notifier:
+                await self.notifier.send_trade_execution(
+                    token_address=token_address,
+                    action='BUY',
+                    amount=position_size_usd,
+                    price=entry_price,
+                    status='SUCCESS'
+                )
 
+            # === 🔒 OPEN POSITION IN PROTECTED CORE ===
             position = await self.open_position(
                 token_address=token_address,
                 entry_price=entry_price,
-                amount_usd=amount_usd,
+                amount_usd=position_size_usd,
                 symbol=symbol
             )
 
@@ -645,6 +685,10 @@ class MLBot2Foundation:
         if self.csv_tracker:
             trades_exported = self.csv_tracker.export_csv()
             logger.info(f"Exported {trades_exported} trades to CSV")
+
+        # Send shutdown notification
+        if self.notifier:
+            await self.notifier.send_shutdown_message()
 
         logger.info("Bot stopped.")
 
