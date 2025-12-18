@@ -1,0 +1,29 @@
+# Core dependencies
+python-dotenv==1.0.0
+aiohttp==3.9.1
+asyncio==3.4.3
+
+# Solana blockchain interaction
+solders>=0.20.0
+solana>=0.32.0
+base58>=2.1.1
+
+# Telegram
+python-telegram-bot==20.7
+
+# Web Dashboard
+flask==3.0.0
+
+# Dashboard (optional - for future use)
+streamlit==1.29.0
+plotly==5.18.0
+
+# Data processing
+pandas==2.1.4
+numpy==1.26.2
+
+# Security/Encryption
+cryptography>=41.0.0
+
+# Utilities
+python-dateutil==2.8.2
