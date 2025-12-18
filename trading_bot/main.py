@@ -313,6 +313,7 @@ class MLBot2Foundation:
 
         Uses protected core PositionManager to:
         - Update prices
+        - Check partial profits (if enabled)
         - Check stop loss
         - Check trailing stop
         - Detect rugs
@@ -324,6 +325,7 @@ class MLBot2Foundation:
 
         logger.debug(f"Monitoring {len(positions)} position(s)...")
 
+        # Update all prices first
         for position in positions:
             # Get current price from PriceValidator
             try:
@@ -340,7 +342,7 @@ class MLBot2Foundation:
                 current_liquidity = price_data.get('liquidity', 0)
 
                 # Update position
-                self.position_manager.update_price(
+                self.position_manager.update_position_price(
                     position.token_address,
                     current_price,
                     current_liquidity
@@ -350,7 +352,50 @@ class MLBot2Foundation:
                 logger.error(f"Error getting price for {position.token_address[:8]}...: {e}")
                 continue
 
-            # Check exit conditions
+        # === PARTIAL PROFIT TAKING (before stop loss/trailing stop checks) ===
+        if self.config.partial_profit_settings.get('enabled', False):
+            for position in list(self.position_manager.get_all_positions()):
+                if position.initial_quantity == 0:
+                    continue
+
+                milestone = position.check_profit_milestone()
+                if milestone:
+                    # Determine sell percentage based on milestone
+                    sell_pct = self.config.partial_profit_settings.get(f'milestone_{milestone}', 0)
+
+                    if sell_pct > 0:
+                        # Calculate quantity to sell (percentage of INITIAL quantity, not current)
+                        sell_quantity = (sell_pct / 100) * position.initial_quantity
+                        sell_quantity = min(sell_quantity, position.quantity)  # Don't sell more than we have
+
+                        if sell_quantity > 0:
+                            # Calculate proceeds
+                            sell_value = sell_quantity * position.current_price
+
+                            logger.info(
+                                f"💰 PARTIAL PROFIT at +{milestone}%: {position.symbol or position.token_address[:8]}... "
+                                f"Selling {sell_pct}% ({sell_quantity:.2f} tokens) = ${sell_value:.2f}"
+                            )
+
+                            # Update position in position manager
+                            position.quantity -= sell_quantity
+                            position.amount_usd = position.quantity * position.entry_price  # Update cost basis
+                            position.milestones_hit.add(milestone)
+
+                            # Update executor balance (add proceeds)
+                            self.executor.available_balance += sell_value
+
+                            # Calculate profit on this partial sell
+                            cost_basis = position.entry_price * sell_quantity
+                            partial_profit = sell_value - cost_basis
+
+                            logger.info(
+                                f"💵 Locked in ${partial_profit:.2f} profit, "
+                                f"Remaining: {position.quantity:.2f} tokens (${position.amount_usd:.2f} cost basis)"
+                            )
+
+        # Check exit conditions for remaining positions
+        for position in list(self.position_manager.get_all_positions()):
             # 1. Stop Loss
             if self.position_manager.check_stop_loss(position.token_address):
                 logger.warning(f"🛑 Stop loss hit: {position.symbol or position.token_address[:8]}...")

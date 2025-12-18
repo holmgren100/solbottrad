@@ -62,6 +62,9 @@ class BotConfig:
     telegram_bot_token: str = ''
     telegram_chat_id: str = ''
 
+    # Partial Profit
+    partial_profit_settings: dict = None
+
     # Logging
     log_level: str = 'INFO'
     log_file: str = 'trading_bot.log'
@@ -72,6 +75,8 @@ class BotConfig:
             self.core_config = MLBot2Config()
         if self.safety_config is None:
             self.safety_config = SafetyConfig()
+        if self.partial_profit_settings is None:
+            self.partial_profit_settings = {'enabled': False}
 
     def validate(self) -> tuple[bool, list[str]]:
         """
@@ -143,6 +148,19 @@ def load_config(env_file: str = '.env') -> BotConfig:
     core_config.scan_interval = _get_int('SCAN_INTERVAL', 120)
     core_config.monitor_interval = _get_int('MONITOR_INTERVAL', 60)
 
+    # Partial profit settings
+    partial_profit_enabled = _get_bool('PARTIAL_PROFIT_ENABLED', False)
+    partial_profit_settings = {
+        'enabled': partial_profit_enabled,
+        'milestone_100': _get_float('PROFIT_MILESTONE_100', 25),
+        'milestone_200': _get_float('PROFIT_MILESTONE_200', 15),
+        'milestone_300': _get_float('PROFIT_MILESTONE_300', 10),
+        'milestone_400': _get_float('PROFIT_MILESTONE_400', 10),
+        'milestone_500': _get_float('PROFIT_MILESTONE_500', 10),
+        'milestone_600': _get_float('PROFIT_MILESTONE_600', 10),
+        'milestone_700': _get_float('PROFIT_MILESTONE_700', 10),
+    }
+
     # === SAFETY FILTERS CONFIGURATION ===
     safety_config = SafetyConfig(
         enable_lp_lock_check=_get_bool('ENABLE_LP_LOCK_CHECK', True),
@@ -174,6 +192,9 @@ def load_config(env_file: str = '.env') -> BotConfig:
         # Safety Filters
         enable_safety_filters=_get_bool('ENABLE_SAFETY_FILTERS', False),
         safety_config=safety_config,
+
+        # Partial Profit
+        partial_profit_settings=partial_profit_settings,
 
         # API Credentials
         solana_rpc_url=os.getenv('SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com'),
