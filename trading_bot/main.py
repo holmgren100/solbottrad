@@ -75,9 +75,8 @@ class MLBot2Foundation:
         jupiter_client = JupiterClient()
 
         self.price_validator = PriceValidator(
-            dexscreener=dexscreener_client,
-            jupiter=jupiter_client,
-            stale_minutes=config.core_config.stale_price_minutes
+            dexscreener_client=dexscreener_client,
+            jupiter_client=jupiter_client
         )
         logger.info("  ✅ PriceValidator initialized")
 
