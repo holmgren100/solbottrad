@@ -40,6 +40,7 @@ class BotConfig:
     # Mode
     paper_trading: bool = True
     paper_sol_balance: float = 1000.0
+    default_position_size: float = 0.5  # Position size in SOL
 
     # Protected core config
     core_config: MLBot2Config = None
@@ -180,6 +181,7 @@ def load_config(env_file: str = '.env') -> BotConfig:
         # Mode
         paper_trading=_get_bool('PAPER_TRADING_MODE', True),
         paper_sol_balance=_get_float('PAPER_SOL_BALANCE', 1000.0),
+        default_position_size=_get_float('DEFAULT_POSITION_SIZE', 0.5),
 
         # Core
         core_config=core_config,

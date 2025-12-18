@@ -592,18 +592,18 @@ class MLBot2Foundation:
 
             # === EXECUTE TRADE ===
             entry_price = market_data['price_usd']
-            position_size = 70.0  # From config, would use recommended_position_size from assessment
+            position_size_sol = self.config.default_position_size  # Position size in SOL
 
-            # Check executor balance
+            # Check executor balance (both in SOL)
             balance = self.executor.get_balance()
-            if balance['available_balance'] < position_size:
-                logger.warning(f"Insufficient balance: ${balance['available_balance']:.2f} < ${position_size:.2f}")
+            if balance['available_balance'] < position_size_sol:
+                logger.warning(f"Insufficient balance: {balance['available_balance']:.2f} SOL < {position_size_sol:.2f} SOL")
                 return
 
             # Execute buy
             trade_result = await self.executor.execute_buy(
                 token_address=token_address,
-                amount_sol=position_size,
+                amount_sol=position_size_sol,
                 price_usd=entry_price,
                 symbol=symbol
             )
@@ -613,10 +613,15 @@ class MLBot2Foundation:
                 return
 
             # === 🔒 OPEN POSITION IN PROTECTED CORE ===
+            # Calculate USD value of SOL position (approximately)
+            # Note: This is paper trading, actual USD value = position_size_sol * SOL_price_in_USD
+            # For now, using a rough estimate based on entry price
+            amount_usd = position_size_sol * 200  # Rough: 1 SOL ~ $200
+
             position = await self.open_position(
                 token_address=token_address,
                 entry_price=entry_price,
-                amount_usd=position_size,
+                amount_usd=amount_usd,
                 symbol=symbol
             )
 
