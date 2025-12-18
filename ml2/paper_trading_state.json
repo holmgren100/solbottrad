@@ -1,0 +1,1008 @@
+{
+  "initial_capital": 1000.0,
+  "current_capital": 16682.52834877909,
+  "total_invested": -3.417710559006082e-12,
+  "positions": {},
+  "trades": [
+    {
+      "token_address": "7FLmX67prL769VJr9banXgp1teRoSSCjiMtHb2n6HhCb",
+      "action": "sell",
+      "price": 1.592e-05,
+      "amount_usd": 64.89701662943658,
+      "quantity": 4076445.76818069,
+      "pnl": 10.150349962769917,
+      "pnl_percent": 18.540580789277737,
+      "timestamp": "2025-11-27T17:52:39.431103"
+    },
+    {
+      "token_address": "9mzYbMqZKtkTFVbgWL8DAPWf4ieKtU8PtF7ozLYisHuU",
+      "action": "sell",
+      "price": 0.7872,
+      "amount_usd": 71.1092762312634,
+      "quantity": 90.3319057815846,
+      "pnl": 37.36127623126339,
+      "pnl_percent": 110.7066381156317,
+      "timestamp": "2025-11-27T17:58:36.649193"
+    },
+    {
+      "token_address": "AH3S2cJDZzV1ar7v22NuMRHdHwTynZ2GuKDZ32Y6ico7",
+      "action": "sell",
+      "price": 8.284e-06,
+      "amount_usd": 78.93299303450844,
+      "quantity": 9528367.097357368,
+      "pnl": 19.199659701175108,
+      "pnl_percent": 32.14228744616368,
+      "timestamp": "2025-11-27T18:02:40.565378"
+    },
+    {
+      "token_address": "EJGs2qSdJ1opwEyNxpG7nw2AfshJHpNm1bgdf3UK3pFU",
+      "action": "sell",
+      "price": 1.427e-05,
+      "amount_usd": 57.030962199312725,
+      "quantity": 3996563.573883162,
+      "pnl": 2.7576288659793824,
+      "pnl_percent": 5.081001472754052,
+      "timestamp": "2025-11-27T18:04:37.388252"
+    },
+    {
+      "token_address": "GXdtrQU7UqFyGRKCkYfurDsNgRusnJjfAo1SSxyyNsEE",
+      "action": "sell",
+      "price": 1.249e-05,
+      "amount_usd": 65.12246349206349,
+      "quantity": 5213968.253968254,
+      "pnl": 10.375796825396831,
+      "pnl_percent": 18.952380952380963,
+      "timestamp": "2025-11-27T18:04:37.455080"
+    },
+    {
+      "token_address": "8EquNa9GyWXyuvurhM3EMjGAQRe9LHTWkw16VRYqPhQM",
+      "action": "sell",
+      "price": 0.2944,
+      "amount_usd": 62.439738562091506,
+      "quantity": 212.09150326797388,
+      "pnl": 10.519738562091506,
+      "pnl_percent": 20.261437908496735,
+      "timestamp": "2025-11-27T18:04:37.533453"
+    },
+    {
+      "token_address": "HXEiiFKFWYjcaSFaEE4wnH6azPNEpT7a823RZ6vSQKyD",
+      "action": "sell",
+      "price": 1.35,
+      "amount_usd": 69.1015445284259,
+      "quantity": 51.186329280315476,
+      "pnl": 53.5255445284259,
+      "pnl_percent": 343.6411436082813,
+      "timestamp": "2025-11-27T18:11:04.561409"
+    },
+    {
+      "token_address": "FVXN9pLTgx4Upzv7eN7DDg2hEhHGnqu75Uyu7jBqbvei",
+      "action": "sell",
+      "price": 0.352,
+      "amount_usd": 30.576944955663375,
+      "quantity": 86.86632089677096,
+      "pnl": -21.343055044336626,
+      "pnl_percent": -41.107579053036645,
+      "timestamp": "2025-11-27T18:11:04.613888"
+    },
+    {
+      "token_address": "DVkErt3yEprKPPtwboMEW22nvcLtsR1Jt3uPqn8kgG79",
+      "action": "sell",
+      "price": 0.03168,
+      "amount_usd": 10.849773087071238,
+      "quantity": 342.48021108179415,
+      "pnl": -41.07022691292876,
+      "pnl_percent": -79.1029023746702,
+      "timestamp": "2025-11-27T18:11:04.677190"
+    },
+    {
+      "token_address": "ESinZAgev35Z7hHVychFn8DCKto9AitfRge4i9xs8NWS",
+      "action": "sell",
+      "price": 3.591e-05,
+      "amount_usd": 55.256452729693756,
+      "quantity": 1538748.335552597,
+      "pnl": -2.523547270306256,
+      "pnl_percent": -4.367509986684415,
+      "timestamp": "2025-11-27T18:13:09.989556"
+    },
+    {
+      "token_address": "D1a2J39nsuiE4Dee3snoWdM7UMVbJPZbwJRru88J3CfE",
+      "action": "sell",
+      "price": 4.626e-05,
+      "amount_usd": 27.107105203436543,
+      "quantity": 585972.87512833,
+      "pnl": -9.041561463230131,
+      "pnl_percent": -25.012157562003566,
+      "timestamp": "2025-11-27T18:13:10.056849"
+    },
+    {
+      "token_address": "BHZVEQgKF7QLhocyz3bmxaJX81R36SVRShxyYX17UAZb",
+      "action": "sell",
+      "price": 6.311e-05,
+      "amount_usd": 82.87084511323908,
+      "quantity": 1313117.4950600395,
+      "pnl": 25.27751177990576,
+      "pnl_percent": 43.88964888280894,
+      "timestamp": "2025-11-27T18:15:14.882618"
+    },
+    {
+      "token_address": "dPKXeWvx5iEPBd6DFfZqwfoBV5AnvnUgZK1SS82Vvoh",
+      "action": "sell",
+      "price": 0.0001019,
+      "amount_usd": 20.203456501576703,
+      "quantity": 198267.48284177334,
+      "pnl": -15.425210165089966,
+      "pnl_percent": -43.294379521424595,
+      "timestamp": "2025-11-27T18:17:30.237422"
+    },
+    {
+      "token_address": "BtGvKqgHuDiF4ULtrgoiDEKGJuwhLQqsGLG6QyYj6yVE",
+      "action": "sell",
+      "price": 0.03956,
+      "amount_usd": 54.55538774080561,
+      "quantity": 1379.0542907180386,
+      "pnl": 15.183387740805603,
+      "pnl_percent": 38.56392294220665,
+      "timestamp": "2025-11-27T18:19:29.457954"
+    },
+    {
+      "token_address": "2qfmYxag6ZVWN7DcRAMYU7pwW8vSoR5YDtw9R3a2uiBq",
+      "action": "sell",
+      "price": 0.3259,
+      "amount_usd": 27.357684721099446,
+      "quantity": 83.94502829426034,
+      "pnl": 6.589684721099438,
+      "pnl_percent": 31.72999191592563,
+      "timestamp": "2025-11-27T18:23:33.443904"
+    },
+    {
+      "token_address": "9MLBoPmvVmDjPGShjtUNea8zs8NSoU6xzHCsXQGMo8r2",
+      "action": "sell",
+      "price": 0.001779,
+      "amount_usd": 55.74076843198344,
+      "quantity": 31332.641052267252,
+      "pnl": 49.70610176531677,
+      "pnl_percent": 823.6760124610593,
+      "timestamp": "2025-11-27T18:27:27.231236"
+    },
+    {
+      "token_address": "GMjQwNwe7ov7WKx7dSDc8LasFUaEe2ubg5DBk8rSFwJu",
+      "action": "sell",
+      "price": 0.0008718,
+      "amount_usd": 127.36211087420043,
+      "quantity": 146090.973702914,
+      "pnl": 99.95544420753376,
+      "pnl_percent": 364.71215351812367,
+      "timestamp": "2025-11-27T18:29:45.988899"
+    },
+    {
+      "token_address": "HYMAPCx2xh4fK2NvbcAVcNC6pHYjrop8AHxwZ77wj3dC",
+      "action": "sell",
+      "price": 1.609e-05,
+      "amount_usd": 63.22441583214116,
+      "quantity": 3929422.985216977,
+      "pnl": 8.291082498807823,
+      "pnl_percent": 15.09298998569385,
+      "timestamp": "2025-11-27T18:29:46.058800"
+    },
+    {
+      "token_address": "825SrjEbuseXFMT9bgXyC88ZzDhw8HaSfyBJvg15umU9",
+      "action": "sell",
+      "price": 9.16e-05,
+      "amount_usd": 104.3981971830986,
+      "quantity": 1139718.309859155,
+      "pnl": 55.8461971830986,
+      "pnl_percent": 115.02347417840377,
+      "timestamp": "2025-11-27T18:31:50.086571"
+    },
+    {
+      "token_address": "JCoJMxLhc1J5pNPQh9cah2xsBkDqQJd1pJm3h1Mpehdr",
+      "action": "sell",
+      "price": 9.343e-06,
+      "amount_usd": 48.88421209223249,
+      "quantity": 5232175.114228031,
+      "pnl": -0.35578790776750624,
+      "pnl_percent": -0.7225587078950167,
+      "timestamp": "2025-11-27T18:33:54.661195"
+    },
+    {
+      "token_address": "F7CNLXjh3CWAcKyWcrFRaqDgV3wQqNeSSSPczTKY7hG3",
+      "action": "sell",
+      "price": 1.621e-05,
+      "amount_usd": 61.064810948735804,
+      "quantity": 3767107.3996752505,
+      "pnl": 6.931477615402458,
+      "pnl_percent": 12.804453723034095,
+      "timestamp": "2025-11-27T18:33:54.722941"
+    },
+    {
+      "token_address": "99b1RqCE9Xq9MnHMYNuhFGjDwVYpBXpfnSpXgy9dgUu7",
+      "action": "sell",
+      "price": 9.036e-05,
+      "amount_usd": 100.49222855043176,
+      "quantity": 1112131.7900667526,
+      "pnl": 39.958895217098416,
+      "pnl_percent": 66.01139077714495,
+      "timestamp": "2025-11-27T18:33:54.808982"
+    },
+    {
+      "token_address": "GKfnA8rFoEDxXAkYPtsjvgvVn2zCbrpvS2Qxffuy5emb",
+      "action": "sell",
+      "price": 1.369e-05,
+      "amount_usd": 54.41155163974548,
+      "quantity": 3974547.2344591296,
+      "pnl": 0.2782183064121364,
+      "pnl_percent": 0.5139500734214342,
+      "timestamp": "2025-11-27T18:38:07.614471"
+    },
+    {
+      "token_address": "ETEwwzf6S9aoZ37fUaA5LLpSgbSmtcNxkjnuGuLLq1kW",
+      "action": "sell",
+      "price": 1.089,
+      "amount_usd": 72.9559741935484,
+      "quantity": 66.9935483870968,
+      "pnl": 46.9959741935484,
+      "pnl_percent": 181.03225806451613,
+      "timestamp": "2025-11-27T18:38:07.717826"
+    },
+    {
+      "token_address": "31ricWBFjstTKnAwMnY3TyESKJAHQvg9832X4T55qWiV",
+      "action": "sell",
+      "price": 1.032,
+      "amount_usd": 107.12991694863119,
+      "quantity": 103.80805905875116,
+      "pnl": 73.3819169486312,
+      "pnl_percent": 217.4407874500154,
+      "timestamp": "2025-11-27T18:40:19.469174"
+    },
+    {
+      "token_address": "2SxZge6XgMYWsmmuMyBYYgmrQ7hWNoFDajvu3fkHBm5F",
+      "action": "sell",
+      "price": 0.0001499,
+      "amount_usd": 113.50305362078494,
+      "quantity": 757191.8186843558,
+      "pnl": 90.67372028745162,
+      "pnl_percent": 397.18076285240465,
+      "timestamp": "2025-11-27T18:44:08.452798"
+    },
+    {
+      "token_address": "zKeqNuG7E9RS9MHHuhSX6J4pCLGb71SuDfJq6n4nhyw",
+      "action": "sell",
+      "price": 1.237e-05,
+      "amount_usd": 61.718922191946724,
+      "quantity": 4989403.57250984,
+      "pnl": 6.7855888586133855,
+      "pnl_percent": 12.352406902815627,
+      "timestamp": "2025-11-27T18:46:05.160116"
+    },
+    {
+      "token_address": "2yeSwCAUK7LnYHWQz8j2LJPgigWT89pAiFo9jQrFdkBF",
+      "action": "sell",
+      "price": 0.2252,
+      "amount_usd": 32.89922341024198,
+      "quantity": 146.08891389983117,
+      "pnl": -19.020776589758015,
+      "pnl_percent": -36.634777715250415,
+      "timestamp": "2025-11-27T18:46:05.235444"
+    },
+    {
+      "token_address": "5D23XFtka616UZgZnWS4TUWCxaa13f6uMwKBJADhLrEd",
+      "action": "sell",
+      "price": 6.096e-05,
+      "amount_usd": 84.64890886392011,
+      "quantity": 1388597.5863503956,
+      "pnl": 29.035575530586772,
+      "pnl_percent": 52.209737827715365,
+      "timestamp": "2025-11-27T18:52:49.327342"
+    },
+    {
+      "token_address": "2bdfN9HHZoQ2dtepFvxZTHg4DPAXsqJTWL2PegAYqXVU",
+      "action": "sell",
+      "price": 1.156e-05,
+      "amount_usd": 52.00895440895441,
+      "quantity": 4499044.499044499,
+      "pnl": -2.924378924378927,
+      "pnl_percent": -5.323505323505328,
+      "timestamp": "2025-11-27T18:54:47.284677"
+    },
+    {
+      "token_address": "ANpkXuughLAMFs8tVESLySgEcrpL1oBr34qvGELbcMXX",
+      "action": "sell",
+      "price": 1.785e-05,
+      "amount_usd": 30.00530393325388,
+      "quantity": 1680969.4080254275,
+      "pnl": -26.40802940007946,
+      "pnl_percent": -46.81168057210965,
+      "timestamp": "2025-11-27T18:58:01.665152"
+    },
+    {
+      "token_address": "3HfuznhxaiA4m5BFN4EZe5VWPeDzUit1YjVjreiS4daZ",
+      "action": "sell",
+      "price": 1.79,
+      "amount_usd": 120.82267290691631,
+      "quantity": 67.49869994799793,
+      "pnl": 94.8626729069163,
+      "pnl_percent": 365.4186167446698,
+      "timestamp": "2025-11-27T19:00:30.084957"
+    },
+    {
+      "token_address": "4uBH9KkRtwr3NrdUirm5tqVjyRXnyVRaxxM1xyFayT83",
+      "action": "sell",
+      "price": 0.002118,
+      "amount_usd": 103.10119911770603,
+      "quantity": 48678.56426709444,
+      "pnl": 54.54919911770603,
+      "pnl_percent": 112.35211550030077,
+      "timestamp": "2025-11-27T19:00:30.158123"
+    },
+    {
+      "token_address": "B1YxidkcK6tWe2X3RzCK4jmmmmdikFMMTE52ff9LX4gv",
+      "action": "sell",
+      "price": 1.346e-05,
+      "amount_usd": 54.62028985507248,
+      "quantity": 4057971.014492755,
+      "pnl": 0.4869565217391328,
+      "pnl_percent": 0.8995502248875603,
+      "timestamp": "2025-11-27T19:00:30.213343"
+    },
+    {
+      "token_address": "8pSVoBDHeYJ2P12JuzNkqcYtqxXEkad6qfhFUk8PWLvB",
+      "action": "sell",
+      "price": 7.329e-06,
+      "amount_usd": 44.164489694561716,
+      "quantity": 6025991.225891897,
+      "pnl": -4.368843638771625,
+      "pnl_percent": -9.001738266699775,
+      "timestamp": "2025-11-27T19:00:30.282669"
+    },
+    {
+      "token_address": "A7mXRYiBXbiUyE9XJpKKTKzPj9bpFS5Vxjqj7EtLnNV6",
+      "action": "sell",
+      "price": 0.0002983,
+      "amount_usd": 114.97097690188599,
+      "quantity": 385420.6399660945,
+      "pnl": 54.34431023521932,
+      "pnl_percent": 89.63763509218053,
+      "timestamp": "2025-11-27T19:01:33.335204"
+    },
+    {
+      "token_address": "84MUq2WzNuktyHv5xhnEQwWRPab4XrcaY5XJkJdZdR9W",
+      "action": "sell",
+      "price": 0.1535,
+      "amount_usd": 51.92,
+      "quantity": 338.24104234527687,
+      "pnl": 0.0,
+      "pnl_percent": 0.0,
+      "timestamp": "2025-11-27T19:03:08.975637"
+    },
+    {
+      "token_address": "BVpfc2WRMcnZwQNDafQtzd21vJLZaUP5ZyYwrmeD5dvi",
+      "action": "sell",
+      "price": 3.004e-05,
+      "amount_usd": 25.9091894127378,
+      "quantity": 862489.6608767576,
+      "pnl": -29.704143920595534,
+      "pnl_percent": -53.411910669975185,
+      "timestamp": "2025-11-27T19:03:09.054422"
+    },
+    {
+      "token_address": "4MhU9RGU7crfxkeahxudU47bRqGKLGn4P9mJiZE56uDP",
+      "action": "sell",
+      "price": 1.19,
+      "amount_usd": 69.12984615384615,
+      "quantity": 58.092307692307685,
+      "pnl": 48.36184615384615,
+      "pnl_percent": 232.86713286713288,
+      "timestamp": "2025-11-27T19:05:05.535451"
+    },
+    {
+      "token_address": "2BQmKYentFW7pML18WzgmXwsa4tfNNntYbpYPRWhkycm",
+      "action": "sell",
+      "price": 0.3968,
+      "amount_usd": 73.73606299212598,
+      "quantity": 185.82677165354332,
+      "pnl": 21.816062992125985,
+      "pnl_percent": 42.0186113099499,
+      "timestamp": "2025-11-27T19:05:05.614426"
+    },
+    {
+      "token_address": "9E2yUzousBcNFFFCN8G1Q5tCqSEn8RWirQbhnJvrHUAu",
+      "action": "sell",
+      "price": 1.583e-05,
+      "amount_usd": 109.12992079656033,
+      "quantity": 6893867.390812403,
+      "pnl": 58.35658746322699,
+      "pnl_percent": 114.93550577053631,
+      "timestamp": "2025-11-27T19:07:08.354635"
+    },
+    {
+      "token_address": "H7TAt7LES8AkztcZZXodfXANCj7KX3AtCQL5rX9P5LLj",
+      "action": "sell",
+      "price": 0.03731,
+      "amount_usd": 39.97390012381346,
+      "quantity": 1071.3990920346678,
+      "pnl": -11.946099876186546,
+      "pnl_percent": -23.008666941807675,
+      "timestamp": "2025-11-27T19:11:17.084431"
+    },
+    {
+      "token_address": "E78zffVJ55xmwaJorHiGfniSTz6LV2seGR7WmrPyXpAG",
+      "action": "sell",
+      "price": 6.31e-05,
+      "amount_usd": 96.5806092715232,
+      "quantity": 1530596.0264900664,
+      "pnl": 38.800609271523186,
+      "pnl_percent": 67.1523178807947,
+      "timestamp": "2025-11-27T19:13:32.711149"
+    },
+    {
+      "token_address": "3s7qMwYHfATQvW3Hpb2PAAVJAHjTbQqgrwzNr5zLAYph",
+      "action": "sell",
+      "price": 1.152e-05,
+      "amount_usd": 58.98756302521008,
+      "quantity": 5120448.179271708,
+      "pnl": 4.147563025210078,
+      "pnl_percent": 7.563025210084024,
+      "timestamp": "2025-11-27T19:17:34.161465"
+    },
+    {
+      "token_address": "ACpXX54bQXqnNFCBVumQn1gqg6oEqkj24U8XCR7c5J2a",
+      "action": "sell",
+      "price": 0.6143,
+      "amount_usd": 78.48045275590552,
+      "quantity": 127.75590551181104,
+      "pnl": 26.560452755905512,
+      "pnl_percent": 51.15649606299212,
+      "timestamp": "2025-11-27T19:17:34.242055"
+    },
+    {
+      "token_address": "DWCggXBmb7ELzPv9tNnszWMfNcYpj26wdkvHafz6WqJB",
+      "action": "sell",
+      "price": 1.18,
+      "amount_usd": 86.89207942395811,
+      "quantity": 73.6373554440323,
+      "pnl": 53.14407942395811,
+      "pnl_percent": 157.47327078332972,
+      "timestamp": "2025-11-27T19:17:34.313243"
+    },
+    {
+      "token_address": "7DfCnwd5JpaQiJkJniCzwq6hzHM5TSCgLnuFGGx4L8hN",
+      "action": "sell",
+      "price": 0.0002572,
+      "amount_usd": 120.26116314408071,
+      "quantity": 467578.3948059125,
+      "pnl": 97.69582981074737,
+      "pnl_percent": 432.9465395772897,
+      "timestamp": "2025-11-27T19:19:53.600035"
+    },
+    {
+      "token_address": "GLz8dN2tfPUGAJS1jQf8C99igJvFG4anpyf3P7idv1zG",
+      "action": "sell",
+      "price": 2.34e-05,
+      "amount_usd": 34.75703001579779,
+      "quantity": 1485343.1630682817,
+      "pnl": -21.656303317535546,
+      "pnl_percent": -38.38862559241706,
+      "timestamp": "2025-11-27T19:22:24.234606"
+    },
+    {
+      "token_address": "E9D3Hj7yiFR4kRPUstMw7zdc99Grp8McNKvwT7w8o75w",
+      "action": "sell",
+      "price": 7.942e-05,
+      "amount_usd": 83.3584888888889,
+      "quantity": 1049590.643274854,
+      "pnl": 23.531822222222218,
+      "pnl_percent": 39.333333333333314,
+      "timestamp": "2025-11-27T19:22:24.309423"
+    },
+    {
+      "token_address": "9xBE43oGzDNVDHc5yUjgNw5qiAJG1aoAkjroeV1DWwn8",
+      "action": "sell",
+      "price": 1.09,
+      "amount_usd": 90.31726779444621,
+      "quantity": 82.8598787105011,
+      "pnl": 64.35726779444622,
+      "pnl_percent": 247.90935205872967,
+      "timestamp": "2025-11-27T19:26:01.361716"
+    },
+    {
+      "token_address": "2QCmnEJ6Wt5UNWDCMWdfZkKUs8ppBeJ7iqfrAvXsbTyG",
+      "action": "sell",
+      "price": 1.45e-05,
+      "amount_usd": 60.56207159177457,
+      "quantity": 4176694.592536177,
+      "pnl": 5.722071591774564,
+      "pnl_percent": 10.434120335110437,
+      "timestamp": "2025-11-27T19:28:11.097724"
+    },
+    {
+      "token_address": "27SAZ4qeBz81jJPyLxut5C2SBXY4pvvRxsKW3NJCPk7w",
+      "action": "sell",
+      "price": 0.002298,
+      "amount_usd": 60.9014534883721,
+      "quantity": 26501.937984496126,
+      "pnl": 6.201453488372101,
+      "pnl_percent": 11.337209302325595,
+      "timestamp": "2025-11-27T19:28:11.205372"
+    },
+    {
+      "token_address": "DH9MrrAcAGHSGJfDqnXRZaccT5drMxd9JhkyXc5TBBxV",
+      "action": "sell",
+      "price": 1.408e-05,
+      "amount_usd": 62.83195234226916,
+      "quantity": 4462496.61521798,
+      "pnl": 7.898619008935825,
+      "pnl_percent": 14.37855402112104,
+      "timestamp": "2025-11-27T19:30:27.220456"
+    },
+    {
+      "token_address": "Deu35ByWH4pPviBKWDAfT19UTNTXhk96suNBUSWqGz3V",
+      "action": "sell",
+      "price": 1.249e-05,
+      "amount_usd": 59.62304526748973,
+      "quantity": 4773662.55144033,
+      "pnl": 5.489711934156384,
+      "pnl_percent": 10.141093474426816,
+      "timestamp": "2025-11-27T19:30:27.307515"
+    },
+    {
+      "token_address": "H33SAXHHdSK4qMy4NT9uLq4pGx9Jrk7SnimLHpUjNQ3h",
+      "action": "sell",
+      "price": 3.815e-05,
+      "amount_usd": 57.78000000000001,
+      "quantity": 1514547.8374836175,
+      "pnl": 0.0,
+      "pnl_percent": 0.0,
+      "timestamp": "2025-11-27T19:30:27.365691"
+    },
+    {
+      "token_address": "Fk1KQ4Wn9vuTcRCxYAq2fmWvCwywCKJ7sbXWjrqpPEx8",
+      "action": "sell",
+      "price": 0.4385,
+      "amount_usd": 76.32222594703319,
+      "quantity": 174.05296681193428,
+      "pnl": 24.402225947033184,
+      "pnl_percent": 46.99966476701307,
+      "timestamp": "2025-11-27T19:32:29.915356"
+    },
+    {
+      "token_address": "6y5TtiVpY3WusfuSAFJAxS6meFhE5tEGjnhbWC4LKRGB",
+      "action": "sell",
+      "price": 0.005322,
+      "amount_usd": 89.68337978613316,
+      "quantity": 16851.44302633092,
+      "pnl": 40.83104645279982,
+      "pnl_percent": 83.5805450155226,
+      "timestamp": "2025-11-27T19:32:30.001684"
+    },
+    {
+      "token_address": "F5XueQ9VXeqL1AxNc2QuyLbukDa8K7VbYZMBjXfcxexe",
+      "action": "sell",
+      "price": 0.3312,
+      "amount_usd": 41.68862330498736,
+      "quantity": 125.87144717689421,
+      "pnl": -13.078043361679308,
+      "pnl_percent": -23.879567915421738,
+      "timestamp": "2025-11-27T19:32:30.073146"
+    },
+    {
+      "token_address": "BiCbLLTY1drdGqrNHozT3m2WmfKoFrL241EdrCM13FpZ",
+      "action": "sell",
+      "price": 0.03717,
+      "amount_usd": 24.616529470816012,
+      "quantity": 662.2687508963145,
+      "pnl": -21.563470529184,
+      "pnl_percent": -46.6943926573928,
+      "timestamp": "2025-11-27T19:32:30.142699"
+    },
+    {
+      "token_address": "2Ptv9tDnf3eidPGB94ERsh6NN8tEuj1dyQzXqQDABid9",
+      "action": "sell",
+      "price": 9.642e-06,
+      "amount_usd": 105.94169373865701,
+      "quantity": 10987522.68602541,
+      "pnl": 57.508693738657,
+      "pnl_percent": 118.73865698729583,
+      "timestamp": "2025-11-27T19:34:36.917082"
+    },
+    {
+      "token_address": "BN61zzBqY6pm2ehDSwrkVBLyGxTrHWk9oyWLkiUqk8fY",
+      "action": "sell",
+      "price": 0.3959,
+      "amount_usd": 70.02749018036072,
+      "quantity": 176.88176352705412,
+      "pnl": 25.895490180360717,
+      "pnl_percent": 58.67735470941883,
+      "timestamp": "2025-11-27T19:34:37.008547"
+    },
+    {
+      "token_address": "BFw6wxENTyd6CNZq2Unwoz2VDAAekedF21Lcc2NcFAep",
+      "action": "sell",
+      "price": 2.401e-05,
+      "amount_usd": 36.617575921420205,
+      "quantity": 1525096.8730287466,
+      "pnl": -19.795757411913137,
+      "pnl_percent": -35.09056501757233,
+      "timestamp": "2025-11-27T19:36:42.043901"
+    },
+    {
+      "token_address": "3aeYhkgruv44JwSh4RDT9J73A3LMbAwvQs3DwMqUa8Cu",
+      "action": "sell",
+      "price": 4.208e-05,
+      "amount_usd": 12.528761904761904,
+      "quantity": 297736.7372804635,
+      "pnl": -42.284571428571425,
+      "pnl_percent": -77.14285714285715,
+      "timestamp": "2025-11-27T19:42:52.717519"
+    },
+    {
+      "token_address": "A3rWDXk4gQ5HFWxnmghFhgpeBXPjhXyNr21PcofCWh7G",
+      "action": "sell",
+      "price": 1.061e-05,
+      "amount_usd": 56.10959080657287,
+      "quantity": 5288368.596283965,
+      "pnl": 6.869590806572874,
+      "pnl_percent": 13.951240468263352,
+      "timestamp": "2025-11-27T19:42:52.804817"
+    },
+    {
+      "token_address": "9mrk1pKYsV2CNKTrvSqrypVMQnqHBxUpsNdc64q6L31L",
+      "action": "sell",
+      "price": 1.603e-05,
+      "amount_usd": 62.89866666666668,
+      "quantity": 3923809.5238095243,
+      "pnl": 7.965333333333338,
+      "pnl_percent": 14.500000000000007,
+      "timestamp": "2025-11-27T19:42:52.864328"
+    },
+    {
+      "token_address": "8AuNCWwkeE7p6UVd4vyT5pbYvX9HT2wMuHHFN9nEj5Dt",
+      "action": "sell",
+      "price": 3.869e-05,
+      "amount_usd": 60.38715627822943,
+      "quantity": 1560794.941282746,
+      "pnl": 2.793822944896107,
+      "pnl_percent": 4.85094850948508,
+      "timestamp": "2025-11-27T19:46:48.544400"
+    },
+    {
+      "token_address": "82UY6PzgohTcZUxTyLKSfR8NPhb4iRmzcSbRtpmJCJtf",
+      "action": "sell",
+      "price": 0.3593,
+      "amount_usd": 51.92000000000001,
+      "quantity": 144.5032006679655,
+      "pnl": 0.0,
+      "pnl_percent": 0.0,
+      "timestamp": "2025-11-27T19:46:48.629914"
+    },
+    {
+      "token_address": "2k4YW87mtWmeg4cbiU2TZcBJrBL7fyETSwiKe2i9JDWR",
+      "action": "sell",
+      "price": 4.227e-05,
+      "amount_usd": 15.358760985144645,
+      "quantity": 363348.9705499088,
+      "pnl": -31.11357234818869,
+      "pnl_percent": -66.95074276778733,
+      "timestamp": "2025-11-27T19:49:11.640614"
+    },
+    {
+      "token_address": "FzxsgbF3vGB5qfHm3Y3NDFNfcrrovpvabYDFVbGKnCcf",
+      "action": "sell",
+      "price": 5.921e-06,
+      "amount_usd": 72.63263293864371,
+      "quantity": 12266953.713670615,
+      "pnl": 15.652632938643697,
+      "pnl_percent": 27.470398277717962,
+      "timestamp": "2025-11-27T19:49:11.720704"
+    },
+    {
+      "token_address": "2raxnAQtdEzZoCkFH92Xt5Hq9PaYnNfJKAYJZbuRpF5t",
+      "action": "sell",
+      "price": 0.1874,
+      "amount_usd": 42.67459649122807,
+      "quantity": 227.71929824561403,
+      "pnl": -9.245403508771929,
+      "pnl_percent": -17.807017543859647,
+      "timestamp": "2025-11-27T19:49:11.794875"
+    },
+    {
+      "token_address": "CzsY91HYBcNQsNE1irwmRn2GmXfq1iSqQEgZJsvwQPuK",
+      "action": "sell",
+      "price": 7.126e-05,
+      "amount_usd": 77.49327597444923,
+      "quantity": 1087472.2982661973,
+      "pnl": 21.879942641115893,
+      "pnl_percent": 39.34298005475167,
+      "timestamp": "2025-11-27T19:51:15.627483"
+    },
+    {
+      "token_address": "Fua6ZLZmSL2p7ha41T8w4zcPmovxkBxDrjUZzcTfNzEZ",
+      "action": "sell",
+      "price": 1.424e-05,
+      "amount_usd": 56.43182040019523,
+      "quantity": 3962908.7359687663,
+      "pnl": 2.2984870668618824,
+      "pnl_percent": 4.245973645680817,
+      "timestamp": "2025-11-27T19:51:15.694627"
+    },
+    {
+      "token_address": "56XZ3CDRqhWJqJoKFsSRNRjU96RGo3Vv2fMKGKNjNGBj",
+      "action": "sell",
+      "price": 1.027e-05,
+      "amount_usd": 53.23315689981097,
+      "quantity": 5183364.839319471,
+      "pnl": -1.6068431001890382,
+      "pnl_percent": -2.9300567107750513,
+      "timestamp": "2025-11-27T19:51:15.763597"
+    },
+    {
+      "token_address": "EUGNkVLshW8cVm5VnEVxUjU8ktk4iR3orrmFzdg13Ato",
+      "action": "sell",
+      "price": 0.001257,
+      "amount_usd": 70.6113976377953,
+      "quantity": 56174.540682414714,
+      "pnl": 13.538064304461953,
+      "pnl_percent": 23.720472440944892,
+      "timestamp": "2025-11-27T19:57:15.224869"
+    },
+    {
+      "token_address": "DTZHJFwXioA7TB7BVcd4L8DJWqUNaoR6kb5fZUG6RA6o",
+      "action": "sell",
+      "price": 0.246,
+      "amount_usd": 82.50852713178296,
+      "quantity": 335.40051679586566,
+      "pnl": 30.58852713178295,
+      "pnl_percent": 58.91472868217055,
+      "timestamp": "2025-11-27T19:57:15.318447"
+    },
+    {
+      "token_address": "E19ggMZEH4xjx3rs5VHpbZWzdT5fsBFKcCXHnNfz9dt1",
+      "action": "sell",
+      "price": 9.892e-05,
+      "amount_usd": 71.23119397456477,
+      "quantity": 720088.899864181,
+      "pnl": 12.911193974564764,
+      "pnl_percent": 22.13853562168169,
+      "timestamp": "2025-11-27T19:57:15.380341"
+    },
+    {
+      "token_address": "56DUDgowz27BCyM6w4hT61bmZMXKLXKstzT6XTrRYaU2",
+      "action": "sell",
+      "price": 6.476e-05,
+      "amount_usd": 64.11596115596116,
+      "quantity": 990054.9900549902,
+      "pnl": 7.70262782262782,
+      "pnl_percent": 13.65391365391365,
+      "timestamp": "2025-11-27T19:58:59.531651"
+    },
+    {
+      "token_address": "EWVWwvfaRgamsYgF1BUZxny991BWzv6WYGw8sss66Z5h",
+      "action": "sell",
+      "price": 0.08485,
+      "amount_usd": 51.92,
+      "quantity": 611.9033588685917,
+      "pnl": 0.0,
+      "pnl_percent": 0.0,
+      "timestamp": "2025-11-27T20:01:26.139100"
+    },
+    {
+      "token_address": "AfWXXLLciJSeQjxHJpvADtbLMy4D6byJ9Ldsgsm1ynW3",
+      "action": "sell",
+      "price": 0.1638,
+      "amount_usd": 16.003589993358425,
+      "quantity": 97.7020146114678,
+      "pnl": -28.12841000664158,
+      "pnl_percent": -63.73699357980961,
+      "timestamp": "2025-11-27T20:01:26.226411"
+    },
+    {
+      "token_address": "ByopcvSamiX2vekZbT7Nj2grjVt8ZTgH7chNKJam2cpt",
+      "action": "sell",
+      "price": 0.9681,
+      "amount_usd": 110.00048712667352,
+      "quantity": 113.62512873326467,
+      "pnl": 65.86848712667351,
+      "pnl_percent": 149.25334706488152,
+      "timestamp": "2025-11-27T20:07:51.949818"
+    },
+    {
+      "token_address": "EK6wgoAjnuxHSnsAT73ZJcCPy5ipYQodjCyXWchFt8KH",
+      "action": "sell",
+      "price": 4.944e-05,
+      "amount_usd": 74.63407010971368,
+      "quantity": 1509588.7967175096,
+      "pnl": 18.22073677638034,
+      "pnl_percent": 32.298635268932294,
+      "timestamp": "2025-11-27T20:07:52.015112"
+    },
+    {
+      "token_address": "5k1pfi2E56y8ciQkhbT8ao3WqjgrhaARuAjFkhW5Gnye",
+      "action": "sell",
+      "price": 1.374e-05,
+      "amount_usd": 57.050944822373395,
+      "quantity": 4152179.3902746285,
+      "pnl": 2.1176114890400615,
+      "pnl_percent": 3.8548752834467135,
+      "timestamp": "2025-11-27T20:07:52.076867"
+    },
+    {
+      "token_address": "Av2bP2sUQ3cb2yiGEvrjTcLAkCT4aCeMsUgbeNvZkD7u",
+      "action": "sell",
+      "price": 4.739e-05,
+      "amount_usd": 78.05628807785888,
+      "quantity": 1647104.6228710464,
+      "pnl": 21.64295474452555,
+      "pnl_percent": 38.36496350364963,
+      "timestamp": "2025-11-27T20:11:47.254029"
+    },
+    {
+      "token_address": "AGEozaZybUfCk5T95YMBkkwmpDjadm3Sh8vFAaGTdeq1",
+      "action": "sell",
+      "price": 1.3,
+      "amount_usd": 116.2798833819242,
+      "quantity": 89.44606413994168,
+      "pnl": 82.5318833819242,
+      "pnl_percent": 244.55340577789556,
+      "timestamp": "2025-11-27T20:13:53.866718"
+    },
+    {
+      "token_address": "5UjA66hFcEZ5UvYYC9c7w6ibDcJc1qTwpSvcLnJC6MNN",
+      "action": "sell",
+      "price": 4.78e-05,
+      "amount_usd": 12.116788538266231,
+      "quantity": 253489.29996372867,
+      "pnl": -34.4745447950671,
+      "pnl_percent": -73.99347116430903,
+      "timestamp": "2025-11-27T20:16:00.046659"
+    },
+    {
+      "token_address": "39bhs142C2nFmzTrk7pssGSDZh5Z4obg2jeyy7XcBeC7",
+      "action": "sell",
+      "price": 0.9697,
+      "amount_usd": 95.06575528700907,
+      "quantity": 98.03625377643505,
+      "pnl": 69.10575528700907,
+      "pnl_percent": 266.20090634441095,
+      "timestamp": "2025-11-27T20:18:08.215188"
+    },
+    {
+      "token_address": "8SDMSyFFsU8EE6MJ7nv8T6Y6K4GoWNJ6AvMSULpJWM5R",
+      "action": "sell",
+      "price": 0.009822,
+      "amount_usd": 68.9595748839482,
+      "quantity": 7020.9300431631245,
+      "pnl": 11.486241550614862,
+      "pnl_percent": 19.985340825800126,
+      "timestamp": "2025-11-27T20:20:35.724676"
+    },
+    {
+      "token_address": "9QrcyLwPjQk6xmQpe76TBSRcJ4dhoGyvGkNio49tvqDY",
+      "action": "sell",
+      "price": 0.0002394,
+      "amount_usd": 95.63341705221416,
+      "quantity": 399471.2491738269,
+      "pnl": 35.19341705221415,
+      "pnl_percent": 58.228684732319905,
+      "timestamp": "2025-11-27T20:20:35.911732"
+    },
+    {
+      "token_address": "6ZoBDFmmEjALeeLKycyWQqdC2yGpL29mzoQxZsLZuLCz",
+      "action": "sell",
+      "price": 0.0002893,
+      "amount_usd": 92.31207719298246,
+      "quantity": 319087.7192982456,
+      "pnl": 31.68541052631578,
+      "pnl_percent": 52.26315789473682,
+      "timestamp": "2025-11-27T20:20:36.189575"
+    },
+    {
+      "token_address": "7jJbxwwQHocf5ZnnXGgdhL9cWFC2XX5jUxDhVmZK1BKE",
+      "action": "sell",
+      "price": 7.886e-05,
+      "amount_usd": 116.39049914011127,
+      "quantity": 1475912.999494183,
+      "pnl": 67.75916580677794,
+      "pnl_percent": 139.33232169954474,
+      "timestamp": "2025-11-27T20:20:36.466178"
+    },
+    {
+      "token_address": "8jSezDu8oiEMsq6mPeqH9d8qEFwEoBbXtTT7A5nzgF4c",
+      "action": "sell",
+      "price": 0.0001915,
+      "amount_usd": 77.17484318996415,
+      "quantity": 403001.7921146953,
+      "pnl": 17.20817652329748,
+      "pnl_percent": 28.69623655913977,
+      "timestamp": "2025-11-27T20:20:36.644964"
+    },
+    {
+      "token_address": "7L9Yv9x1kJiT2euCKrU9iPfoPPGtKBwXC9XaKR2iUMKi",
+      "action": "sell",
+      "price": 0.0002066,
+      "amount_usd": 79.62790421699513,
+      "quantity": 385420.6399660945,
+      "pnl": 19.00123755032846,
+      "pnl_percent": 31.341385886840435,
+      "timestamp": "2025-11-27T20:20:36.931752"
+    },
+    {
+      "token_address": "3RNk48Ht7SCRhjnQBbcuQJ2ibmQMxsjgbrmuBtmanJ3V",
+      "action": "sell",
+      "price": 6.825e-06,
+      "amount_usd": 70.88695090439278,
+      "quantity": 10386366.432878062,
+      "pnl": 14.613617571059436,
+      "pnl_percent": 25.968992248062023,
+      "timestamp": "2025-11-27T20:20:37.222760"
+    },
+    {
+      "token_address": "774E8jjs8ijdN38Vyz2BvbcYiVLSvdhbm76M66NRn6Dx",
+      "action": "sell",
+      "price": 2.17,
+      "amount_usd": 105.75032851511172,
+      "quantity": 48.73287028346162,
+      "pnl": 79.79032851511171,
+      "pnl_percent": 307.3587385019711,
+      "timestamp": "2025-11-27T20:20:37.588918"
+    },
+    {
+      "token_address": "3omC2PaZ9wsckDyqdnXARXegmC1KXaqNm4PrXdcGMC38",
+      "action": "sell",
+      "price": 0.0001699,
+      "amount_usd": 72.23172109901503,
+      "quantity": 425142.56091238983,
+      "pnl": 17.5583877656817,
+      "pnl_percent": 32.11508553654743,
+      "timestamp": "2025-11-27T20:20:37.910947"
+    },
+    {
+      "token_address": "4kjxorQ9QQFFpWV74s7P9of1emdjnsMfr1mhnYbix2ot",
+      "action": "sell",
+      "price": 1.32e-05,
+      "amount_usd": 59.57925925925926,
+      "quantity": 4513580.24691358,
+      "pnl": 4.73925925925926,
+      "pnl_percent": 8.641975308641976,
+      "timestamp": "2025-11-27T20:20:38.085697"
+    },
+    {
+      "token_address": "AVV8m2StiWp821DG7FASZNb3ebq4K68ZKPHTHyH88kht",
+      "action": "sell",
+      "price": 1.316e-05,
+      "amount_usd": 51.88599174556932,
+      "quantity": 3942704.5399368787,
+      "pnl": -2.247341587764026,
+      "pnl_percent": -4.151493080844874,
+      "timestamp": "2025-11-27T20:20:38.249265"
+    },
+    {
+      "token_address": "6BYFpEde1rp778evu3DMQMTJK2G2hskxJ5kctjJutGru",
+      "action": "sell",
+      "price": 1.483e-05,
+      "amount_usd": 60.88649725959144,
+      "quantity": 4105630.2939711013,
+      "pnl": 5.953163926258095,
+      "pnl_percent": 10.83707025411061,
+      "timestamp": "2025-11-27T20:20:38.459326"
+    },
+    {
+      "token_address": "CQXv6hx5HiD4MgG3GZcPzgsy3xzawYQtX36EfrQ9BEJN",
+      "action": "sell",
+      "price": 1.409e-05,
+      "amount_usd": 53.60074959006795,
+      "quantity": 3804169.5947528705,
+      "pnl": -0.5325837432653968,
+      "pnl_percent": -0.9838369641602155,
+      "timestamp": "2025-11-27T20:20:38.625288"
+    },
+    {
+      "token_address": "7aA22JGywr3t5HFpELpb6tFH46ds7pGv9kFrje2iTqTS",
+      "action": "sell",
+      "price": 0.7773,
+      "amount_usd": 89.48429268292684,
+      "quantity": 115.1219512195122,
+      "pnl": 37.564292682926826,
+      "pnl_percent": 72.35033259423503,
+      "timestamp": "2025-11-27T20:20:38.969828"
+    }
+  ]
+}
