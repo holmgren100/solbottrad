@@ -69,10 +69,17 @@ class MLBot2Foundation:
         )
         logger.info("  ✅ PositionManager initialized")
 
-        # Note: PriceValidator needs API clients (DexScreener, Jupiter)
-        # For now, we'll initialize it as None - would be set up in full implementation
-        self.price_validator = None
-        logger.info("  ⚠️  PriceValidator placeholder (needs API clients)")
+        # Initialize PriceValidator with API clients
+        from trading_bot.api_clients import DexScreenerClient, JupiterClient
+        dexscreener_client = DexScreenerClient(api_key=config.dexscreener_api_key)
+        jupiter_client = JupiterClient()
+
+        self.price_validator = PriceValidator(
+            dexscreener=dexscreener_client,
+            jupiter=jupiter_client,
+            stale_minutes=config.core_config.stale_price_minutes
+        )
+        logger.info("  ✅ PriceValidator initialized")
 
         # === ✅ OPTIONAL ENHANCEMENTS ===
         logger.info("Initializing enhancement modules...")
@@ -101,7 +108,24 @@ class MLBot2Foundation:
             self.safety_filters = None
             logger.info("  ℹ️  SafetyFilters disabled (ML Bot 2 baseline mode)")
 
-        logger.info("Initialization complete!")
+        # === 🔍 TOKEN SCANNER ===
+        from trading_bot.scanner import TokenScanner
+        self.scanner = TokenScanner(
+            min_liquidity=config.core_config.min_position_liquidity,
+            min_volume_24h=10000,
+            dexscreener_api_key=config.dexscreener_api_key
+        )
+        logger.info("  ✅ TokenScanner initialized")
+
+        # === 💰 TRADE EXECUTOR ===
+        from trading_bot.executor import PaperTradingExecutor
+        if config.paper_trading:
+            self.executor = PaperTradingExecutor(initial_balance=config.paper_sol_balance)
+            logger.info(f"  ✅ PaperTradingExecutor initialized (${config.paper_sol_balance:.2f} SOL)")
+        else:
+            raise NotImplementedError("Live trading not implemented yet! Use PAPER_TRADING_MODE=true")
+
+        logger.info("✅ Initialization complete!")
 
     async def analyze_token(
         self,
@@ -301,8 +325,30 @@ class MLBot2Foundation:
         logger.debug(f"Monitoring {len(positions)} position(s)...")
 
         for position in positions:
-            # In real implementation, would get current price from PriceValidator
-            # For now, this is a placeholder showing the pattern
+            # Get current price from PriceValidator
+            try:
+                price_data = await self.price_validator.get_validated_price(
+                    position.token_address,
+                    entry_price=position.entry_price
+                )
+
+                if not price_data:
+                    logger.warning(f"⚠️  No price data for {position.symbol or position.token_address[:8]}...")
+                    continue
+
+                current_price = price_data['price']
+                current_liquidity = price_data.get('liquidity', 0)
+
+                # Update position
+                self.position_manager.update_price(
+                    position.token_address,
+                    current_price,
+                    current_liquidity
+                )
+
+            except Exception as e:
+                logger.error(f"Error getting price for {position.token_address[:8]}...: {e}")
+                continue
 
             # Check exit conditions
             # 1. Stop Loss
@@ -380,10 +426,163 @@ class MLBot2Foundation:
 
         self.running = True
 
-        # Main loop would go here
-        # For now, this is a placeholder showing the architecture
+        # Initialize API clients
+        await self.scanner.__aenter__()
 
-        logger.info("Bot is running... (Ctrl+C to stop)")
+        try:
+            # Main trading loop
+            scan_interval = self.config.core_config.scan_interval
+            monitor_interval = self.config.core_config.monitor_interval
+
+            logger.info(f"Scan interval: {scan_interval}s, Monitor interval: {monitor_interval}s")
+            logger.info("Bot is running... (Ctrl+C to stop)")
+            logger.info("")
+
+            scan_counter = 0
+            monitor_counter = 0
+
+            while self.running:
+                # === SCAN FOR NEW TOKENS ===
+                if scan_counter <= 0:
+                    await self.scan_and_trade()
+                    scan_counter = scan_interval
+
+                # === MONITOR OPEN POSITIONS ===
+                if monitor_counter <= 0:
+                    await self.monitor_positions()
+                    monitor_counter = monitor_interval
+
+                    # Print stats periodically
+                    if len(self.position_manager.get_all_positions()) > 0:
+                        self.print_statistics()
+
+                # Sleep for 1 second and decrement counters
+                await asyncio.sleep(1)
+                scan_counter -= 1
+                monitor_counter -= 1
+
+        finally:
+            # Cleanup
+            await self.scanner.__aexit__(None, None, None)
+
+    async def scan_and_trade(self):
+        """Scan for new tokens and execute trades."""
+        try:
+            # Check if we have room for more positions
+            open_positions = len(self.position_manager.get_all_positions())
+            max_positions = self.config.core_config.max_open_positions
+
+            if open_positions >= max_positions:
+                logger.info(f"Max positions reached ({open_positions}/{max_positions})")
+                return
+
+            # Scan for new tokens
+            tokens = await self.scanner.scan_new_tokens(limit=10)
+
+            if not tokens:
+                logger.debug("No new tokens found this scan")
+                return
+
+            # Analyze each token
+            for token in tokens:
+                if not self.running:
+                    break
+
+                # Check if we still have room
+                if len(self.position_manager.get_all_positions()) >= max_positions:
+                    logger.info("Max positions reached during scan")
+                    break
+
+                await self.analyze_and_trade_token(token)
+
+        except Exception as e:
+            logger.error(f"Error in scan_and_trade: {e}", exc_info=True)
+
+    async def analyze_and_trade_token(self, token_data: dict):
+        """
+        Analyze token and execute trade if approved.
+
+        Args:
+            token_data: Token data from scanner
+        """
+        try:
+            token_address = token_data['address']
+            symbol = token_data.get('symbol', '')
+
+            logger.info(f"Analyzing: {symbol} ({token_address[:8]}...)")
+
+            # Prepare data for risk assessment
+            market_data = {
+                'price_usd': token_data.get('price_usd', 0),
+                'liquidity_usd': token_data.get('liquidity_usd', 0),
+                'volume_24h': token_data.get('volume_24h', 0),
+                'price_change_5m': token_data.get('price_change_5m', 0),
+                'price_change_1h': token_data.get('price_change_1h', 0),
+                'txns_24h': token_data.get('txns_24h', 0),
+            }
+
+            # For now, use simplified security data
+            # In full implementation, would fetch from Solscan, etc.
+            security_data = {
+                'is_mintable': False,
+                'has_freeze_authority': False,
+                'ownership_renounced': True,
+            }
+
+            # Simplified sentiment and prediction
+            sentiment_score = {'score': 0.5}
+            price_prediction = {'confidence': 0.6}
+
+            # === 🔒 ANALYZE WITH PROTECTED CORE ===
+            should_trade, risk_score, reason = await self.analyze_token(
+                token_address=token_address,
+                market_data=market_data,
+                security_data=security_data,
+                sentiment_score=sentiment_score,
+                price_prediction=price_prediction
+            )
+
+            if not should_trade:
+                logger.debug(f"Token rejected: {symbol} - {reason}")
+                return
+
+            # === EXECUTE TRADE ===
+            entry_price = market_data['price_usd']
+            position_size = 70.0  # From config, would use recommended_position_size from assessment
+
+            # Check executor balance
+            balance = self.executor.get_balance()
+            if balance['available_balance'] < position_size:
+                logger.warning(f"Insufficient balance: ${balance['available_balance']:.2f} < ${position_size:.2f}")
+                return
+
+            # Execute buy
+            trade_result = await self.executor.execute_buy(
+                token_address=token_address,
+                amount_sol=position_size,
+                price_usd=entry_price,
+                symbol=symbol
+            )
+
+            if not trade_result:
+                logger.error(f"Failed to execute buy for {symbol}")
+                return
+
+            # === 🔒 OPEN POSITION IN PROTECTED CORE ===
+            position = await self.open_position(
+                token_address=token_address,
+                entry_price=entry_price,
+                amount_usd=position_size,
+                symbol=symbol
+            )
+
+            if position:
+                logger.info(f"✅ Position opened successfully: {symbol}")
+            else:
+                logger.error(f"Failed to open position for {symbol}")
+
+        except Exception as e:
+            logger.error(f"Error analyzing/trading token: {e}", exc_info=True)
 
     async def stop(self):
         """Stop the trading bot."""
@@ -403,6 +602,7 @@ class MLBot2Foundation:
 
 async def main():
     """Main entry point."""
+    bot = None
     try:
         # Load configuration
         logger.info("Loading configuration...")
@@ -411,22 +611,17 @@ async def main():
         # Create bot instance
         bot = MLBot2Foundation(config)
 
-        # Start bot
+        # Start bot (runs until Ctrl+C)
         await bot.start()
 
-        # In real implementation, bot would run its trading loop here
-        # For now, just show it initialized successfully
-        logger.info("\n✅ Bot initialized successfully!")
-        logger.info("This is a framework demonstration.")
-        logger.info("Full implementation would connect to APIs and trade.")
-
-        # Print statistics
-        bot.print_statistics()
-
     except KeyboardInterrupt:
-        logger.info("\nShutdown requested...")
+        logger.info("\n\nShutdown requested...")
+        if bot:
+            await bot.stop()
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
+        if bot:
+            await bot.stop()
         sys.exit(1)
 
 

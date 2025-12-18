@@ -23,11 +23,19 @@ Usage:
 
 from trading_bot.main import MLBot2Foundation
 from trading_bot.config import load_config, BotConfig
+from trading_bot.scanner import TokenScanner
+from trading_bot.executor import PaperTradingExecutor
+from trading_bot.api_clients import DexScreenerClient, JupiterClient, SolscanClient
 
 __all__ = [
     'MLBot2Foundation',
     'load_config',
     'BotConfig',
+    'TokenScanner',
+    'PaperTradingExecutor',
+    'DexScreenerClient',
+    'JupiterClient',
+    'SolscanClient',
 ]
 
 __version__ = "1.0.0"

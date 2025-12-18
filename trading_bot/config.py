@@ -58,6 +58,7 @@ class BotConfig:
     dexscreener_api_key: str = ''
     jupiter_api_url: str = ''
     solsniffer_api_key: str = ''
+    solscan_api_key: str = ''
     telegram_bot_token: str = ''
     telegram_chat_id: str = ''
 
@@ -180,6 +181,7 @@ def load_config(env_file: str = '.env') -> BotConfig:
         dexscreener_api_key=os.getenv('DEXSCREENER_API_KEY', ''),
         jupiter_api_url=os.getenv('JUPITER_API_URL', 'https://quote-api.jup.ag/v6'),
         solsniffer_api_key=os.getenv('SOLSNIFFER_API_KEY', ''),
+        solscan_api_key=os.getenv('SOLSCAN_API_KEY', ''),
         telegram_bot_token=os.getenv('TELEGRAM_BOT_TOKEN', ''),
         telegram_chat_id=os.getenv('TELEGRAM_CHAT_ID', ''),
 
