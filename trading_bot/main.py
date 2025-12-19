@@ -144,6 +144,22 @@ class MLBot2Foundation:
         else:
             raise NotImplementedError("Live trading not implemented yet! Use PAPER_TRADING_MODE=true")
 
+        # Compatibility attributes for TelegramCommandHandler
+        self.trading_engine = self.executor  # Alias for telegram commands
+        self.trading_engine.position_manager = self.position_manager  # Add position_manager to executor
+        self.trading_engine.stuck_liquidity_threshold = 1000.0  # Compatibility attribute
+        self.trading_engine.stuck_time_hours = 24.0  # Compatibility attribute
+        self.trading_engine.max_position_age_hours = 72.0  # Compatibility attribute
+
+        self.settings = type('Settings', (), {
+            'is_paper_trading': lambda: config.paper_trading,
+            'trading': type('Trading', (), {
+                'max_position_size': config.default_position_size,
+                'min_liquidity_usd': config.core_config.min_position_liquidity,
+                'min_confidence_score': 0.5  # Default value
+            })()
+        })()
+
         logger.info("✅ Initialization complete!")
 
     async def analyze_token(

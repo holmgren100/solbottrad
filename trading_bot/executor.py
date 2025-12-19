@@ -196,6 +196,27 @@ class PaperTradingExecutor:
         logger.info(f"Total PnL: ${balance['total_pnl']:.2f} ({balance['total_pnl_percent']:+.1f}%)")
         logger.info("=" * 60)
 
+    def get_performance_summary(self) -> Dict:
+        """
+        Get performance summary for Telegram /status command.
+
+        Returns:
+            Performance summary dict
+        """
+        balance = self.get_balance()
+        return {
+            'portfolio_value': balance['available_balance'] + balance['total_invested'],
+            'current_capital': balance['available_balance'],
+            'invested_capital': balance['total_invested'],
+            'total_pnl': balance['total_pnl'],
+            'total_return_percent': balance['total_pnl_percent'],
+            'initial_capital': balance['initial_capital'],
+            'total_trades': 0,  # Placeholder - would need to track this
+            'win_rate': 0.0,  # Placeholder - would need to track this
+            'winning_trades': 0,  # Placeholder - would need to track this
+            'losing_trades': 0  # Placeholder - would need to track this
+        }
+
 
 class LiveTradingExecutor:
     """
