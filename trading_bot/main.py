@@ -131,7 +131,7 @@ class MLBot2Foundation:
         from trading_bot.scanner import TokenScanner
         self.scanner = TokenScanner(
             min_liquidity=config.core_config.min_position_liquidity,
-            min_volume_24h=10000,
+            min_volume_24h=5000,  # Lowered from 10000 to find more tokens
             dexscreener_api_key=config.dexscreener_api_key,
             position_manager=self.position_manager
         )
