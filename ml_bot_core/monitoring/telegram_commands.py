@@ -559,14 +559,15 @@ class TelegramCommandHandler:
                         if trade_date and trade_time:
                             trade_datetime = datetime.strptime(f"{trade_date} {trade_time}", "%Y-%m-%d %H:%M:%S")
                             if trade_datetime >= yesterday:
-                                # Convert CSV row to trade dict
-                                pnl = float(row.get('PnL ($)', 0))
+                                # Convert CSV row to trade dict (strip $ and % formatting)
+                                pnl_str = row.get('PnL ($)', '$0').replace('$', '').strip()
+                                pnl_pct_str = row.get('PnL (%)', '0%').replace('%', '').replace('+', '').strip()
                                 trade = {
-                                    'pnl': pnl,
-                                    'win': row.get('Win/Loss', '').lower() == 'win',
+                                    'pnl': float(pnl_str) if pnl_str else 0,
+                                    'win': row.get('Win/Loss', '').upper() == 'WIN',
                                     'exit_reason': row.get('Exit Reason', 'unknown'),
                                     'symbol': row.get('Symbol', ''),
-                                    'pnl_percent': float(row.get('PnL (%)', 0))
+                                    'pnl_percent': float(pnl_pct_str) if pnl_pct_str else 0
                                 }
                                 daily_trades.append(trade)
                     except Exception as e:
@@ -652,14 +653,15 @@ class TelegramCommandHandler:
                         if trade_date and trade_time:
                             trade_datetime = datetime.strptime(f"{trade_date} {trade_time}", "%Y-%m-%d %H:%M:%S")
                             if trade_datetime >= week_ago:
-                                # Convert CSV row to trade dict
-                                pnl = float(row.get('PnL ($)', 0))
+                                # Convert CSV row to trade dict (strip $ and % formatting)
+                                pnl_str = row.get('PnL ($)', '$0').replace('$', '').strip()
+                                pnl_pct_str = row.get('PnL (%)', '0%').replace('%', '').replace('+', '').strip()
                                 trade = {
-                                    'pnl': pnl,
-                                    'win': row.get('Win/Loss', '').lower() == 'win',
+                                    'pnl': float(pnl_str) if pnl_str else 0,
+                                    'win': row.get('Win/Loss', '').upper() == 'WIN',
                                     'exit_reason': row.get('Exit Reason', 'unknown'),
                                     'symbol': row.get('Symbol', ''),
-                                    'pnl_percent': float(row.get('PnL (%)', 0)),
+                                    'pnl_percent': float(pnl_pct_str) if pnl_pct_str else 0,
                                     'exit_time': trade_datetime
                                 }
                                 weekly_trades.append(trade)
