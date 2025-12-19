@@ -686,16 +686,16 @@ class MLBot2Foundation:
             # === FRESH LIQUIDITY CHECK (right before buying) ===
             # Re-validate liquidity hasn't dried up since initial scan
             try:
-                fresh_price_data = await self.price_validator.get_validated_price(
+                # get_validated_price returns tuple: (price, liquidity, source)
+                validated_price, fresh_liquidity, data_source = await self.price_validator.get_validated_price(
                     token_address,
                     entry_price=entry_price
                 )
 
-                if not fresh_price_data:
+                if validated_price is None or fresh_liquidity is None:
                     logger.warning(f"Cannot verify price/liquidity for {symbol} - skipping")
                     return
 
-                fresh_liquidity = fresh_price_data.get('liquidity', 0)
                 min_liquidity = self.config.core_config.min_position_liquidity
 
                 if fresh_liquidity < min_liquidity:
@@ -704,9 +704,9 @@ class MLBot2Foundation:
                     )
                     return
 
-                # Use fresh price for entry
-                entry_price = fresh_price_data['price']
-                logger.debug(f"Liquidity verified: ${fresh_liquidity:,.0f} (min: ${min_liquidity:,.0f})")
+                # Use fresh validated price for entry
+                entry_price = validated_price
+                logger.debug(f"Liquidity verified: ${fresh_liquidity:,.0f} (min: ${min_liquidity:,.0f}) from {data_source}")
 
             except Exception as e:
                 logger.error(f"Error checking liquidity for {symbol}: {e}")
