@@ -314,16 +314,12 @@ class MLBot2Foundation:
         Returns:
             Trade object or None if failed
         """
-        # Get position before closing (for CSV tracking and notifications)
+        # Get position before closing (for CSV tracking)
         position = self.position_manager.get_position(token_address)
 
         if not position:
             logger.warning(f"Cannot close position - no position found for {token_address[:8]}...")
             return None
-
-        # Store data before closing
-        entry_liquidity = position.entry_liquidity
-        current_liquidity = position.current_liquidity
 
         # 🔒 PROTECTED CORE: Close position
         trade = self.position_manager.close_position(
@@ -360,15 +356,6 @@ class MLBot2Foundation:
                 from datetime import datetime
                 hold_time_hours = (datetime.now() - trade.entry_time).total_seconds() / 3600
 
-                # Calculate liquidity change
-                liquidity_change = None
-                if entry_liquidity > 0:
-                    liquidity_change = {
-                        'entry': entry_liquidity,
-                        'exit': current_liquidity,
-                        'change_percent': ((current_liquidity - entry_liquidity) / entry_liquidity) * 100
-                    }
-
                 await self.notifier.send_exit_notification(
                     token_address=token_address,
                     symbol=trade.symbol,
@@ -379,7 +366,7 @@ class MLBot2Foundation:
                     pnl_percent=trade.pnl_percent,
                     hold_time_hours=hold_time_hours,
                     exit_reason=reason,
-                    liquidity_change=liquidity_change
+                    liquidity_change=None  # Not tracked in Position dataclass
                 )
 
             # === OPTIONAL: Track in CSV ===
