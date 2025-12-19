@@ -204,6 +204,18 @@ class PaperTradingExecutor:
             Performance summary dict
         """
         balance = self.get_balance()
+
+        # Get trade statistics from position_manager if available
+        stats = {'total_trades': 0, 'win_rate': 0.0, 'winning_trades': 0, 'losing_trades': 0}
+        if hasattr(self, 'position_manager'):
+            pm_stats = self.position_manager.get_statistics()
+            stats = {
+                'total_trades': pm_stats.get('total_trades', 0),
+                'win_rate': pm_stats.get('win_rate', 0.0),
+                'winning_trades': pm_stats.get('winning_trades', 0),
+                'losing_trades': pm_stats.get('losing_trades', 0)
+            }
+
         return {
             'portfolio_value': balance['available_balance'] + balance['total_invested'],
             'current_capital': balance['available_balance'],
@@ -211,10 +223,10 @@ class PaperTradingExecutor:
             'total_pnl': balance['total_pnl'],
             'total_return_percent': balance['total_pnl_percent'],
             'initial_capital': balance['initial_capital'],
-            'total_trades': 0,  # Placeholder - would need to track this
-            'win_rate': 0.0,  # Placeholder - would need to track this
-            'winning_trades': 0,  # Placeholder - would need to track this
-            'losing_trades': 0  # Placeholder - would need to track this
+            'total_trades': stats['total_trades'],
+            'win_rate': stats['win_rate'],
+            'winning_trades': stats['winning_trades'],
+            'losing_trades': stats['losing_trades']
         }
 
 

@@ -537,10 +537,10 @@ class TelegramCommandHandler:
 
         try:
             from datetime import datetime, timedelta
-            import json
+            import csv
 
-            # Load trades from last 24 hours
-            trades_file = "data/ml_training/ml_trades.jsonl"
+            # Load trades from last 24 hours from CSV
+            trades_file = "data/ml_trades.csv"
             if not os.path.exists(trades_file):
                 await update.message.reply_text("📭 No trade history found")
                 return
@@ -550,13 +550,27 @@ class TelegramCommandHandler:
             daily_trades = []
 
             with open(trades_file, 'r') as f:
-                for line in f:
+                reader = csv.DictReader(f)
+                for row in reader:
                     try:
-                        trade = json.loads(line)
-                        trade_time = datetime.fromisoformat(trade.get('exit_time', ''))
-                        if trade_time >= yesterday:
-                            daily_trades.append(trade)
-                    except:
+                        # Parse date and time from CSV
+                        trade_date = row.get('Date', '')
+                        trade_time = row.get('Time', '')
+                        if trade_date and trade_time:
+                            trade_datetime = datetime.strptime(f"{trade_date} {trade_time}", "%Y-%m-%d %H:%M:%S")
+                            if trade_datetime >= yesterday:
+                                # Convert CSV row to trade dict
+                                pnl = float(row.get('PnL ($)', 0))
+                                trade = {
+                                    'pnl': pnl,
+                                    'win': row.get('Win/Loss', '').lower() == 'win',
+                                    'exit_reason': row.get('Exit Reason', 'unknown'),
+                                    'symbol': row.get('Symbol', ''),
+                                    'pnl_percent': float(row.get('PnL (%)', 0))
+                                }
+                                daily_trades.append(trade)
+                    except Exception as e:
+                        logger.debug(f"Skipping row in /daily: {e}")
                         continue
 
             if not daily_trades:
@@ -616,10 +630,10 @@ class TelegramCommandHandler:
 
         try:
             from datetime import datetime, timedelta
-            import json
+            import csv
 
-            # Load trades from last 7 days
-            trades_file = "data/ml_training/ml_trades.jsonl"
+            # Load trades from last 7 days from CSV
+            trades_file = "data/ml_trades.csv"
             if not os.path.exists(trades_file):
                 await update.message.reply_text("📭 No trade history found")
                 return
@@ -629,13 +643,28 @@ class TelegramCommandHandler:
             weekly_trades = []
 
             with open(trades_file, 'r') as f:
-                for line in f:
+                reader = csv.DictReader(f)
+                for row in reader:
                     try:
-                        trade = json.loads(line)
-                        trade_time = datetime.fromisoformat(trade.get('exit_time', ''))
-                        if trade_time >= week_ago:
-                            weekly_trades.append(trade)
-                    except:
+                        # Parse date and time from CSV
+                        trade_date = row.get('Date', '')
+                        trade_time = row.get('Time', '')
+                        if trade_date and trade_time:
+                            trade_datetime = datetime.strptime(f"{trade_date} {trade_time}", "%Y-%m-%d %H:%M:%S")
+                            if trade_datetime >= week_ago:
+                                # Convert CSV row to trade dict
+                                pnl = float(row.get('PnL ($)', 0))
+                                trade = {
+                                    'pnl': pnl,
+                                    'win': row.get('Win/Loss', '').lower() == 'win',
+                                    'exit_reason': row.get('Exit Reason', 'unknown'),
+                                    'symbol': row.get('Symbol', ''),
+                                    'pnl_percent': float(row.get('PnL (%)', 0)),
+                                    'exit_time': trade_datetime
+                                }
+                                weekly_trades.append(trade)
+                    except Exception as e:
+                        logger.debug(f"Skipping row in /weekly: {e}")
                         continue
 
             if not weekly_trades:
@@ -651,7 +680,7 @@ class TelegramCommandHandler:
             # Daily breakdown
             daily_pnl = {}
             for t in weekly_trades:
-                day = datetime.fromisoformat(t.get('exit_time', '')).strftime('%Y-%m-%d')
+                day = t['exit_time'].strftime('%Y-%m-%d')
                 daily_pnl[day] = daily_pnl.get(day, 0) + t.get('pnl', 0)
 
             # Best/worst trades
