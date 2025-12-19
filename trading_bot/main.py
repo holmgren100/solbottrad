@@ -152,7 +152,7 @@ class MLBot2Foundation:
         self.trading_engine.max_position_age_hours = 72.0  # Compatibility attribute
 
         self.settings = type('Settings', (), {
-            'is_paper_trading': lambda: config.paper_trading,
+            'is_paper_trading': lambda self: config.paper_trading,  # Fixed: lambda needs self parameter
             'trading': type('Trading', (), {
                 'max_position_size': config.default_position_size,
                 'min_liquidity_usd': config.core_config.min_position_liquidity,
