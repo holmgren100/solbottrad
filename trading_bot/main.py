@@ -132,9 +132,10 @@ class MLBot2Foundation:
         self.scanner = TokenScanner(
             min_liquidity=config.core_config.min_position_liquidity,
             min_volume_24h=10000,
-            dexscreener_api_key=config.dexscreener_api_key
+            dexscreener_api_key=config.dexscreener_api_key,
+            position_manager=self.position_manager
         )
-        logger.info("  ✅ TokenScanner initialized")
+        logger.info("  ✅ TokenScanner initialized (with trade history filter)")
 
         # === 💰 TRADE EXECUTOR ===
         from trading_bot.executor import PaperTradingExecutor

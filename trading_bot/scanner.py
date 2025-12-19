@@ -27,7 +27,8 @@ class TokenScanner:
         self,
         min_liquidity: float = 20000,
         min_volume_24h: float = 10000,
-        dexscreener_api_key: Optional[str] = None
+        dexscreener_api_key: Optional[str] = None,
+        position_manager = None
     ):
         """
         Initialize token scanner.
@@ -36,15 +37,17 @@ class TokenScanner:
             min_liquidity: Minimum liquidity (USD) to consider
             min_volume_24h: Minimum 24h volume (USD) to consider
             dexscreener_api_key: Optional API key for DexScreener
+            position_manager: Position manager to check for already-traded tokens
         """
         self.min_liquidity = min_liquidity
         self.min_volume_24h = min_volume_24h
+        self.position_manager = position_manager
 
         # API clients
         self.dexscreener = DexScreenerClient(api_key=dexscreener_api_key)
         self.jupiter = JupiterClient()
 
-        # Track scanned tokens to avoid duplicates
+        # Track scanned tokens to avoid duplicates within same session
         self.scanned_tokens: Set[str] = set()
         self.last_scan_time: Optional[datetime] = None
 
@@ -87,9 +90,19 @@ class TokenScanner:
             for token in tokens:
                 address = token.get('address')
 
-                # Skip if already scanned recently
+                # Skip if already scanned in this session
                 if address in self.scanned_tokens:
                     continue
+
+                # Skip if already traded (check closed trades)
+                if self.position_manager:
+                    already_traded = any(
+                        trade.token_address == address
+                        for trade in self.position_manager.closed_trades
+                    )
+                    if already_traded:
+                        logger.debug(f"Skipped {address[:8]}... - Already traded")
+                        continue
 
                 # Basic filters
                 liquidity = token.get('liquidity_usd', 0)
