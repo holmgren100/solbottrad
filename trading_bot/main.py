@@ -110,13 +110,21 @@ class MLBot2Foundation:
         # === 📱 TELEGRAM NOTIFICATIONS ===
         if config.telegram_bot_token and config.telegram_chat_id:
             from ml_bot_core.monitoring.telegram_notifier import TelegramNotifier
+            from ml_bot_core.monitoring.telegram_commands import TelegramCommandHandler
+
             self.notifier = TelegramNotifier(
                 bot_token=config.telegram_bot_token,
                 chat_id=config.telegram_chat_id
             )
-            logger.info("  ✅ Telegram notifications enabled")
+            self.command_handler = TelegramCommandHandler(
+                bot_token=config.telegram_bot_token,
+                chat_id=config.telegram_chat_id,
+                bot_instance=self
+            )
+            logger.info("  ✅ Telegram notifications and commands enabled")
         else:
             self.notifier = None
+            self.command_handler = None
             logger.info("  ℹ️  Telegram notifications disabled (no credentials)")
 
         # === 🔍 TOKEN SCANNER ===
@@ -486,6 +494,11 @@ class MLBot2Foundation:
         if self.notifier:
             await self.notifier.send_startup_message()
 
+        # Start Telegram command handler
+        if self.command_handler:
+            await self.command_handler.start()
+            logger.info("  ✅ Telegram commands started (/help, /status, /close)")
+
         # Initialize API clients
         await self.scanner.__aenter__()
 
@@ -606,16 +619,6 @@ class MLBot2Foundation:
                 logger.debug(f"Token rejected: {symbol} - {reason}")
                 return
 
-            # === SEND TRADE SIGNAL NOTIFICATION ===
-            if self.notifier:
-                await self.notifier.send_trade_signal(
-                    token_address=token_address,
-                    action='BUY',
-                    confidence=risk_score,
-                    price=market_data['price_usd'],
-                    reasons=[reason]
-                )
-
             # === EXECUTE TRADE ===
             entry_price = market_data['price_usd']
             position_size_usd = self.config.default_position_size  # Position size in USD
@@ -636,26 +639,7 @@ class MLBot2Foundation:
 
             if not trade_result:
                 logger.error(f"Failed to execute buy for {symbol}")
-                # Send failure notification
-                if self.notifier:
-                    await self.notifier.send_trade_execution(
-                        token_address=token_address,
-                        action='BUY',
-                        amount=position_size_usd,
-                        price=entry_price,
-                        status='FAILED'
-                    )
                 return
-
-            # Send success notification
-            if self.notifier:
-                await self.notifier.send_trade_execution(
-                    token_address=token_address,
-                    action='BUY',
-                    amount=position_size_usd,
-                    price=entry_price,
-                    status='SUCCESS'
-                )
 
             # === 🔒 OPEN POSITION IN PROTECTED CORE ===
             position = await self.open_position(
@@ -667,6 +651,20 @@ class MLBot2Foundation:
 
             if position:
                 logger.info(f"✅ Position opened successfully: {symbol}")
+
+                # Send enhanced entry notification
+                if self.notifier:
+                    await self.notifier.send_entry_notification(
+                        token_address=token_address,
+                        symbol=symbol,
+                        entry_price=entry_price,
+                        position_size=position_size_usd,
+                        score=int(risk_score * 100),  # Convert 0-1 to 0-100
+                        confidence=risk_score,
+                        token_data=market_data,
+                        rugcheck_data=None,
+                        source='DEXSCREENER'
+                    )
             else:
                 logger.error(f"Failed to open position for {symbol}")
 
