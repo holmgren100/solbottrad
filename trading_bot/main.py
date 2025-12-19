@@ -683,6 +683,35 @@ class MLBot2Foundation:
                 logger.warning(f"Insufficient capital: {balance['available_balance']:.2f} USD < {position_size_usd:.2f} USD")
                 return
 
+            # === FRESH LIQUIDITY CHECK (right before buying) ===
+            # Re-validate liquidity hasn't dried up since initial scan
+            try:
+                fresh_price_data = await self.price_validator.get_validated_price(
+                    token_address,
+                    entry_price=entry_price
+                )
+
+                if not fresh_price_data:
+                    logger.warning(f"Cannot verify price/liquidity for {symbol} - skipping")
+                    return
+
+                fresh_liquidity = fresh_price_data.get('liquidity', 0)
+                min_liquidity = self.config.core_config.min_position_liquidity
+
+                if fresh_liquidity < min_liquidity:
+                    logger.warning(
+                        f"Liquidity too low for {symbol}: ${fresh_liquidity:,.0f} < ${min_liquidity:,.0f} - skipping"
+                    )
+                    return
+
+                # Use fresh price for entry
+                entry_price = fresh_price_data['price']
+                logger.debug(f"Liquidity verified: ${fresh_liquidity:,.0f} (min: ${min_liquidity:,.0f})")
+
+            except Exception as e:
+                logger.error(f"Error checking liquidity for {symbol}: {e}")
+                return
+
             # Execute buy
             trade_result = await self.executor.execute_buy(
                 token_address=token_address,

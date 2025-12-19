@@ -90,18 +90,18 @@ class TokenScanner:
             for token in tokens:
                 address = token.get('address')
 
-                # Skip if already scanned in this session
+                # Skip if already scanned in this session (prevent duplicates within same scan)
                 if address in self.scanned_tokens:
                     continue
 
-                # Skip if already traded (check closed trades)
+                # Skip if already have open position in this token (no double positions)
                 if self.position_manager:
-                    already_traded = any(
-                        trade.token_address == address
-                        for trade in self.position_manager.closed_trades
+                    has_open_position = any(
+                        pos.token_address == address
+                        for pos in self.position_manager.get_all_positions()
                     )
-                    if already_traded:
-                        logger.debug(f"Skipped {address[:8]}... - Already traded")
+                    if has_open_position:
+                        logger.debug(f"Skipped {address[:8]}... - Already have open position")
                         continue
 
                 # Basic filters
