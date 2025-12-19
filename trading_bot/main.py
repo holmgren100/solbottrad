@@ -603,8 +603,8 @@ class MLBot2Foundation:
                 logger.info(f"Max positions reached ({open_positions}/{max_positions})")
                 return
 
-            # Scan for new tokens
-            tokens = await self.scanner.scan_new_tokens(limit=10)
+            # Scan for new tokens (increased from 10 to 50 for better sample size)
+            tokens = await self.scanner.scan_new_tokens(limit=50)
 
             if not tokens:
                 logger.debug("No new tokens found this scan")
