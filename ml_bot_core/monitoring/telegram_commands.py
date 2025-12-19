@@ -562,9 +562,12 @@ class TelegramCommandHandler:
                                 # Convert CSV row to trade dict (strip $ and % formatting)
                                 pnl_str = row.get('PnL ($)', '$0').replace('$', '').strip()
                                 pnl_pct_str = row.get('PnL (%)', '0%').replace('%', '').replace('+', '').strip()
+                                win_loss = row.get('Win/Loss', '').upper()
                                 trade = {
                                     'pnl': float(pnl_str) if pnl_str else 0,
-                                    'win': row.get('Win/Loss', '').upper() == 'WIN',
+                                    'win': win_loss == 'WIN',
+                                    'loss': win_loss == 'LOSS',
+                                    'breakeven': win_loss == 'BREAK-EVEN',
                                     'exit_reason': row.get('Exit Reason', 'unknown'),
                                     'symbol': row.get('Symbol', ''),
                                     'pnl_percent': float(pnl_pct_str) if pnl_pct_str else 0
@@ -580,9 +583,12 @@ class TelegramCommandHandler:
 
             # Calculate stats
             wins = [t for t in daily_trades if t.get('win', False)]
-            losses = [t for t in daily_trades if not t.get('win', False)]
+            losses = [t for t in daily_trades if t.get('loss', False)]
+            breakeven = [t for t in daily_trades if t.get('breakeven', False)]
             total_pnl = sum(t.get('pnl', 0) for t in daily_trades)
-            win_rate = len(wins) / len(daily_trades) * 100 if daily_trades else 0
+            # Win rate excludes breakeven trades
+            trades_with_outcome = len(wins) + len(losses)
+            win_rate = (len(wins) / trades_with_outcome * 100) if trades_with_outcome > 0 else 0
 
             # Exit reason breakdown
             exit_reasons = {}
@@ -597,7 +603,7 @@ class TelegramCommandHandler:
             message += f"Total P&L: ${total_pnl:+.2f}\n"
             message += f"Total Trades: {len(daily_trades)}\n"
             message += f"Win Rate: {win_rate:.1f}%\n"
-            message += f"Wins/Losses: {len(wins)}/{len(losses)}\n\n"
+            message += f"Wins/Losses/BE: {len(wins)}/{len(losses)}/{len(breakeven)}\n\n"
 
             if wins:
                 avg_win = sum(t.get('pnl', 0) for t in wins) / len(wins)
@@ -605,6 +611,8 @@ class TelegramCommandHandler:
             if losses:
                 avg_loss = sum(t.get('pnl', 0) for t in losses) / len(losses)
                 message += f"🔴 Average Loss: ${avg_loss:.2f}\n"
+            if breakeven:
+                message += f"⚪ Breakeven Trades: {len(breakeven)}\n"
 
             message += f"\n📝 *Exit Reasons*\n"
             for reason, count in sorted(exit_reasons.items(), key=lambda x: x[1], reverse=True):
@@ -656,9 +664,12 @@ class TelegramCommandHandler:
                                 # Convert CSV row to trade dict (strip $ and % formatting)
                                 pnl_str = row.get('PnL ($)', '$0').replace('$', '').strip()
                                 pnl_pct_str = row.get('PnL (%)', '0%').replace('%', '').replace('+', '').strip()
+                                win_loss = row.get('Win/Loss', '').upper()
                                 trade = {
                                     'pnl': float(pnl_str) if pnl_str else 0,
-                                    'win': row.get('Win/Loss', '').upper() == 'WIN',
+                                    'win': win_loss == 'WIN',
+                                    'loss': win_loss == 'LOSS',
+                                    'breakeven': win_loss == 'BREAK-EVEN',
                                     'exit_reason': row.get('Exit Reason', 'unknown'),
                                     'symbol': row.get('Symbol', ''),
                                     'pnl_percent': float(pnl_pct_str) if pnl_pct_str else 0,
@@ -675,9 +686,12 @@ class TelegramCommandHandler:
 
             # Calculate stats
             wins = [t for t in weekly_trades if t.get('win', False)]
-            losses = [t for t in weekly_trades if not t.get('win', False)]
+            losses = [t for t in weekly_trades if t.get('loss', False)]
+            breakeven = [t for t in weekly_trades if t.get('breakeven', False)]
             total_pnl = sum(t.get('pnl', 0) for t in weekly_trades)
-            win_rate = len(wins) / len(weekly_trades) * 100 if weekly_trades else 0
+            # Win rate excludes breakeven trades
+            trades_with_outcome = len(wins) + len(losses)
+            win_rate = (len(wins) / trades_with_outcome * 100) if trades_with_outcome > 0 else 0
 
             # Daily breakdown
             daily_pnl = {}
@@ -697,7 +711,7 @@ class TelegramCommandHandler:
             message += f"Total P&L: ${total_pnl:+.2f}\n"
             message += f"Total Trades: {len(weekly_trades)}\n"
             message += f"Win Rate: {win_rate:.1f}%\n"
-            message += f"Wins/Losses: {len(wins)}/{len(losses)}\n\n"
+            message += f"Wins/Losses/BE: {len(wins)}/{len(losses)}/{len(breakeven)}\n\n"
 
             if best_trade:
                 message += f"🏆 *Best Trade*\n"
