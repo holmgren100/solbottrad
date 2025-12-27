@@ -395,9 +395,19 @@ class JupiterClient:
                 if response.status == 200:
                     data = await response.json()
 
+                    # Safe null check for response
+                    if not data or not isinstance(data, dict):
+                        logger.warning(f"⚠️  Invalid Jupiter response format for {token_address[:8]}...")
+                        return None
+
                     # Response format: {"data": {"<address>": {"id": "...", "price": "..."}}}
-                    token_data = data.get('data', {}).get(token_address)
-                    if token_data and 'price' in token_data:
+                    data_dict = data.get('data')
+                    if not data_dict or not isinstance(data_dict, dict):
+                        logger.warning(f"⚠️  No Jupiter price data for {token_address[:8]}... (too new or no liquidity)")
+                        return None
+
+                    token_data = data_dict.get(token_address)
+                    if token_data and isinstance(token_data, dict) and 'price' in token_data:
                         price = float(token_data['price'])
                         logger.info(f"✅ Jupiter price for {token_address[:8]}...: ${price:.8f}")
                         return price
