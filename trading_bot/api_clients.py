@@ -63,44 +63,74 @@ class DexScreenerClient:
             if self.api_key:
                 headers['X-Api-Key'] = self.api_key
 
-            async with self.session.get(url, headers=headers) as response:
+            async with self.session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     data = await response.json()
 
                     # DexScreener returns pairs array
-                    pairs = data.get('pairs', [])
-                    if not pairs:
+                    pairs = data.get('pairs')
+                    if not pairs or not isinstance(pairs, list):
+                        logger.debug(f"No pairs found for {token_address[:8]}...")
                         return None
 
-                    # Get the main SOL pair (highest liquidity)
-                    sol_pairs = [p for p in pairs if p.get('baseToken', {}).get('address') == token_address]
+                    # Get the main SOL pair (highest liquidity) - with safe checks
+                    sol_pairs = []
+                    for p in pairs:
+                        if not p or not isinstance(p, dict):
+                            continue
+                        base_token = p.get('baseToken')
+                        if not base_token or not isinstance(base_token, dict):
+                            continue
+                        if base_token.get('address') == token_address:
+                            sol_pairs.append(p)
+
                     if not sol_pairs:
+                        logger.debug(f"No SOL pairs found for {token_address[:8]}...")
                         return None
 
-                    pair = max(sol_pairs, key=lambda p: float(p.get('liquidity', {}).get('usd', 0)))
+                    # Get pair with highest liquidity - safe version
+                    def get_liquidity(p):
+                        try:
+                            liq = p.get('liquidity') or {}
+                            if not isinstance(liq, dict):
+                                return 0
+                            return float(liq.get('usd', 0))
+                        except:
+                            return 0
 
-                    # Extract relevant data
+                    pair = max(sol_pairs, key=get_liquidity)
+
+                    # Extract relevant data with safe nested gets
+                    base_token = pair.get('baseToken') or {}
+                    liquidity = pair.get('liquidity') or {}
+                    volume = pair.get('volume') or {}
+                    price_change = pair.get('priceChange') or {}
+                    txns = pair.get('txns') or {}
+                    txns_h24 = txns.get('h24') or {}
+
                     return {
                         'address': token_address,
-                        'symbol': pair.get('baseToken', {}).get('symbol', ''),
-                        'name': pair.get('baseToken', {}).get('name', ''),
+                        'symbol': base_token.get('symbol', ''),
+                        'name': base_token.get('name', ''),
                         'price_usd': float(pair.get('priceUsd', 0)),
-                        'liquidity_usd': float(pair.get('liquidity', {}).get('usd', 0)),
-                        'volume_24h': float(pair.get('volume', {}).get('h24', 0)),
-                        'price_change_5m': float(pair.get('priceChange', {}).get('m5', 0)),
-                        'price_change_1h': float(pair.get('priceChange', {}).get('h1', 0)),
-                        'price_change_24h': float(pair.get('priceChange', {}).get('h24', 0)),
-                        'txns_24h': pair.get('txns', {}).get('h24', {}).get('buys', 0) +
-                                   pair.get('txns', {}).get('h24', {}).get('sells', 0),
+                        'liquidity_usd': float(liquidity.get('usd', 0)),
+                        'volume_24h': float(volume.get('h24', 0)),
+                        'price_change_5m': float(price_change.get('m5', 0)),
+                        'price_change_1h': float(price_change.get('h1', 0)),
+                        'price_change_24h': float(price_change.get('h24', 0)),
+                        'txns_24h': txns_h24.get('buys', 0) + txns_h24.get('sells', 0),
                         'pair_address': pair.get('pairAddress', ''),
                         'dex_id': pair.get('dexId', ''),
                     }
+                elif response.status == 404:
+                    logger.debug(f"Token {token_address[:8]}... not found on DexScreener (may be too new)")
+                    return None
                 else:
                     logger.warning(f"DexScreener API error: {response.status}")
                     return None
 
         except Exception as e:
-            logger.error(f"Error fetching token profile from DexScreener: {e}")
+            logger.debug(f"Error fetching token profile from DexScreener: {e}")
             return None
 
     async def get_latest_tokens(self, limit: int = 50, use_cycling: bool = False) -> List[Dict]:
