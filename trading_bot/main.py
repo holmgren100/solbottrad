@@ -130,8 +130,8 @@ class MLBot2Foundation:
         # === 🔍 TOKEN SCANNER ===
         from trading_bot.scanner import TokenScanner
         self.scanner = TokenScanner(
-            min_liquidity=config.core_config.min_position_liquidity,
-            min_volume_24h=5000,  # Lowered from 10000 to find more tokens
+            min_liquidity=1000,  # Lowered to let Jupiter tokens through (they often lack liquidity data)
+            min_volume_24h=1000,  # Lowered to match working bot settings
             dexscreener_api_key=config.dexscreener_api_key,
             position_manager=self.position_manager
         )
