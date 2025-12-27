@@ -378,6 +378,8 @@ class JupiterClient:
         """
         Get token price from Jupiter in USD.
 
+        Uses Jupiter Price API v2 which directly returns USD prices.
+
         Args:
             token_address: Token address
 
@@ -385,68 +387,29 @@ class JupiterClient:
             Price in USD or None
         """
         try:
-            # First get SOL/USDC price to convert to USD
-            sol_mint = "So11111111111111111111111111111111111111112"
-            usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-
-            # Get SOL price in USDC (1 SOL worth)
-            url = f"{self.base_url}/quote"
-            params = {
-                'inputMint': sol_mint,
-                'outputMint': usdc_mint,
-                'amount': 1_000_000_000,  # 1 SOL
-                'slippageBps': 50
-            }
-
-            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status != 200:
-                    logger.debug(f"Failed to get SOL/USDC price: {response.status}")
-                    return None
-
-                sol_data = await response.json()
-                sol_usdc_amount = int(sol_data.get('outAmount', 0))
-                if sol_usdc_amount == 0:
-                    return None
-
-                # USDC has 6 decimals
-                sol_price_usd = sol_usdc_amount / 1_000_000
-
-            # Now get token price in SOL
-            params = {
-                'inputMint': sol_mint,
-                'outputMint': token_address,
-                'amount': 1_000_000_000,  # 1 SOL in lamports
-                'slippageBps': 50
-            }
+            # Use Jupiter Price API v2 - much simpler and more reliable
+            url = f"https://api.jup.ag/price/v2"
+            params = {'ids': token_address}
 
             async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     data = await response.json()
 
-                    # Calculate price from quote
-                    out_amount = int(data.get('outAmount', 0))
-                    if out_amount > 0:
-                        # How many tokens for 1 SOL? = out_amount / decimals
-                        # Price of 1 token in SOL = 1 / (out_amount / decimals)
-                        # For simplicity: 1 SOL / tokens_per_sol = SOL per token
-                        # We need to know token decimals, but usually it's in the response
-                        decimals = data.get('outputDecimals', 9)  # Default to 9 if not provided
-                        tokens_per_sol = out_amount / (10 ** decimals)
-
-                        if tokens_per_sol > 0:
-                            price_in_sol = 1.0 / tokens_per_sol
-                            price_in_usd = price_in_sol * sol_price_usd
-
-                            logger.debug(f"Token {token_address[:8]}: {tokens_per_sol:.2f} tokens/SOL = ${price_in_usd:.8f}")
-                            return price_in_usd
-
-                    return None
+                    # Response format: {"data": {"<address>": {"id": "...", "price": "..."}}}
+                    token_data = data.get('data', {}).get(token_address)
+                    if token_data and 'price' in token_data:
+                        price = float(token_data['price'])
+                        logger.info(f"✅ Jupiter price for {token_address[:8]}...: ${price:.8f}")
+                        return price
+                    else:
+                        logger.warning(f"⚠️  No Jupiter price data for {token_address[:8]}... (too new or no liquidity)")
+                        return None
                 else:
-                    logger.debug(f"Failed to get token quote: {response.status}")
+                    logger.warning(f"⚠️  Jupiter Price API error {response.status} for {token_address[:8]}...")
                     return None
 
         except Exception as e:
-            logger.debug(f"Error getting Jupiter price: {e}")
+            logger.warning(f"⚠️  Error getting Jupiter price for {token_address[:8]}...: {e}")
             return None
 
     async def get_token_price_data(self, token_address: str) -> Optional[Dict]:
