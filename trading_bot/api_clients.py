@@ -376,7 +376,7 @@ class JupiterClient:
 
     async def get_token_price(self, token_address: str) -> Optional[float]:
         """
-        Get token price from Jupiter.
+        Get token price from Jupiter in USD.
 
         Args:
             token_address: Token address
@@ -385,34 +385,64 @@ class JupiterClient:
             Price in USD or None
         """
         try:
-            # Get quote for 1 SOL worth of token
+            # First get SOL/USDC price to convert to USD
             sol_mint = "So11111111111111111111111111111111111111112"
-            amount = 1_000_000_000  # 1 SOL in lamports
+            usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
+            # Get SOL price in USDC (1 SOL worth)
             url = f"{self.base_url}/quote"
             params = {
                 'inputMint': sol_mint,
-                'outputMint': token_address,
-                'amount': amount,
+                'outputMint': usdc_mint,
+                'amount': 1_000_000_000,  # 1 SOL
                 'slippageBps': 50
             }
 
-            async with self.session.get(url, params=params) as response:
+            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    logger.debug(f"Failed to get SOL/USDC price: {response.status}")
+                    return None
+
+                sol_data = await response.json()
+                sol_usdc_amount = int(sol_data.get('outAmount', 0))
+                if sol_usdc_amount == 0:
+                    return None
+
+                # USDC has 6 decimals
+                sol_price_usd = sol_usdc_amount / 1_000_000
+
+            # Now get token price in SOL
+            params = {
+                'inputMint': sol_mint,
+                'outputMint': token_address,
+                'amount': 1_000_000_000,  # 1 SOL in lamports
+                'slippageBps': 50
+            }
+
+            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     data = await response.json()
 
                     # Calculate price from quote
                     out_amount = int(data.get('outAmount', 0))
                     if out_amount > 0:
-                        # Price of token in SOL
-                        price_sol = amount / out_amount
+                        # How many tokens for 1 SOL? = out_amount / decimals
+                        # Price of 1 token in SOL = 1 / (out_amount / decimals)
+                        # For simplicity: 1 SOL / tokens_per_sol = SOL per token
+                        # We need to know token decimals, but usually it's in the response
+                        decimals = data.get('outputDecimals', 9)  # Default to 9 if not provided
+                        tokens_per_sol = out_amount / (10 ** decimals)
 
-                        # Convert to USD (would need SOL/USD price)
-                        # For now, return SOL price
-                        return price_sol
+                        if tokens_per_sol > 0:
+                            price_in_sol = 1.0 / tokens_per_sol
+                            price_in_usd = price_in_sol * sol_price_usd
+
+                            logger.debug(f"Token {token_address[:8]}: {tokens_per_sol:.2f} tokens/SOL = ${price_in_usd:.8f}")
+                            return price_in_usd
 
                     return None
                 else:
+                    logger.debug(f"Failed to get token quote: {response.status}")
                     return None
 
         except Exception as e:
