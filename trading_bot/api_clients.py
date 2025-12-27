@@ -263,11 +263,9 @@ class JupiterClient:
         Returns:
             List of token dictionaries with mint addresses and metadata
         """
-        try:
-            # Ensure session is initialized
-            if self.session is None:
-                self.session = aiohttp.ClientSession()
+        await self._ensure_session()
 
+        try:
             url = f"{self.tokens_base_url}/recent"
             params = {'limit': limit}
 
@@ -327,11 +325,9 @@ class JupiterClient:
         Returns:
             List of token dictionaries with full market data
         """
-        try:
-            # Ensure session is initialized
-            if self.session is None:
-                self.session = aiohttp.ClientSession()
+        await self._ensure_session()
 
+        try:
             # Use cycling if category not specified
             if category is None:
                 category = self.DISCOVERY_CYCLES[self.current_cycle]
@@ -382,22 +378,25 @@ class JupiterClient:
             logger.error(f"Error fetching trending tokens from Jupiter: {e}")
             return []
 
-    async def get_token_price(self, token_address: str) -> Optional[float]:
-        """
-        Get token price from Jupiter search API (WORKING ML BOT 1/2 METHOD).
-
-        Args:
-            token_address: Token address
-
-        Returns:
-            Price in USD or None
-        """
-        # Ensure session is initialized (lazy init like ML Bot 1/2)
-        if self.session is None:
+    async def _ensure_session(self):
+        """Ensure aiohttp session exists (WORKING ML BOT METHOD)."""
+        if self.session is None or (hasattr(self.session, 'closed') and self.session.closed):
             self.session = aiohttp.ClientSession()
 
+    async def get_token_price_data(self, token_address: str) -> Optional[Dict]:
+        """
+        Get price and liquidity data for a specific token (COMPLETE WORKING VERSION).
+
+        Args:
+            token_address: Token mint address
+
+        Returns:
+            Dictionary with price and liquidity data, or None if not found
+        """
+        await self._ensure_session()
+
         try:
-            # Use Jupiter search API - same as working ML Bot 1 and 2
+            # Jupiter API search endpoint - PROVEN WORKING METHOD
             url = f"{self.tokens_base_url}/search"
             params = {'q': token_address}
 
@@ -409,48 +408,44 @@ class JupiterClient:
                     for token in data:
                         token_id = token.get('id') or token.get('address')
                         if token_id and token_id.lower() == token_address.lower():
-                            # Found the token, extract USD price
+                            # Found the token, extract price and liquidity
                             price_usd = token.get('usdPrice', 0.0)
+                            liquidity = token.get('liquidity', 0.0)
 
                             if price_usd and isinstance(price_usd, (int, float)):
-                                logger.debug(f"Jupiter price for {token_address[:8]}...: ${price_usd:.8f}")
-                                return float(price_usd)
+                                return {
+                                    'price_usd': float(price_usd),
+                                    'liquidity_usd': float(liquidity) if liquidity else 0.0,
+                                    'volume_24h': 0.0,  # Jupiter doesn't provide volume data
+                                    'volume_1h': 0.0,   # Jupiter doesn't provide volume data
+                                    'symbol': token.get('symbol', 'UNKNOWN'),
+                                    'name': token.get('name', 'Unknown'),
+                                    'source': 'jupiter',
+                                    'dex_id': 'unknown',  # Jupiter doesn't provide DEX platform
+                                    # Transaction data (Jupiter doesn't provide, set to 0)
+                                    'txns_h1_buys': 0,
+                                    'txns_h1_sells': 0,
+                                    'txns_m5_buys': 0,
+                                    'txns_m5_sells': 0
+                                }
 
                     # Token not found in search results
                     logger.debug(f"Token {token_address[:8]}... not found in Jupiter search")
                     return None
                 else:
-                    # 400/404 = token not found (expected for very new tokens)
+                    # 400/404/429 = token not found or rate limited (expected), use debug
+                    # Other errors = real issues, use warning
                     if response.status in [400, 404]:
-                        logger.debug(f"Jupiter: token {token_address[:8]}... not found ({response.status})")
+                        logger.debug(f"Jupiter search: token {token_address[:8]}... not found ({response.status})")
+                    elif response.status == 429:
+                        logger.debug(f"Jupiter search: rate limited (429) - skipping {token_address[:8]}...")
                     else:
-                        logger.warning(f"Jupiter API error {response.status} for {token_address[:8]}...")
+                        logger.warning(f"Jupiter search API returned {response.status} for {token_address[:8]}...")
                     return None
 
         except Exception as e:
-            logger.debug(f"Error getting Jupiter price for {token_address[:8]}...: {e}")
+            logger.debug(f"Error fetching token data from Jupiter for {token_address[:8]}...: {e}")
             return None
-
-    async def get_token_price_data(self, token_address: str) -> Optional[Dict]:
-        """
-        Get comprehensive price data from Jupiter.
-
-        Args:
-            token_address: Token address
-
-        Returns:
-            Price data dict or None
-        """
-        price = await self.get_token_price(token_address)
-
-        if price:
-            return {
-                'price_usd': price,
-                'source': 'jupiter',
-                'timestamp': datetime.now().isoformat()
-            }
-
-        return None
 
 
 class SolscanClient:
