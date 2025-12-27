@@ -264,6 +264,10 @@ class JupiterClient:
             List of token dictionaries with mint addresses and metadata
         """
         try:
+            # Ensure session is initialized
+            if self.session is None:
+                self.session = aiohttp.ClientSession()
+
             url = f"{self.tokens_base_url}/recent"
             params = {'limit': limit}
 
@@ -324,6 +328,10 @@ class JupiterClient:
             List of token dictionaries with full market data
         """
         try:
+            # Ensure session is initialized
+            if self.session is None:
+                self.session = aiohttp.ClientSession()
+
             # Use cycling if category not specified
             if category is None:
                 category = self.DISCOVERY_CYCLES[self.current_cycle]
@@ -387,6 +395,10 @@ class JupiterClient:
             Price in USD or None
         """
         try:
+            # Ensure session is initialized
+            if self.session is None:
+                self.session = aiohttp.ClientSession()
+
             # Use Jupiter Price API v2 - much simpler and more reliable
             url = f"https://api.jup.ag/price/v2"
             params = {'ids': token_address}
