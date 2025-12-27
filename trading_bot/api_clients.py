@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 class DexScreenerClient:
     """DexScreener API client for token discovery and market data."""
 
+    # PHASE 2: Category Discovery - Cycling strategies
+    DISCOVERY_CATEGORIES = [
+        'latest',    # Cycle 1: Latest tokens (newly created)
+        'trending'   # Cycle 2: Trending tokens (proven activity)
+    ]
+
     def __init__(self, api_key: Optional[str] = None):
         """
         Initialize DexScreener client.
@@ -28,6 +34,7 @@ class DexScreenerClient:
         self.api_key = api_key
         self.base_url = "https://api.dexscreener.com"
         self.session: Optional[aiohttp.ClientSession] = None
+        self.current_category = 0  # Track which category we're on
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -96,20 +103,28 @@ class DexScreenerClient:
             logger.error(f"Error fetching token profile from DexScreener: {e}")
             return None
 
-    async def get_latest_tokens(self, limit: int = 50) -> List[Dict]:
+    async def get_latest_tokens(self, limit: int = 50, use_cycling: bool = False) -> List[Dict]:
         """
-        Get latest token profiles.
+        Get latest token profiles with optional category cycling.
 
         Args:
             limit: Max number of tokens to return
+            use_cycling: If True, cycles between 'latest' and 'trending' categories
 
         Returns:
             List of token data dicts
         """
         try:
-            url = f"{self.base_url}/token-profiles/latest/v1"
+            # Use cycling if enabled
+            if use_cycling:
+                category = self.DISCOVERY_CATEGORIES[self.current_category]
+                logger.info(f"DexScreener Cycle {self.current_category + 1}/2: Using '{category}' category")
+            else:
+                category = 'latest'
 
-            async with self.session.get(url) as response:
+            url = f"{self.base_url}/token-profiles/{category}/v1"
+
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status == 200:
                     data = await response.json()
 
@@ -118,26 +133,83 @@ class DexScreenerClient:
                     for item in data[:limit]:
                         if item.get('chainId') == 'solana':
                             token_data = await self.get_token_profile(item.get('tokenAddress'))
-                            if token_data and token_data.get('liquidity_usd', 0) > 5000:
+                            if token_data:
+                                # Add source tracking
+                                token_data['source'] = f'dexscreener_{category}'
                                 tokens.append(token_data)
+
+                    # Advance to next category for next scan
+                    if use_cycling:
+                        self.current_category = (self.current_category + 1) % len(self.DISCOVERY_CATEGORIES)
+                        logger.info(
+                            f"Retrieved {len(tokens)} tokens from DexScreener '{category}' "
+                            f"(Next cycle: {self.DISCOVERY_CATEGORIES[self.current_category]})"
+                        )
+                    else:
+                        logger.info(f"Retrieved {len(tokens)} tokens from DexScreener 'latest'")
 
                     return tokens
                 else:
-                    logger.warning(f"DexScreener latest tokens error: {response.status}")
+                    logger.warning(f"DexScreener {category} tokens error: {response.status}")
                     return []
 
         except Exception as e:
-            logger.error(f"Error fetching latest tokens: {e}")
+            logger.error(f"Error fetching {category if use_cycling else 'latest'} tokens: {e}")
+            return []
+
+    async def get_trending_tokens(self, limit: int = 50) -> List[Dict]:
+        """
+        Get trending token profiles.
+
+        Args:
+            limit: Max number of tokens to return
+
+        Returns:
+            List of token data dicts
+        """
+        try:
+            url = f"{self.base_url}/token-profiles/trending/v1"
+
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Filter for Solana tokens
+                    tokens = []
+                    for item in data[:limit]:
+                        if item.get('chainId') == 'solana':
+                            token_data = await self.get_token_profile(item.get('tokenAddress'))
+                            if token_data:
+                                token_data['source'] = 'dexscreener_trending'
+                                tokens.append(token_data)
+
+                    logger.info(f"Retrieved {len(tokens)} trending tokens from DexScreener")
+                    return tokens
+                else:
+                    logger.warning(f"DexScreener trending tokens error: {response.status}")
+                    return []
+
+        except Exception as e:
+            logger.error(f"Error fetching trending tokens: {e}")
             return []
 
 
 class JupiterClient:
-    """Jupiter API client for price validation and swaps."""
+    """Jupiter API client for price validation and token discovery."""
+
+    # PHASE 1: Token Discovery - Cycling strategies
+    DISCOVERY_CYCLES = [
+        'toporganicscore',  # Cycle 1: Organic activity (filters bots)
+        'toptraded',        # Cycle 2: Highest traded volume
+        'toptrending'       # Cycle 3: Trending tokens
+    ]
 
     def __init__(self):
         """Initialize Jupiter client."""
         self.base_url = "https://quote-api.jup.ag/v6"
+        self.tokens_base_url = "https://lite-api.jup.ag/tokens/v2"
         self.session: Optional[aiohttp.ClientSession] = None
+        self.current_cycle = 0  # Track which discovery cycle we're on
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -148,6 +220,129 @@ class JupiterClient:
         """Async context manager exit."""
         if self.session:
             await self.session.close()
+
+    async def get_recent_tokens(self, limit: int = 50) -> List[Dict]:
+        """
+        Get recently created tokens from Jupiter.
+
+        This returns tokens that just had their first pool created.
+
+        Args:
+            limit: Maximum number of tokens to retrieve (default: 50)
+
+        Returns:
+            List of token dictionaries with mint addresses and metadata
+        """
+        try:
+            url = f"{self.tokens_base_url}/recent"
+            params = {'limit': limit}
+
+            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Convert to standard format
+                    tokens = []
+                    for token in data:
+                        token_address = token.get('id') or token.get('address')
+                        if not token_address:
+                            continue
+
+                        tokens.append({
+                            'address': token_address,
+                            'symbol': token.get('symbol'),
+                            'name': token.get('name'),
+                            'decimals': token.get('decimals'),
+                            'liquidity': token.get('liquidity', 0),
+                            'fdv': token.get('fdv', 0),
+                            'mcap': token.get('mcap', 0),
+                            'price_usd': token.get('usdPrice', 0),
+                            'holder_count': token.get('holderCount', 0),
+                            'source': 'jupiter_recent'
+                        })
+
+                    logger.info(f"Retrieved {len(tokens)} recent tokens from Jupiter")
+                    return tokens
+                else:
+                    logger.warning(f"Jupiter recent tokens error: {response.status}")
+                    return []
+
+        except Exception as e:
+            logger.error(f"Error fetching recent tokens from Jupiter: {e}")
+            return []
+
+    async def get_trending_tokens(
+        self,
+        category: str = None,
+        interval: str = '1h',
+        limit: int = 50
+    ) -> List[Dict]:
+        """
+        Get trending/top tokens using CYCLING strategy.
+
+        Rotates through 3 discovery methods:
+        1. toporganicscore - Organic activity (filters bots)
+        2. toptraded - Highest traded volume
+        3. toptrending - Trending tokens
+
+        Args:
+            category: Category type (if None, uses automatic cycling)
+            interval: Time interval (5m, 1h, 6h, 24h)
+            limit: Maximum number of tokens to retrieve
+
+        Returns:
+            List of token dictionaries with full market data
+        """
+        try:
+            # Use cycling if category not specified
+            if category is None:
+                category = self.DISCOVERY_CYCLES[self.current_cycle]
+                logger.info(f"Jupiter Cycle {self.current_cycle + 1}/3: Using '{category}' discovery")
+
+            # Endpoint: /tokens/v2/{category}/{interval}?limit={limit}
+            url = f"{self.tokens_base_url}/{category}/{interval}"
+            params = {'limit': limit}
+
+            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    tokens = []
+                    for token in data:
+                        token_address = token.get('id') or token.get('address')
+                        if not token_address:
+                            continue
+
+                        tokens.append({
+                            'address': token_address,
+                            'symbol': token.get('symbol'),
+                            'name': token.get('name'),
+                            'decimals': token.get('decimals'),
+                            'liquidity': token.get('liquidity', 0),
+                            'fdv': token.get('fdv', 0),
+                            'mcap': token.get('mcap', 0),
+                            'price_usd': token.get('usdPrice', 0),
+                            'holder_count': token.get('holderCount', 0),
+                            'volume_24h': token.get('volume24h', 0),
+                            'source': f'jupiter_{category}'
+                        })
+
+                    # Advance to next cycle for next scan
+                    if category is None or category in self.DISCOVERY_CYCLES:
+                        self.current_cycle = (self.current_cycle + 1) % len(self.DISCOVERY_CYCLES)
+
+                    logger.info(
+                        f"Retrieved {len(tokens)} tokens using Jupiter '{category}' "
+                        f"(Next cycle: {self.DISCOVERY_CYCLES[self.current_cycle]})"
+                    )
+                    return tokens
+                else:
+                    logger.warning(f"Jupiter trending tokens error {response.status}")
+                    return []
+
+        except Exception as e:
+            logger.error(f"Error fetching trending tokens from Jupiter: {e}")
+            return []
 
     async def get_token_price(self, token_address: str) -> Optional[float]:
         """

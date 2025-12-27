@@ -64,37 +64,91 @@ class TokenScanner:
 
     async def scan_new_tokens(self, limit: int = 20) -> List[Dict]:
         """
-        Scan for new tokens meeting basic criteria.
+        Scan for new tokens using MULTI-SOURCE discovery.
+
+        PHASE 1+2: Jupiter Discovery + DexScreener Categories
+
+        Sources:
+        - Jupiter: trending/traded/organic (cycling through 3 methods)
+        - DexScreener: latest/trending (cycling through 2 categories)
 
         Args:
-            limit: Max tokens to scan per run
+            limit: Max tokens to return after filtering
 
         Returns:
             List of token data dicts that pass initial filters
         """
-        logger.info(f"Scanning for new tokens (limit: {limit})...")
+        logger.info(f"=== MULTI-SOURCE TOKEN SCAN (limit: {limit}) ===")
 
         try:
-            # Get latest tokens from DexScreener
-            tokens = await self.dexscreener.get_latest_tokens(limit=limit * 2)
+            all_tokens = []
 
-            if not tokens:
-                logger.warning("No tokens found from DexScreener")
+            # === SOURCE 1: JUPITER TRENDING (with cycling) ===
+            try:
+                jupiter_tokens = await self.jupiter.get_trending_tokens(limit=50)
+                all_tokens.extend(jupiter_tokens)
+                logger.info(f"  📊 Jupiter: {len(jupiter_tokens)} tokens")
+            except Exception as e:
+                logger.warning(f"  ⚠️  Jupiter scan failed: {e}")
+
+            # === SOURCE 2: DEXSCREENER (with category cycling) ===
+            try:
+                dex_tokens = await self.dexscreener.get_latest_tokens(limit=50, use_cycling=True)
+                all_tokens.extend(dex_tokens)
+                logger.info(f"  📊 DexScreener: {len(dex_tokens)} tokens")
+            except Exception as e:
+                logger.warning(f"  ⚠️  DexScreener scan failed: {e}")
+
+            if not all_tokens:
+                logger.warning("❌ No tokens found from any source")
                 return []
 
-            logger.info(f"Found {len(tokens)} tokens from DexScreener")
+            logger.info(f"  📥 Total collected: {len(all_tokens)} tokens from {2} sources")
 
-            # Filter tokens
+            # === DEDUPLICATION ===
+            # Group by address to count sources and merge data
+            token_map = {}
+            for token in all_tokens:
+                address = token.get('address')
+                if not address:
+                    continue
+
+                if address not in token_map:
+                    token_map[address] = token
+                    token_map[address]['sources'] = [token.get('source', 'unknown')]
+                    token_map[address]['source_count'] = 1
+                else:
+                    # Token seen in multiple sources - higher confidence!
+                    source = token.get('source', 'unknown')
+                    if source not in token_map[address]['sources']:
+                        token_map[address]['sources'].append(source)
+                        token_map[address]['source_count'] += 1
+
+                    # Merge data (prefer non-zero values)
+                    if token.get('liquidity', 0) > token_map[address].get('liquidity', 0):
+                        token_map[address]['liquidity'] = token.get('liquidity')
+                    if token.get('volume_24h', 0) > token_map[address].get('volume_24h', 0):
+                        token_map[address]['volume_24h'] = token.get('volume_24h')
+
+            unique_tokens = list(token_map.values())
+            logger.info(f"  🔍 Deduplicated: {len(unique_tokens)} unique tokens")
+
+            # Log multi-source tokens (higher confidence)
+            multi_source = [t for t in unique_tokens if t.get('source_count', 1) > 1]
+            if multi_source:
+                logger.info(f"  ⭐ {len(multi_source)} tokens seen in multiple sources (high confidence)")
+
+            # === FILTERING ===
             filtered_tokens = []
 
-            for token in tokens:
+            for token in unique_tokens:
                 address = token.get('address')
 
-                # Skip if already scanned in this session (prevent duplicates within same scan)
+                # Skip if already scanned in this session
                 if address in self.scanned_tokens:
                     continue
 
-                # Skip if already have open position in this token (no double positions)
+                # Skip if already have open position
                 if self.position_manager:
                     has_open_position = any(
                         pos.token_address == address
@@ -105,15 +159,21 @@ class TokenScanner:
                         continue
 
                 # Basic filters
-                liquidity = token.get('liquidity_usd', 0)
+                liquidity = token.get('liquidity_usd', 0) or token.get('liquidity', 0)
                 volume_24h = token.get('volume_24h', 0)
 
                 if liquidity < self.min_liquidity:
-                    logger.debug(f"Skipped {address[:8]}... - Low liquidity: ${liquidity:,.0f}")
+                    logger.debug(
+                        f"Skipped {address[:8]}... - Low liquidity: ${liquidity:,.0f} "
+                        f"(sources: {token.get('source_count', 1)})"
+                    )
                     continue
 
                 if volume_24h < self.min_volume_24h:
-                    logger.debug(f"Skipped {address[:8]}... - Low volume: ${volume_24h:,.0f}")
+                    logger.debug(
+                        f"Skipped {address[:8]}... - Low volume: ${volume_24h:,.0f} "
+                        f"(sources: {token.get('source_count', 1)})"
+                    )
                     continue
 
                 # Add to filtered list
@@ -123,14 +183,17 @@ class TokenScanner:
                 if len(filtered_tokens) >= limit:
                     break
 
-            logger.info(f"✅ {len(filtered_tokens)} tokens passed initial filters")
+            logger.info(
+                f"✅ {len(filtered_tokens)} tokens passed filters "
+                f"(from {len(all_tokens)} total, {len(unique_tokens)} unique)"
+            )
 
             self.last_scan_time = datetime.now()
 
             return filtered_tokens
 
         except Exception as e:
-            logger.error(f"Error scanning tokens: {e}", exc_info=True)
+            logger.error(f"Error in multi-source scan: {e}", exc_info=True)
             return []
 
     async def get_token_details(self, token_address: str) -> Optional[Dict]:
