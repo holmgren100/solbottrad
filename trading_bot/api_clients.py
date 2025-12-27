@@ -384,9 +384,7 @@ class JupiterClient:
 
     async def get_token_price(self, token_address: str) -> Optional[float]:
         """
-        Get token price from Jupiter in USD.
-
-        Uses Jupiter Price API v2 which directly returns USD prices.
+        Get token price from Jupiter search API (WORKING ML BOT 1/2 METHOD).
 
         Args:
             token_address: Token address
@@ -394,44 +392,43 @@ class JupiterClient:
         Returns:
             Price in USD or None
         """
-        try:
-            # Ensure session is initialized
-            if self.session is None:
-                self.session = aiohttp.ClientSession()
+        # Ensure session is initialized (lazy init like ML Bot 1/2)
+        if self.session is None:
+            self.session = aiohttp.ClientSession()
 
-            # Use Jupiter Price API v2 - much simpler and more reliable
-            url = f"https://api.jup.ag/price/v2"
-            params = {'ids': token_address}
+        try:
+            # Use Jupiter search API - same as working ML Bot 1 and 2
+            url = f"{self.tokens_base_url}/search"
+            params = {'q': token_address}
 
             async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     data = await response.json()
 
-                    # Safe null check for response
-                    if not data or not isinstance(data, dict):
-                        logger.warning(f"⚠️  Invalid Jupiter response format for {token_address[:8]}...")
-                        return None
+                    # Find exact match by address/id
+                    for token in data:
+                        token_id = token.get('id') or token.get('address')
+                        if token_id and token_id.lower() == token_address.lower():
+                            # Found the token, extract USD price
+                            price_usd = token.get('usdPrice', 0.0)
 
-                    # Response format: {"data": {"<address>": {"id": "...", "price": "..."}}}
-                    data_dict = data.get('data')
-                    if not data_dict or not isinstance(data_dict, dict):
-                        logger.warning(f"⚠️  No Jupiter price data for {token_address[:8]}... (too new or no liquidity)")
-                        return None
+                            if price_usd and isinstance(price_usd, (int, float)):
+                                logger.debug(f"Jupiter price for {token_address[:8]}...: ${price_usd:.8f}")
+                                return float(price_usd)
 
-                    token_data = data_dict.get(token_address)
-                    if token_data and isinstance(token_data, dict) and 'price' in token_data:
-                        price = float(token_data['price'])
-                        logger.info(f"✅ Jupiter price for {token_address[:8]}...: ${price:.8f}")
-                        return price
-                    else:
-                        logger.warning(f"⚠️  No Jupiter price data for {token_address[:8]}... (too new or no liquidity)")
-                        return None
+                    # Token not found in search results
+                    logger.debug(f"Token {token_address[:8]}... not found in Jupiter search")
+                    return None
                 else:
-                    logger.warning(f"⚠️  Jupiter Price API error {response.status} for {token_address[:8]}...")
+                    # 400/404 = token not found (expected for very new tokens)
+                    if response.status in [400, 404]:
+                        logger.debug(f"Jupiter: token {token_address[:8]}... not found ({response.status})")
+                    else:
+                        logger.warning(f"Jupiter API error {response.status} for {token_address[:8]}...")
                     return None
 
         except Exception as e:
-            logger.warning(f"⚠️  Error getting Jupiter price for {token_address[:8]}...: {e}")
+            logger.debug(f"Error getting Jupiter price for {token_address[:8]}...: {e}")
             return None
 
     async def get_token_price_data(self, token_address: str) -> Optional[Dict]:
