@@ -398,7 +398,7 @@ class JupiterClient:
         try:
             # Jupiter API search endpoint - PROVEN WORKING METHOD
             url = f"{self.tokens_base_url}/search"
-            params = {'q': token_address}
+            params = {'query': token_address}  # Fixed: 'query' not 'q' per API docs
 
             async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
