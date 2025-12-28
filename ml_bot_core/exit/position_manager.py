@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import csv
 import os
 from ..monitoring.logger import get_logger
+from .state_persistence import StatePersistence
 
 logger = get_logger(__name__)
 
@@ -161,18 +162,27 @@ class Trade:
 class PositionManager:
     """Manages trading positions and portfolio."""
 
-    def __init__(self, max_open_positions: int = 5):
+    def __init__(self, max_open_positions: int = 5, enable_persistence: bool = True):
         """
         Initialize position manager.
 
         Args:
             max_open_positions: Maximum number of simultaneous positions
+            enable_persistence: Enable state persistence between restarts
         """
         self.max_open_positions = max_open_positions
         self.open_positions: Dict[str, Position] = {}
         self.closed_trades: List[Trade] = []
         self.daily_trades: List[Trade] = []
         self.portfolio_value: float = 0.0
+
+        # State persistence
+        self.enable_persistence = enable_persistence
+        self.state_persistence = StatePersistence() if enable_persistence else None
+
+        # Load saved state if available
+        if self.enable_persistence:
+            self._load_state()
 
     def can_open_position(self) -> bool:
         """
@@ -254,6 +264,9 @@ class PositionManager:
             f"@ ${entry_price:.8f}, size: ${amount_usd:.2f}, mode: {mode}"
         )
 
+        # Save state after opening position
+        self._save_state()
+
         return position
 
     def close_position(
@@ -312,6 +325,9 @@ class PositionManager:
             f"PnL: ${pnl:.2f} ({pnl_percent:+.1f}%), "
             f"Reason: {reason}"
         )
+
+        # Save state after closing position
+        self._save_state()
 
         return sell_trade
 
@@ -661,3 +677,79 @@ class PositionManager:
 
         logger.info(f"Exported {len(sell_trades)} trades to {filepath}")
         return len(sell_trades)
+
+    def _save_state(self):
+        """Save current state to disk (if persistence enabled)."""
+        if not self.enable_persistence or not self.state_persistence:
+            return
+
+        self.state_persistence.save_state(
+            self.open_positions,
+            self.closed_trades,
+            self.portfolio_value
+        )
+
+    def _load_state(self):
+        """Load saved state from disk (if available)."""
+        if not self.enable_persistence or not self.state_persistence:
+            return
+
+        state = self.state_persistence.load_state()
+        if not state:
+            return
+
+        # Restore portfolio value
+        self.portfolio_value = state.get('portfolio_value', 0.0)
+
+        # Restore open positions
+        for address, pos_dict in state.get('open_positions', {}).items():
+            try:
+                position = Position(
+                    token_address=pos_dict['token_address'],
+                    entry_price=pos_dict['entry_price'],
+                    current_price=pos_dict['current_price'],
+                    amount_usd=pos_dict['amount_usd'],
+                    quantity=pos_dict['quantity'],
+                    entry_time=datetime.fromisoformat(pos_dict['entry_time']),
+                    stop_loss=pos_dict['stop_loss'],
+                    take_profit=pos_dict['take_profit'],
+                    use_trailing_stop=pos_dict.get('use_trailing_stop', True),
+                    trailing_stop_percent=pos_dict.get('trailing_stop_percent', 15.0),
+                    highest_price=pos_dict.get('highest_price', pos_dict['entry_price']),
+                    trailing_stop_price=pos_dict.get('trailing_stop_price', 0.0),
+                    symbol=pos_dict.get('symbol', ''),
+                    current_liquidity=pos_dict.get('current_liquidity', 0.0),
+                    initial_quantity=pos_dict.get('initial_quantity', pos_dict['quantity']),
+                    milestones_hit=set(pos_dict.get('milestones_hit', []))
+                )
+                self.open_positions[address] = position
+                logger.info(f"📂 Restored position: {position.symbol or address[:8]}... @ ${position.entry_price:.8f}")
+            except Exception as e:
+                logger.error(f"Failed to restore position {address[:8]}...: {e}")
+
+        # Restore closed trades
+        for trade_dict in state.get('closed_trades', []):
+            try:
+                trade = Trade(
+                    token_address=trade_dict['token_address'],
+                    action=trade_dict['action'],
+                    price=trade_dict['price'],
+                    amount_usd=trade_dict['amount_usd'],
+                    quantity=trade_dict['quantity'],
+                    timestamp=datetime.fromisoformat(trade_dict['timestamp']),
+                    pnl=trade_dict.get('pnl', 0.0),
+                    pnl_percent=trade_dict.get('pnl_percent', 0.0),
+                    reason=trade_dict.get('reason', ''),
+                    symbol=trade_dict.get('symbol', ''),
+                    entry_price=trade_dict.get('entry_price', 0.0),
+                    entry_time=datetime.fromisoformat(trade_dict['entry_time']) if trade_dict.get('entry_time') else None
+                )
+                self.closed_trades.append(trade)
+            except Exception as e:
+                logger.error(f"Failed to restore trade: {e}")
+
+        stats = state.get('statistics', {})
+        logger.info(
+            f"📊 Restored statistics: {stats.get('total_trades', 0)} trades, "
+            f"{stats.get('wins', 0)}W-{stats.get('losses', 0)}L"
+        )
