@@ -114,17 +114,48 @@ class RiskAssessor:
         if age_risk > 0.6:
             warnings.append("Very new token - high risk")
 
+        # 7. PHASE 3: Momentum Risk (from 455-trade research - 71.7% win rate)
+        # Control with ENABLE_MOMENTUM_FILTERS env var
+        import os
+        enable_momentum = os.getenv('ENABLE_MOMENTUM_FILTERS', 'false').lower() == 'true'
+
+        if enable_momentum:
+            momentum_risk = self._assess_momentum_risk(market_data)
+            risk_factors['momentum'] = momentum_risk
+
+            if momentum_risk > 0.7:
+                warnings.append("Weak momentum - token not climbing")
+            elif momentum_risk > 0.5:
+                warnings.append("Moderate momentum - wait for stronger signal")
+        else:
+            # If momentum filters disabled, set neutral risk
+            risk_factors['momentum'] = 0.5
+
         # Calculate Overall Risk Score
         # Adjusted weights: With partial profit-taking and trailing stops,
         # we can afford to be more aggressive on volatile/new tokens
-        weights = {
-            'liquidity': 0.35,      # Most important - can't sell with no liquidity
-            'security': 0.35,        # Rug pull indicators matter
-            'volatility': 0.05,      # Volatility is GOOD - that's where gains are!
-            'sentiment': 0.15,       # Coordination pumps still risky
-            'prediction_uncertainty': 0.05,  # Less important with good exits
-            'age': 0.05              # New tokens moon - age matters less
-        }
+        if enable_momentum:
+            # PHASE 3: Momentum-optimized weights (from 71.7% win rate bot)
+            weights = {
+                'liquidity': 0.30,      # Still important - but momentum matters more
+                'security': 0.30,        # Rug pull indicators critical
+                'momentum': 0.20,        # NEW - momentum is key for runners!
+                'sentiment': 0.10,       # Coordination pumps still risky
+                'volatility': 0.05,      # Volatility is GOOD - that's where gains are!
+                'prediction_uncertainty': 0.03,  # Less important with momentum
+                'age': 0.02              # New tokens moon - age matters less
+            }
+        else:
+            # Original weights (no momentum filter)
+            weights = {
+                'liquidity': 0.35,      # Most important - can't sell with no liquidity
+                'security': 0.35,        # Rug pull indicators matter
+                'volatility': 0.05,      # Volatility is GOOD - that's where gains are!
+                'sentiment': 0.15,       # Coordination pumps still risky
+                'prediction_uncertainty': 0.05,  # Less important with good exits
+                'age': 0.05,             # New tokens moon - age matters less
+                'momentum': 0.0          # Not used
+            }
 
         overall_risk_score = sum(
             risk_factors[factor] * weights[factor]
@@ -318,6 +349,72 @@ class RiskAssessor:
 
         except Exception:
             return 0.5
+
+    def _assess_momentum_risk(self, market_data: Dict) -> float:
+        """
+        Assess momentum risk (PHASE 3 - from 455-trade research).
+
+        Based on research from commit eb1ffbe showing 71.7% win rate:
+        - Tokens need 10-50% price gain in 1h (climbing)
+        - Tokens need 3%+ price gain in 5min (recent momentum)
+        - Tokens need 60%+ buy pressure (demand strong)
+
+        Args:
+            market_data: Market data including price changes and transactions
+
+        Returns:
+            Risk score (0-1, lower is better)
+        """
+        # Extract momentum indicators
+        price_change_1h = market_data.get('price_change_1h', 0) or market_data.get('price_change_h1', 0)
+        price_change_5m = market_data.get('price_change_5m', 0) or market_data.get('price_change_m5', 0)
+
+        # Calculate buy pressure if transaction data available
+        buys_1h = market_data.get('txns_h1_buys', 0) or market_data.get('txns_1h_buys', 0)
+        sells_1h = market_data.get('txns_h1_sells', 0) or market_data.get('txns_1h_sells', 0)
+        total_txns = buys_1h + sells_1h
+        buy_pressure = (buys_1h / total_txns * 100) if total_txns > 0 else 50.0
+
+        # MOMENTUM FILTER RULES (from 455-trade research)
+
+        # 1. Check 1h price movement (should be climbing but not exhausted)
+        if price_change_1h < 10:
+            # Not climbing enough - HIGH RISK
+            h1_risk = 0.9
+        elif price_change_1h > 50:
+            # Exhausted rally - MODERATE RISK
+            h1_risk = 0.6
+        else:
+            # Good 1h momentum (10-50%) - LOW RISK
+            h1_risk = 0.2
+
+        # 2. Check 5min price movement (should have recent momentum)
+        if price_change_5m < 3:
+            # No recent momentum - HIGH RISK
+            m5_risk = 0.8
+        elif price_change_5m > 20:
+            # Too fast, likely to retrace - MODERATE RISK
+            m5_risk = 0.5
+        else:
+            # Good 5min momentum (3-20%) - LOW RISK
+            m5_risk = 0.2
+
+        # 3. Check buy pressure (need strong demand)
+        if buy_pressure < 60:
+            # Weak demand - MODERATE RISK
+            pressure_risk = 0.6
+        else:
+            # Strong buy pressure (60%+) - LOW RISK
+            pressure_risk = 0.2
+
+        # Combine momentum factors (weighted average)
+        momentum_risk = (
+            h1_risk * 0.4 +       # 1h trend most important
+            m5_risk * 0.3 +       # Recent momentum second
+            pressure_risk * 0.3    # Buy pressure third
+        )
+
+        return momentum_risk
 
     def _calculate_position_size(
         self,

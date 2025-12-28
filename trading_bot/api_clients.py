@@ -369,6 +369,38 @@ class JupiterClient:
                         f"Retrieved {len(tokens)} tokens using Jupiter '{category}' "
                         f"(Next cycle: {self.DISCOVERY_CYCLES[self.current_cycle]})"
                     )
+
+                    # PHASE 1: Data Enrichment (controlled by env var)
+                    # Problem: Discovery API returns liquidity=0, volume=0 for many tokens
+                    # Solution: Query each token individually to get real data
+                    import os
+                    enrich_data = os.getenv('ENABLE_JUPITER_ENRICHMENT', 'false').lower() == 'true'
+
+                    if enrich_data and tokens:
+                        logger.info(f"🔍 Enriching {len(tokens)} Jupiter tokens with liquidity/volume data...")
+                        enriched_tokens = []
+                        success_count = 0
+
+                        for token in tokens[:20]:  # Limit to 20 to avoid rate limits
+                            try:
+                                # Get detailed data including liquidity/volume
+                                detailed_data = await self.get_token_price_data(token['address'])
+
+                                if detailed_data and detailed_data.get('liquidity_usd', 0) > 0:
+                                    # Merge basic info with detailed data
+                                    enriched_token = {**token, **detailed_data}
+                                    enriched_tokens.append(enriched_token)
+                                    success_count += 1
+                                else:
+                                    # Keep original if no detailed data
+                                    enriched_tokens.append(token)
+                            except Exception as e:
+                                logger.debug(f"Failed to enrich {token['address'][:8]}...: {e}")
+                                enriched_tokens.append(token)
+
+                        logger.info(f"✅ Enriched {success_count}/{len(enriched_tokens)} tokens with real data")
+                        return enriched_tokens
+
                     return tokens
                 else:
                     logger.warning(f"Jupiter trending tokens error {response.status}")
