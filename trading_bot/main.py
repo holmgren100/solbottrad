@@ -252,7 +252,8 @@ class MLBot2Foundation:
         token_address: str,
         entry_price: float,
         amount_usd: float,
-        symbol: str = ''
+        symbol: str = '',
+        entry_liquidity: float = 0.0
     ) -> Optional[object]:
         """
         Open a new position using protected core.
@@ -262,6 +263,7 @@ class MLBot2Foundation:
             entry_price: Entry price
             amount_usd: Position size in USD
             symbol: Token symbol (optional)
+            entry_liquidity: Entry liquidity for drop % tracking
 
         Returns:
             Position object or None if failed
@@ -284,7 +286,8 @@ class MLBot2Foundation:
             stop_loss=stop_loss,
             take_profit=take_profit,
             use_trailing_stop=self.config.core_config.use_trailing_stop,
-            trailing_stop_percent=self.config.core_config.trailing_stop_percent
+            trailing_stop_percent=self.config.core_config.trailing_stop_percent,
+            entry_liquidity=entry_liquidity
         )
 
         if position:
@@ -473,7 +476,29 @@ class MLBot2Foundation:
 
         # Check exit conditions for remaining positions
         for position in list(self.position_manager.get_all_positions()):
-            # 1. Stop Loss
+            # === EXIT PRIORITY (ML Bot Style) ===
+            # 1. DRAWDOWN PRIMARY - Loser pattern detection (>30% drawdown)
+            # 2. Stop Loss - Safety net
+            # 3. Rug Detection - Severe only (70% liq drop + frozen)
+            # 4. Trailing Stop - After winners develop
+            # 5. Winner Hold Logic - Don't exit winners too early!
+
+            # 1. DRAWDOWN PRIMARY - Check loser pattern FIRST!
+            if position.is_loser_pattern():
+                drawdown = position.get_drawdown_percent()
+                duration = position.get_duration_minutes()
+                logger.warning(
+                    f"🚨 LOSER PATTERN: {position.symbol or position.token_address[:8]}... "
+                    f"Drawdown: {drawdown:.1f}% (>{30}%), Duration: {duration:.0f}min"
+                )
+                await self.close_position(
+                    position.token_address,
+                    position.current_price,
+                    'stop_loss'  # Use stop_loss reason for loser pattern
+                )
+                continue
+
+            # 2. Stop Loss - Safety net (should rarely trigger if drawdown works)
             if self.position_manager.check_stop_loss(position.token_address):
                 logger.warning(f"🛑 Stop loss hit: {position.symbol or position.token_address[:8]}...")
                 await self.close_position(
@@ -483,7 +508,56 @@ class MLBot2Foundation:
                 )
                 continue
 
-            # 2. Trailing Stop
+            # 3. Rug Detection - RELAXED (only severe cases)
+            if self.config.core_config.rug_detection_enabled:
+                dead_positions = self.position_manager.get_dead_positions(
+                    stale_minutes=self.config.core_config.stale_price_minutes,
+                    min_liquidity=self.config.core_config.min_position_liquidity
+                )
+
+                if position.token_address in dead_positions:
+                    # === WINNER HOLD LOGIC ===
+                    # If position shows winner pattern (low drawdown), hold longer!
+                    # Don't exit on small liquidity fluctuations
+                    if position.is_winner_pattern():
+                        duration = position.get_duration_minutes()
+                        drawdown = position.get_drawdown_percent()
+
+                        # Winner pattern: Hold 25-35 min minimum (ML Bot style)
+                        if duration < 25:
+                            logger.info(
+                                f"✅ WINNER HOLD: {position.symbol or position.token_address[:8]}... "
+                                f"Low drawdown {drawdown:.1f}% - holding to 25+ min (now {duration:.0f}min)"
+                            )
+                            continue  # Skip exit, keep holding!
+
+                        # Optimal exit window: 25-35 min
+                        if duration < 35:
+                            logger.info(
+                                f"✅ WINNER OPTIMAL: {position.symbol or position.token_address[:8]}... "
+                                f"In optimal window ({duration:.0f}min) - can exit or hold to 35min"
+                            )
+                            # Exit at optimal time
+                        else:
+                            logger.info(
+                                f"✅ WINNER MATURE: {position.symbol or position.token_address[:8]}... "
+                                f"Held {duration:.0f}min - time to exit"
+                            )
+
+                    # Log detailed rug info
+                    liq_drop = position.get_liquidity_drop_percent()
+                    logger.error(
+                        f"🚨 Rug detected: {position.symbol or position.token_address[:8]}... "
+                        f"Liq drop: {liq_drop:.0f}%, Current: ${position.current_liquidity:.0f}"
+                    )
+                    await self.close_position(
+                        position.token_address,
+                        position.current_price,
+                        'low_liquidity'
+                    )
+                    continue
+
+            # 4. Trailing Stop - Unchanged for now
             if self.position_manager.check_trailing_stop(position.token_address):
                 logger.info(f"📊 Trailing stop hit: {position.symbol or position.token_address[:8]}...")
                 await self.close_position(
@@ -492,21 +566,6 @@ class MLBot2Foundation:
                     'trailing_stop'
                 )
                 continue
-
-            # 3. Rug Detection
-            if self.config.core_config.rug_detection_enabled:
-                dead_positions = self.position_manager.get_dead_positions(
-                    stale_minutes=self.config.core_config.stale_price_minutes,
-                    min_liquidity=self.config.core_config.min_position_liquidity
-                )
-
-                if position.token_address in dead_positions:
-                    logger.error(f"🚨 Rug detected: {position.symbol or position.token_address[:8]}...")
-                    await self.close_position(
-                        position.token_address,
-                        position.current_price,
-                        'low_liquidity'
-                    )
 
     def get_statistics(self) -> Dict:
         """
@@ -741,7 +800,8 @@ class MLBot2Foundation:
                 token_address=token_address,
                 entry_price=entry_price,
                 amount_usd=position_size_usd,
-                symbol=symbol
+                symbol=symbol,
+                entry_liquidity=fresh_liquidity  # Track entry liquidity for drop % calculation
             )
 
             if position:

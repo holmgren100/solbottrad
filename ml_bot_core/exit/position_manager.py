@@ -37,6 +37,7 @@ class Position:
     last_price_change: datetime = field(default_factory=datetime.now)  # Track when price ACTUALLY changed
     last_known_price: float = 0.0  # Track previous price to detect changes
     current_liquidity: float = 0.0  # Track current liquidity
+    entry_liquidity: float = 0.0  # Track entry liquidity for drop % calculation
     price_update_failures: int = 0  # Count consecutive failed price updates
     # Partial profit taking fields
     initial_quantity: float = 0.0  # Track original quantity for partial sells
@@ -102,6 +103,58 @@ class Position:
         time_since_update = datetime.now() - self.last_price_update
         return time_since_update > timedelta(minutes=stale_minutes)
 
+    def get_drawdown_percent(self) -> float:
+        """
+        Calculate current drawdown from peak price.
+
+        ML Bot pattern:
+        - Winners: <2% drawdown
+        - Losers: >30% drawdown
+
+        Returns:
+            Drawdown percentage from peak (0-100)
+        """
+        if self.highest_price == 0:
+            return 0.0
+
+        drawdown = ((self.highest_price - self.current_price) / self.highest_price) * 100
+        return max(0.0, drawdown)  # Never negative
+
+    def get_duration_minutes(self) -> float:
+        """
+        Get how long position has been held in minutes.
+
+        Returns:
+            Duration in minutes
+        """
+        return (datetime.now() - self.entry_time).total_seconds() / 60
+
+    def is_winner_pattern(self) -> bool:
+        """
+        Check if position shows winner pattern.
+
+        ML Bot pattern: <5% drawdown after 15+ minutes
+
+        Returns:
+            True if winner pattern detected
+        """
+        drawdown = self.get_drawdown_percent()
+        duration = self.get_duration_minutes()
+
+        # Winner: Low drawdown + held for a while
+        return drawdown < 5 and duration > 15
+
+    def is_loser_pattern(self) -> bool:
+        """
+        Check if position shows loser pattern.
+
+        ML Bot pattern: >30% drawdown
+
+        Returns:
+            True if loser pattern detected
+        """
+        return self.get_drawdown_percent() > 30
+
     def is_price_frozen(self, freeze_minutes: int = 15) -> bool:
         """
         Check if price hasn't CHANGED for too long (frozen/stuck price).
@@ -127,19 +180,54 @@ class Position:
 
         return time_since_change > timedelta(minutes=freeze_minutes)
 
+    def get_liquidity_drop_percent(self) -> float:
+        """
+        Calculate liquidity drop from entry.
+
+        Returns:
+            Percentage drop (0-100), or 0 if entry_liquidity not set
+        """
+        if self.entry_liquidity == 0:
+            return 0.0
+
+        drop_pct = ((self.entry_liquidity - self.current_liquidity) / self.entry_liquidity) * 100
+        return max(0.0, drop_pct)  # Never negative
+
     def is_liquidity_dead(self, min_liquidity: float = 1000.0) -> bool:
         """
         Check if liquidity has dried up (possible rug).
 
-        Returns True if liquidity is below threshold AND we've received at least
-        one price update (so we know the liquidity data is real, not just uninitialized).
+        RELAXED THRESHOLD (ML Bot style):
+        - Requires >70% liquidity drop (not 30%!)
+        - PLUS price frozen >10 min (combination signal!)
+
+        This prevents false positives on normal volatility.
+
+        Returns:
+            True only if SEVERE liquidity drop + price frozen
         """
         # Only check liquidity if we've had at least one price update
-        # (last_price_update != entry_time means we got market data)
         has_received_update = self.last_price_update != self.entry_time
 
-        # If we've received updates and liquidity is below threshold, it's dead
-        return has_received_update and self.current_liquidity < min_liquidity
+        if not has_received_update:
+            return False
+
+        # Calculate liquidity drop percentage
+        liq_drop_pct = self.get_liquidity_drop_percent()
+
+        # RELAXED THRESHOLD: 70% drop (not 30%!)
+        if liq_drop_pct > 70:
+            # COMBINATION SIGNAL: Also check if price is frozen
+            if self.is_price_frozen(minutes=10):
+                # Both conditions met - likely rug!
+                return True
+            else:
+                # Liquidity dropping but price moving - probably OK
+                # (normal volatility, not rug)
+                return False
+
+        # Normal liquidity levels
+        return False
 
 
 @dataclass
@@ -201,7 +289,8 @@ class PositionManager:
         stop_loss: float,
         take_profit: float,
         use_trailing_stop: bool = True,
-        trailing_stop_percent: float = 15.0
+        trailing_stop_percent: float = 15.0,
+        entry_liquidity: float = 0.0
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -214,6 +303,7 @@ class PositionManager:
             take_profit: Take profit price (ignored if using trailing stop)
             use_trailing_stop: Whether to use trailing stop instead of fixed take profit
             trailing_stop_percent: Percent to trail below peak (default 15%)
+            entry_liquidity: Entry liquidity for drop % calculation
 
         Returns:
             Position object if successful, None otherwise
@@ -242,7 +332,8 @@ class PositionManager:
             highest_price=entry_price,  # Initialize with entry price
             trailing_stop_price=stop_loss,  # Start with regular stop loss
             initial_quantity=quantity,  # Track original quantity for partial profit taking
-            last_known_price=entry_price  # Initialize for frozen price detection
+            last_known_price=entry_price,  # Initialize for frozen price detection
+            entry_liquidity=entry_liquidity  # Track entry liquidity for drop % calculation
         )
 
         self.open_positions[token_address] = position
