@@ -27,7 +27,7 @@ class Position:
     unrealized_pnl: float = 0.0
     unrealized_pnl_percent: float = 0.0
     # Trailing stop loss fields
-    use_trailing_stop: bool = True
+    use_trailing_stop: bool = False  # Start disabled, activate at 15% gain (ML Bot style!)
     trailing_stop_percent: float = 15.0  # Trail by 15% from peak
     highest_price: float = 0.0  # Track highest price reached
     trailing_stop_price: float = 0.0  # Dynamic trailing stop price
@@ -64,6 +64,20 @@ class Position:
         self.unrealized_pnl = (new_price - self.entry_price) * self.quantity
         if self.entry_price > 0:
             self.unrealized_pnl_percent = ((new_price - self.entry_price) / self.entry_price) * 100
+
+        # === TRAIL ACTIVATION @ 15% GAIN (ML Bot Style) ===
+        # Don't trail from entry! Only activate after 15% gain!
+        if not self.use_trailing_stop:
+            gain_percent = self.unrealized_pnl_percent
+            if gain_percent >= 15.0:  # Activate trail at 15% gain
+                self.use_trailing_stop = True
+                self.highest_price = new_price  # Set current as peak
+                self.trailing_stop_price = self.highest_price * (1 - self.trailing_stop_percent / 100)
+                logger.info(
+                    f"🎯 TRAIL ACTIVATED @ +{gain_percent:.1f}%: {self.symbol or self.token_address[:8]}... "
+                    f"Peak: ${self.highest_price:.8f}, Stop: ${self.trailing_stop_price:.8f} "
+                    f"(trail {self.trailing_stop_percent}%)"
+                )
 
         # Update trailing stop if enabled
         if self.use_trailing_stop:
@@ -288,7 +302,7 @@ class PositionManager:
         amount_usd: float,
         stop_loss: float,
         take_profit: float,
-        use_trailing_stop: bool = True,
+        use_trailing_stop: bool = False,  # Start disabled, activate at 15% gain!
         trailing_stop_percent: float = 15.0,
         entry_liquidity: float = 0.0
     ) -> Optional[Position]:

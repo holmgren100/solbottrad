@@ -107,6 +107,20 @@ class DexScreenerClient:
                     price_change = pair.get('priceChange') or {}
                     txns = pair.get('txns') or {}
                     txns_h24 = txns.get('h24') or {}
+                    txns_h1 = txns.get('h1') or {}  # 1h txns for recent activity
+
+                    # Calculate buy/sell ratio and activity
+                    buys_24h = txns_h24.get('buys', 0)
+                    sells_24h = txns_h24.get('sells', 0)
+                    buys_1h = txns_h1.get('buys', 0)
+                    sells_1h = txns_h1.get('sells', 0)
+
+                    total_txns_24h = buys_24h + sells_24h
+                    total_txns_1h = buys_1h + sells_1h
+
+                    # Calculate buy ratio (0-1, where >0.5 = more buyers)
+                    buy_ratio_24h = buys_24h / total_txns_24h if total_txns_24h > 0 else 0
+                    buy_ratio_1h = buys_1h / total_txns_1h if total_txns_1h > 0 else 0
 
                     return {
                         'address': token_address,
@@ -118,7 +132,14 @@ class DexScreenerClient:
                         'price_change_5m': float(price_change.get('m5', 0)),
                         'price_change_1h': float(price_change.get('h1', 0)),
                         'price_change_24h': float(price_change.get('h24', 0)),
-                        'txns_24h': txns_h24.get('buys', 0) + txns_h24.get('sells', 0),
+                        'txns_24h': total_txns_24h,
+                        'txns_1h': total_txns_1h,
+                        'buys_24h': buys_24h,
+                        'sells_24h': sells_24h,
+                        'buys_1h': buys_1h,
+                        'sells_1h': sells_1h,
+                        'buy_ratio_24h': buy_ratio_24h,
+                        'buy_ratio_1h': buy_ratio_1h,
                         'pair_address': pair.get('pairAddress', ''),
                         'dex_id': pair.get('dexId', ''),
                     }

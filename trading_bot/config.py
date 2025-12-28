@@ -149,17 +149,17 @@ def load_config(env_file: str = '.env') -> BotConfig:
     core_config.scan_interval = _get_int('SCAN_INTERVAL', 120)
     core_config.monitor_interval = _get_int('MONITOR_INTERVAL', 60)
 
-    # Partial profit settings
+    # Partial profit settings (ML Bot Style)
     partial_profit_enabled = _get_bool('PARTIAL_PROFIT_ENABLED', False)
     partial_profit_settings = {
         'enabled': partial_profit_enabled,
-        'milestone_100': _get_float('PROFIT_MILESTONE_100', 25),
-        'milestone_200': _get_float('PROFIT_MILESTONE_200', 15),
-        'milestone_300': _get_float('PROFIT_MILESTONE_300', 10),
-        'milestone_400': _get_float('PROFIT_MILESTONE_400', 10),
-        'milestone_500': _get_float('PROFIT_MILESTONE_500', 10),
-        'milestone_600': _get_float('PROFIT_MILESTONE_600', 10),
-        'milestone_700': _get_float('PROFIT_MILESTONE_700', 10),
+        'milestone_100': _get_float('PROFIT_MILESTONE_100', 20),  # ML Bot: 20% at 100%
+        'milestone_200': _get_float('PROFIT_MILESTONE_200', 20),  # ML Bot: 20% at 200%
+        'milestone_300': _get_float('PROFIT_MILESTONE_300', 15),  # ML Bot: 15% at 300%
+        'milestone_400': _get_float('PROFIT_MILESTONE_400', 10),  # ML Bot: 10% at 400%
+        'milestone_500': _get_float('PROFIT_MILESTONE_500', 10),  # ML Bot: 10% at 500%
+        'milestone_600': _get_float('PROFIT_MILESTONE_600', 10),  # ML Bot: 10% at 600%
+        'milestone_700': _get_float('PROFIT_MILESTONE_700', 10),  # ML Bot: 10% at 700%
     }
 
     # === SAFETY FILTERS CONFIGURATION ===

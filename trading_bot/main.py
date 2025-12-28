@@ -701,6 +701,38 @@ class MLBot2Foundation:
 
             logger.info(f"Analyzing: {symbol} ({token_address[:8]}...)")
 
+            # === ENTRY QUALITY FILTERS (ML Bot Style) ===
+            # Filter #1: Buy/Sell Ratio (Bullish Momentum)
+            buy_ratio_24h = token_data.get('buy_ratio_24h', 0)
+            buy_ratio_1h = token_data.get('buy_ratio_1h', 0)
+
+            # Use 1h if available (recent activity), otherwise 24h
+            buy_ratio = buy_ratio_1h if buy_ratio_1h > 0 else buy_ratio_24h
+
+            if buy_ratio < 0.6:  # Require 60%+ buyers (ML Bot 2 standard)
+                logger.info(
+                    f"⛔ Skipped {symbol}: Low buy ratio {buy_ratio:.1%} (need 60%+). "
+                    f"24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}"
+                )
+                return
+
+            # Filter #2: Activity Check (Real Interest)
+            txns_24h = token_data.get('txns_24h', 0)
+            txns_1h = token_data.get('txns_1h', 0)
+
+            if txns_24h < 50:  # Minimum 50 transactions (ML Bot 2 standard)
+                logger.info(
+                    f"⛔ Skipped {symbol}: Low activity {txns_24h} txns (need 50+). "
+                    f"24h: {txns_24h}, 1h: {txns_1h}"
+                )
+                return
+
+            logger.info(
+                f"✅ Quality checks passed: {symbol} - "
+                f"Buy ratio: {buy_ratio:.1%} (24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}), "
+                f"Activity: {txns_24h} txns"
+            )
+
             # Prepare data for risk assessment
             market_data = {
                 'price_usd': token_data.get('price_usd', 0),
@@ -708,7 +740,10 @@ class MLBot2Foundation:
                 'volume_24h': token_data.get('volume_24h', 0),
                 'price_change_5m': token_data.get('price_change_5m', 0),
                 'price_change_1h': token_data.get('price_change_1h', 0),
-                'txns_24h': token_data.get('txns_24h', 0),
+                'txns_24h': txns_24h,
+                'txns_1h': txns_1h,
+                'buy_ratio_24h': buy_ratio_24h,
+                'buy_ratio_1h': buy_ratio_1h,
                 # Phase 2: Preserve source information from scanner
                 'source': token_data.get('source', 'unknown'),
                 'sources': token_data.get('sources', []),
