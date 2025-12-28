@@ -594,16 +594,25 @@ class PositionManager:
         self.daily_trades = []
         logger.info("Daily statistics reset")
 
-    def export_to_csv(self, filepath: str = 'data/trade_history.csv') -> int:
+    def export_to_csv(
+        self,
+        filepath: str = 'data/trade_history.csv',
+        timeframe: str = 'all',
+        limit: Optional[int] = None
+    ) -> int:
         """
-        Export all closed trades to a CSV file for easy analysis in Excel.
+        Export closed trades to a CSV file for easy analysis in Excel.
 
         Args:
             filepath: Path to save CSV file
+            timeframe: Time filter ('all', 'daily', 'weekly', 'monthly')
+            limit: Maximum number of trades to export (most recent first)
 
         Returns:
             Number of trades exported
         """
+        from datetime import timedelta
+
         # Create data directory if it doesn't exist
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
@@ -612,6 +621,32 @@ class PositionManager:
 
         if not sell_trades:
             logger.info("No trades to export")
+            return 0
+
+        # Filter by timeframe
+        if timeframe != 'all':
+            now = datetime.now()
+            if timeframe == 'daily':
+                cutoff = now - timedelta(days=1)
+            elif timeframe == 'weekly':
+                cutoff = now - timedelta(days=7)
+            elif timeframe == 'monthly':
+                cutoff = now - timedelta(days=30)
+            else:
+                cutoff = None
+
+            if cutoff:
+                sell_trades = [t for t in sell_trades if t.timestamp >= cutoff]
+
+        # Sort by timestamp (newest first)
+        sell_trades = sorted(sell_trades, key=lambda t: t.timestamp, reverse=True)
+
+        # Apply limit if specified
+        if limit and limit > 0:
+            sell_trades = sell_trades[:limit]
+
+        if not sell_trades:
+            logger.info(f"No trades to export for timeframe: {timeframe}")
             return 0
 
         # Define CSV columns
