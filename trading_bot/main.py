@@ -736,10 +736,33 @@ class MLBot2Foundation:
                 )
                 return
 
+            # Filter #3: MAX Liquidity (Skip Bluechips)
+            liquidity_usd = token_data.get('liquidity_usd', 0)
+            MAX_LIQUIDITY = 500_000  # Skip tokens with >$500k liquidity (established tokens)
+
+            if liquidity_usd > MAX_LIQUIDITY:
+                logger.info(
+                    f"⛔ Skipped {symbol}: Too high liquidity ${liquidity_usd:,.0f} (max ${MAX_LIQUIDITY:,.0f}). "
+                    f"This is an established token, not a new opportunity."
+                )
+                return
+
+            # Filter #4: MAX Volume (Skip Established Tokens)
+            volume_24h = token_data.get('volume_24h', 0)
+            MAX_VOLUME_24H = 1_000_000  # Skip tokens with >$1M daily volume
+
+            if volume_24h > MAX_VOLUME_24H:
+                logger.info(
+                    f"⛔ Skipped {symbol}: Too high volume ${volume_24h:,.0f} (max ${MAX_VOLUME_24H:,.0f}). "
+                    f"This is an established token, not a new opportunity."
+                )
+                return
+
             logger.info(
                 f"✅ Quality checks passed: {symbol} - "
                 f"Buy ratio: {buy_ratio:.1%} (24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}), "
-                f"Activity: {txns_24h} txns"
+                f"Activity: {txns_24h} txns, "
+                f"Liq: ${liquidity_usd:,.0f}, Vol: ${volume_24h:,.0f}"
             )
 
             # Prepare data for risk assessment
