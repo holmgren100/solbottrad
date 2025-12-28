@@ -845,6 +845,7 @@ class PositionManager:
                     trailing_stop_price=pos_dict.get('trailing_stop_price', 0.0),
                     symbol=pos_dict.get('symbol', ''),
                     current_liquidity=pos_dict.get('current_liquidity', 0.0),
+                    entry_liquidity=pos_dict.get('entry_liquidity', 0.0),  # NEW: Load entry liquidity
                     initial_quantity=pos_dict.get('initial_quantity', pos_dict['quantity']),
                     milestones_hit=set(pos_dict.get('milestones_hit', []))
                 )

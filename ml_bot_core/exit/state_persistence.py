@@ -77,6 +77,7 @@ class StatePersistence:
                     'trailing_stop_price': position.trailing_stop_price,
                     'symbol': position.symbol,
                     'current_liquidity': position.current_liquidity,
+                    'entry_liquidity': position.entry_liquidity,  # NEW: Save entry liquidity
                     'initial_quantity': position.initial_quantity,
                     'milestones_hit': list(position.milestones_hit) if position.milestones_hit else [],
                 }
