@@ -741,6 +741,19 @@ class MLBot2Foundation:
 
                 # Send enhanced entry notification
                 if self.notifier:
+                    # Get actual source from market data (Phase 2 multi-source tracking)
+                    # If token found by multiple sources, show all of them!
+                    sources = market_data.get('sources', [])
+                    if sources and len(sources) > 1:
+                        # Multi-source token - show all sources
+                        actual_source = ' + '.join(sources)
+                    elif sources and len(sources) == 1:
+                        # Single source
+                        actual_source = sources[0]
+                    else:
+                        # Fallback to 'source' field if 'sources' array not available
+                        actual_source = market_data.get('source', 'UNKNOWN')
+
                     await self.notifier.send_entry_notification(
                         token_address=token_address,
                         symbol=symbol,
@@ -750,7 +763,7 @@ class MLBot2Foundation:
                         confidence=risk_score,
                         token_data=market_data,
                         rugcheck_data=None,
-                        source='DEXSCREENER'
+                        source=actual_source
                     )
             else:
                 logger.error(f"Failed to open position for {symbol}")
