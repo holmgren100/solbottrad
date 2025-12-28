@@ -33,7 +33,8 @@ class StatePersistence:
         self,
         open_positions: Dict,
         closed_trades: List,
-        portfolio_value: float
+        portfolio_value: float,
+        executor_state: Dict = None
     ) -> bool:
         """
         Save current bot state to disk.
@@ -42,6 +43,7 @@ class StatePersistence:
             open_positions: Dictionary of open Position objects
             closed_trades: List of closed Trade objects
             portfolio_value: Current portfolio value
+            executor_state: Executor state (current_capital, total_invested, initial_capital)
 
         Returns:
             True if successful
@@ -50,6 +52,7 @@ class StatePersistence:
             state = {
                 'timestamp': datetime.now().isoformat(),
                 'portfolio_value': portfolio_value,
+                'executor_state': executor_state or {},
                 'open_positions': {},
                 'closed_trades': [],
                 'statistics': {

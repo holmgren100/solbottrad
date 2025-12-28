@@ -152,6 +152,15 @@ class MLBot2Foundation:
         self.trading_engine.stuck_time_hours = 24.0  # Compatibility attribute
         self.trading_engine.max_position_age_hours = 72.0  # Compatibility attribute
 
+        # Connect executor to position_manager for state persistence
+        self.position_manager.executor = self.executor
+        # Reload executor state if it was saved (position_manager loads state in __init__ but executor didn't exist yet)
+        if self.position_manager.enable_persistence and self.position_manager.state_persistence:
+            state = self.position_manager.state_persistence.load_state()
+            if state and state.get('executor_state'):
+                self.executor.restore_state(state['executor_state'])
+                logger.info("  ✅ Executor state restored from saved data")
+
         self.settings = type('Settings', (), {
             'is_paper_trading': lambda self: config.paper_trading,  # Fixed: lambda needs self parameter
             'trading': type('Trading', (), {

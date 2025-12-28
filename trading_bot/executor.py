@@ -236,6 +236,37 @@ class PaperTradingExecutor:
             'losing_trades': stats['losing_trades']
         }
 
+    def get_state(self) -> Dict:
+        """
+        Get executor state for persistence.
+
+        Returns:
+            State dict with current_capital, total_invested, initial_capital
+        """
+        return {
+            'current_capital': self.current_capital,
+            'total_invested': self.total_invested,
+            'initial_capital': self.initial_capital
+        }
+
+    def restore_state(self, state: Dict):
+        """
+        Restore executor state from saved data.
+
+        Args:
+            state: State dict with current_capital, total_invested, initial_capital
+        """
+        self.current_capital = state.get('current_capital', self.initial_capital)
+        self.total_invested = state.get('total_invested', 0.0)
+        self.initial_capital = state.get('initial_capital', self.initial_capital)
+
+        logger.info(
+            f"📂 Restored executor state: "
+            f"Capital ${self.current_capital:.2f}, "
+            f"Invested ${self.total_invested:.2f}, "
+            f"Initial ${self.initial_capital:.2f}"
+        )
+
 
 class LiveTradingExecutor:
     """

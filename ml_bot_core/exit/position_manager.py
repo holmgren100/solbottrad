@@ -264,19 +264,21 @@ class Trade:
 class PositionManager:
     """Manages trading positions and portfolio."""
 
-    def __init__(self, max_open_positions: int = 5, enable_persistence: bool = True):
+    def __init__(self, max_open_positions: int = 5, enable_persistence: bool = True, executor=None):
         """
         Initialize position manager.
 
         Args:
             max_open_positions: Maximum number of simultaneous positions
             enable_persistence: Enable state persistence between restarts
+            executor: Optional executor instance for state persistence
         """
         self.max_open_positions = max_open_positions
         self.open_positions: Dict[str, Position] = {}
         self.closed_trades: List[Trade] = []
         self.daily_trades: List[Trade] = []
         self.portfolio_value: float = 0.0
+        self.executor = executor  # Store executor reference for state persistence
 
         # State persistence
         self.enable_persistence = enable_persistence
@@ -823,10 +825,16 @@ class PositionManager:
         if not self.enable_persistence or not self.state_persistence:
             return
 
+        # Get executor state if executor is available
+        executor_state = None
+        if self.executor and hasattr(self.executor, 'get_state'):
+            executor_state = self.executor.get_state()
+
         self.state_persistence.save_state(
             self.open_positions,
             self.closed_trades,
-            self.portfolio_value
+            self.portfolio_value,
+            executor_state
         )
 
     def _load_state(self):
@@ -840,6 +848,11 @@ class PositionManager:
 
         # Restore portfolio value
         self.portfolio_value = state.get('portfolio_value', 0.0)
+
+        # Restore executor state if executor is available
+        executor_state = state.get('executor_state')
+        if executor_state and self.executor and hasattr(self.executor, 'restore_state'):
+            self.executor.restore_state(executor_state)
 
         # Restore open positions
         for address, pos_dict in state.get('open_positions', {}).items():
