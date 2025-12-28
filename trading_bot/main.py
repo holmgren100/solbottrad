@@ -463,7 +463,7 @@ class MLBot2Foundation:
                             position.milestones_hit.add(milestone)
 
                             # Update executor balance (add proceeds)
-                            self.executor.available_balance += sell_value
+                            self.executor.current_capital += sell_value
 
                             # Calculate profit on this partial sell
                             cost_basis = position.entry_price * sell_quantity
