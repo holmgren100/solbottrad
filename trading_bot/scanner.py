@@ -158,25 +158,11 @@ class TokenScanner:
                         logger.debug(f"Skipped {address[:8]}... - Already have open position")
                         continue
 
-                # Basic filters
-                liquidity = token.get('liquidity_usd', 0) or token.get('liquidity', 0)
-                volume_24h = token.get('volume_24h', 0)
+                # FILTERS REMOVED - Let risk assessor handle filtering like old working bot
+                # Old bot gathered ALL tokens, then risk assessor decided
+                # Scanner filters were blocking everything because Jupiter tokens have liquidity=0
 
-                if liquidity < self.min_liquidity:
-                    logger.debug(
-                        f"Skipped {address[:8]}... - Low liquidity: ${liquidity:,.0f} "
-                        f"(sources: {token.get('source_count', 1)})"
-                    )
-                    continue
-
-                if volume_24h < self.min_volume_24h:
-                    logger.debug(
-                        f"Skipped {address[:8]}... - Low volume: ${volume_24h:,.0f} "
-                        f"(sources: {token.get('source_count', 1)})"
-                    )
-                    continue
-
-                # Add to filtered list
+                # Add to filtered list (no filters)
                 filtered_tokens.append(token)
                 self.scanned_tokens.add(address)
 
