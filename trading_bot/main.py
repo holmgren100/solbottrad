@@ -650,6 +650,14 @@ class MLBot2Foundation:
                 'price_change_5m': token_data.get('price_change_5m', 0),
                 'price_change_1h': token_data.get('price_change_1h', 0),
                 'txns_24h': token_data.get('txns_24h', 0),
+                # Phase 2: Preserve source information from scanner
+                'source': token_data.get('source', 'unknown'),
+                'sources': token_data.get('sources', []),
+                'source_count': token_data.get('source_count', 1),
+                'sources_count': token_data.get('source_count', 1),  # Telegram notifier expects this
+                # Preserve additional metadata for notifications
+                'pair_created_at': token_data.get('pair_created_at', 0),
+                'dex_id': token_data.get('dex_id', 'unknown'),
             }
 
             # For now, use simplified security data
