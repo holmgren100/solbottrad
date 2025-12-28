@@ -144,27 +144,46 @@ class TokenScanner:
 
             # CRITICAL: Filter out stablecoins and bluechips!
             EXCLUDED_TOKENS = {
+                # Native tokens
                 'So11111111111111111111111111111111111111112',  # SOL
+                # Stablecoins
                 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
                 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+                'USD1ttGYauSYU7wmwKPEvQGTRdq9icial4EmuB',      # USD1
+                # Wrapped BTC
+                'cbbtcf3aGTPqhU2kAFWbEDN747ZMwCgethernet4iMij',  # cbBTC (Coinbase BTC)
+                '3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh',  # WBTC (Wrapped BTC)
+                # Liquid staking tokens
                 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',   # mSOL
-                '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',  # ETH (wrapped)
                 '7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj',  # stSOL
+                # Wrapped ETH
+                '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',  # ETH (wrapped)
             }
+
+            # Stablecoin patterns (name/symbol based)
+            STABLECOIN_PATTERNS = ['USDC', 'USDT', 'USD1', 'DAI', 'BUSD', 'TUSD', 'USDP', 'FRAX']
+            BLUECHIP_PATTERNS = ['BTC', 'WBTC', 'cbBTC', 'ETH', 'WETH', 'SOL', 'stSOL', 'mSOL']
 
             for token in unique_tokens:
                 address = token.get('address')
+                symbol = (token.get('symbol') or '').upper()
+                name = (token.get('name') or '').upper()
 
-                # FILTER 1: Skip stablecoins/bluechips
+                # FILTER 1: Skip known stablecoins/bluechips by address
                 if address in EXCLUDED_TOKENS:
-                    logger.debug(f"Skipped {address[:8]}... - Stablecoin/bluechip")
+                    logger.debug(f"Skipped {address[:8]}... - Known stablecoin/bluechip")
                     continue
 
-                # FILTER 2: Skip if already scanned in this session
+                # FILTER 2: Skip by symbol/name patterns
+                if any(pattern in symbol or pattern in name for pattern in STABLECOIN_PATTERNS + BLUECHIP_PATTERNS):
+                    logger.debug(f"Skipped {address[:8]}... ({symbol}) - Stablecoin/bluechip pattern")
+                    continue
+
+                # FILTER 3: Skip if already scanned in this session
                 if address in self.scanned_tokens:
                     continue
 
-                # FILTER 3: Skip if already have open position
+                # FILTER 4: Skip if already have open position
                 if self.position_manager:
                     has_open_position = any(
                         pos.token_address == address
