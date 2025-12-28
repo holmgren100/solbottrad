@@ -407,12 +407,16 @@ class MLBot2Foundation:
                     entry_price=position.entry_price
                 )
 
-                if not price_data:
+                if not price_data or price_data[0] is None:
                     logger.warning(f"⚠️  No price data for {position.symbol or position.token_address[:8]}...")
                     continue
 
-                current_price = price_data['price']
-                current_liquidity = price_data.get('liquidity', 0)
+                # CRITICAL FIX: get_validated_price() returns TUPLE (price, liquidity, source), NOT dict!
+                current_price, current_liquidity, data_source = price_data
+
+                # Ensure liquidity is a number (not None)
+                if current_liquidity is None:
+                    current_liquidity = 0
 
                 # Update position
                 self.position_manager.update_position_price(
