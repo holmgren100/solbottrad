@@ -173,14 +173,21 @@ class PaperTradingExecutor:
         Returns:
             Balance details dict
         """
+        # Get unrealized P&L from open positions
+        unrealized_pnl = 0.0
+        if hasattr(self, 'position_manager'):
+            unrealized_pnl = self.position_manager.get_unrealized_pnl()
+
+        # Calculate total P&L (realized + unrealized)
+        total_pnl = self.current_capital + self.total_invested - self.initial_capital + unrealized_pnl
+
         return {
             'available_balance': self.current_capital,
             'total_invested': self.total_invested,
             'initial_capital': self.initial_capital,
-            'total_pnl': self.current_capital + self.total_invested - self.initial_capital,
+            'total_pnl': total_pnl,
             'total_pnl_percent': (
-                (self.current_capital + self.total_invested - self.initial_capital) /
-                self.initial_capital * 100
+                total_pnl / self.initial_capital * 100
             ) if self.initial_capital > 0 else 0
         }
 
