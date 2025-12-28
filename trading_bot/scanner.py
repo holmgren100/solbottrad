@@ -139,6 +139,32 @@ class TokenScanner:
             if multi_source:
                 logger.info(f"  ⭐ {len(multi_source)} tokens seen in multiple sources (high confidence)")
 
+            # === ENRICH WITH DEXSCREENER DATA (GET TXNS/BUYS/SELLS) ===
+            # Critical: Jupiter tokens don't have txns data, need DexScreener for that!
+            logger.info(f"  📡 Enriching tokens with DexScreener data (txns/buys/sells)...")
+            enriched_tokens = []
+            for token in unique_tokens[:30]:  # Limit to avoid rate limits
+                try:
+                    address = token.get('address')
+                    # Get full data from DexScreener
+                    dex_data = await self.dexscreener.get_token_profile(address)
+
+                    if dex_data:
+                        # Merge DexScreener data (has txns) with existing token data
+                        enriched_token = {**token, **dex_data}
+                        enriched_tokens.append(enriched_token)
+                    else:
+                        # Keep original if DexScreener doesn't have it
+                        enriched_tokens.append(token)
+                except Exception as e:
+                    logger.debug(f"Failed to enrich {address[:8]}...: {e}")
+                    enriched_tokens.append(token)
+
+            logger.info(f"  ✅ Enriched {len(enriched_tokens)} tokens with DexScreener data")
+
+            # Use enriched tokens for filtering
+            unique_tokens = enriched_tokens
+
             # === FILTERING ===
             filtered_tokens = []
 
