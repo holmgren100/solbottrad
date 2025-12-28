@@ -85,11 +85,12 @@ class TokenScanner:
 
             # === SOURCE 1: JUPITER TRENDING (with cycling) ===
             try:
+                logger.info("  🔍 Querying Jupiter API...")
                 jupiter_tokens = await self.jupiter.get_trending_tokens(limit=50)
                 all_tokens.extend(jupiter_tokens)
                 logger.info(f"  📊 Jupiter: {len(jupiter_tokens)} tokens")
             except Exception as e:
-                logger.warning(f"  ⚠️  Jupiter scan failed: {e}")
+                logger.error(f"  ❌ Jupiter scan failed: {e}", exc_info=True)
 
             # === SOURCE 2: DEXSCREENER (with category cycling) ===
             try:
@@ -141,14 +142,29 @@ class TokenScanner:
             # === FILTERING ===
             filtered_tokens = []
 
+            # CRITICAL: Filter out stablecoins and bluechips!
+            EXCLUDED_TOKENS = {
+                'So11111111111111111111111111111111111111112',  # SOL
+                'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+                'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',   # mSOL
+                '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',  # ETH (wrapped)
+                '7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj',  # stSOL
+            }
+
             for token in unique_tokens:
                 address = token.get('address')
 
-                # Skip if already scanned in this session
+                # FILTER 1: Skip stablecoins/bluechips
+                if address in EXCLUDED_TOKENS:
+                    logger.debug(f"Skipped {address[:8]}... - Stablecoin/bluechip")
+                    continue
+
+                # FILTER 2: Skip if already scanned in this session
                 if address in self.scanned_tokens:
                     continue
 
-                # Skip if already have open position
+                # FILTER 3: Skip if already have open position
                 if self.position_manager:
                     has_open_position = any(
                         pos.token_address == address
