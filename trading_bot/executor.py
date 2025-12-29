@@ -79,9 +79,9 @@ class PaperTradingExecutor:
             amount_after_fees = amount_usd * (1 - total_fee_percent / 100)
             tokens_received = amount_after_fees / effective_price
 
-            # Update capital
+            # Update capital (only update cash, don't track total_invested manually)
             self.current_capital -= amount_usd
-            self.total_invested += amount_usd
+            # Note: total_invested will be calculated from position_manager in get_balance()
 
             trade_details = {
                 'type': 'buy',
@@ -136,9 +136,9 @@ class PaperTradingExecutor:
             gross_amount = tokens_amount * effective_price
             amount_after_fees = gross_amount * (1 - total_fee_percent / 100)
 
-            # Update capital
+            # Update capital (only update cash, don't track total_invested manually)
             self.current_capital += amount_after_fees
-            self.total_invested -= amount_after_fees
+            # Note: total_invested will be calculated from position_manager in get_balance()
 
             trade_details = {
                 'type': 'sell',
@@ -173,17 +173,25 @@ class PaperTradingExecutor:
         Returns:
             Balance details dict
         """
-        # Get unrealized P&L from open positions
+        # Calculate total_invested from position_manager (cost basis of open positions)
+        total_invested = 0.0
         unrealized_pnl = 0.0
+
         if hasattr(self, 'position_manager'):
+            # Sum cost basis of all open positions
+            for position in self.position_manager.get_all_positions():
+                total_invested += position.amount_usd  # Cost basis
+
+            # Get unrealized P&L
             unrealized_pnl = self.position_manager.get_unrealized_pnl()
 
-        # Calculate total P&L (realized + unrealized)
-        total_pnl = self.current_capital + self.total_invested - self.initial_capital + unrealized_pnl
+        # Calculate total value and P&L
+        total_value = self.current_capital + total_invested + unrealized_pnl
+        total_pnl = total_value - self.initial_capital
 
         return {
             'available_balance': self.current_capital,
-            'total_invested': self.total_invested,
+            'total_invested': total_invested,  # Calculated from positions, not tracked
             'initial_capital': self.initial_capital,
             'total_pnl': total_pnl,
             'total_pnl_percent': (
