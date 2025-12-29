@@ -125,6 +125,21 @@ class EnhancedTradeData:
     buy_pressure_recent: float = 0.0
     momentum_accelerating: bool = False
 
+    # ⚡ CRITICAL ANALYSIS FIELDS (from 401-trade analysis)
+    # Drawdown tracking (ML Bot primary signal!)
+    current_drawdown_percent: float = 0.0  # Current DD from peak
+    max_drawdown_percent: float = 0.0      # Maximum DD reached
+
+    # Token age (bluechip filter)
+    token_age_hours: float = 0.0           # Hours since token creation
+
+    # Data provider tracking (which source works best?)
+    data_provider: str = 'unknown'         # DexScreener, Jupiter, etc.
+
+    # Rug detection indicators
+    price_frozen: bool = False             # Price hasn't moved >0.1% in 15+ min
+    consecutive_failed_updates: int = 0    # Failed price updates count
+
 
 class CSVTracker:
     """
@@ -357,6 +372,10 @@ class CSVTracker:
             # Momentum
             'Price Change 1h (%)', 'Price Change 5min (%)', 'Price Change 1min (%)',
             'Volume Spike Ratio', 'Buy Pressure', 'Momentum Accelerating',
+            # ⚡ Critical Analysis Fields (401-trade analysis)
+            'Current Drawdown (%)', 'Max Drawdown (%)',
+            'Token Age (hours)', 'Data Provider',
+            'Price Frozen', 'Failed Updates Count',
         ]
 
         # Write CSV
@@ -439,6 +458,13 @@ class CSVTracker:
                     'Volume Spike Ratio': f"{trade.volume_spike_ratio:.2f}x",
                     'Buy Pressure': f"{trade.buy_pressure_recent:.2f}",
                     'Momentum Accelerating': 'Yes' if trade.momentum_accelerating else 'No',
+                    # ⚡ Critical Analysis Fields
+                    'Current Drawdown (%)': f"{trade.current_drawdown_percent:.2f}%",
+                    'Max Drawdown (%)': f"{trade.max_drawdown_percent:.2f}%",
+                    'Token Age (hours)': f"{trade.token_age_hours:.1f}",
+                    'Data Provider': trade.data_provider,
+                    'Price Frozen': 'Yes' if trade.price_frozen else 'No',
+                    'Failed Updates Count': trade.consecutive_failed_updates,
                 })
 
         logger.info(f"Exported {len(self.trades)} trades to {filepath}")
