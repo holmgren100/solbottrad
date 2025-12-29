@@ -538,44 +538,82 @@ class TelegramCommandHandler:
         try:
             from datetime import datetime, timedelta
             import csv
+            import json
 
-            # Load trades from last 24 hours from CSV
-            trades_file = "data/ml_trades.csv"
-            if not os.path.exists(trades_file):
-                await update.message.reply_text("📭 No trade history found")
-                return
-
+            # Load trades from last 24 hours - prioritize bot_state.json over CSV
             now = datetime.now()
             yesterday = now - timedelta(hours=24)
             daily_trades = []
 
-            with open(trades_file, 'r') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    try:
-                        # Parse date and time from CSV
-                        trade_date = row.get('Date', '')
-                        trade_time = row.get('Time', '')
-                        if trade_date and trade_time:
-                            trade_datetime = datetime.strptime(f"{trade_date} {trade_time}", "%Y-%m-%d %H:%M:%S")
-                            if trade_datetime >= yesterday:
-                                # Convert CSV row to trade dict (strip $ and % formatting)
-                                pnl_str = row.get('PnL ($)', '$0').replace('$', '').strip()
-                                pnl_pct_str = row.get('PnL (%)', '0%').replace('%', '').replace('+', '').strip()
-                                win_loss = row.get('Win/Loss', '').upper()
-                                trade = {
-                                    'pnl': float(pnl_str) if pnl_str else 0,
-                                    'win': win_loss == 'WIN',
-                                    'loss': win_loss == 'LOSS',
-                                    'breakeven': win_loss == 'BREAK-EVEN',
-                                    'exit_reason': row.get('Exit Reason', 'unknown'),
-                                    'symbol': row.get('Symbol', ''),
-                                    'pnl_percent': float(pnl_pct_str) if pnl_pct_str else 0
-                                }
-                                daily_trades.append(trade)
-                    except Exception as e:
-                        logger.debug(f"Skipping row in /daily: {e}")
-                        continue
+            # Try loading from bot_state.json first (has ALL trade history)
+            state_file = "bot_state.json"
+            if os.path.exists(state_file):
+                try:
+                    with open(state_file, 'r') as f:
+                        state = json.load(f)
+                        closed_trades = state.get('closed_trades', [])
+
+                        for trade in closed_trades:
+                            try:
+                                # Parse timestamp from trade
+                                timestamp_str = trade.get('timestamp', '')
+                                if timestamp_str:
+                                    trade_datetime = datetime.fromisoformat(timestamp_str)
+                                    if trade_datetime >= yesterday:
+                                        pnl = trade.get('pnl', 0)
+                                        pnl_percent = trade.get('pnl_percent', 0)
+                                        trade_dict = {
+                                            'pnl': pnl,
+                                            'win': pnl > 0,
+                                            'loss': pnl < 0,
+                                            'breakeven': pnl == 0,
+                                            'exit_reason': trade.get('reason', 'unknown'),
+                                            'symbol': trade.get('symbol', ''),
+                                            'pnl_percent': pnl_percent
+                                        }
+                                        daily_trades.append(trade_dict)
+                            except Exception as e:
+                                logger.debug(f"Skipping trade in /daily: {e}")
+                                continue
+
+                    logger.info(f"Loaded {len(daily_trades)} trades from bot_state.json for /daily")
+                except Exception as e:
+                    logger.warning(f"Failed to load from bot_state.json: {e}, falling back to CSV")
+
+            # Fallback to CSV if no trades from bot_state.json
+            if not daily_trades:
+                trades_file = "data/ml_trades.csv"
+                if not os.path.exists(trades_file):
+                    await update.message.reply_text("📭 No trade history found")
+                    return
+
+                with open(trades_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        try:
+                            # Parse date and time from CSV
+                            trade_date = row.get('Date', '')
+                            trade_time = row.get('Time', '')
+                            if trade_date and trade_time:
+                                trade_datetime = datetime.strptime(f"{trade_date} {trade_time}", "%Y-%m-%d %H:%M:%S")
+                                if trade_datetime >= yesterday:
+                                    # Convert CSV row to trade dict (strip $ and % formatting)
+                                    pnl_str = row.get('PnL ($)', '$0').replace('$', '').strip()
+                                    pnl_pct_str = row.get('PnL (%)', '0%').replace('%', '').replace('+', '').strip()
+                                    win_loss = row.get('Win/Loss', '').upper()
+                                    trade = {
+                                        'pnl': float(pnl_str) if pnl_str else 0,
+                                        'win': win_loss == 'WIN',
+                                        'loss': win_loss == 'LOSS',
+                                        'breakeven': win_loss == 'BREAK-EVEN',
+                                        'exit_reason': row.get('Exit Reason', 'unknown'),
+                                        'symbol': row.get('Symbol', ''),
+                                        'pnl_percent': float(pnl_pct_str) if pnl_pct_str else 0
+                                    }
+                                    daily_trades.append(trade)
+                        except Exception as e:
+                            logger.debug(f"Skipping row in /daily CSV: {e}")
+                            continue
 
             if not daily_trades:
                 await update.message.reply_text("📭 No trades in the last 24 hours")
@@ -640,45 +678,84 @@ class TelegramCommandHandler:
         try:
             from datetime import datetime, timedelta
             import csv
+            import json
 
-            # Load trades from last 7 days from CSV
-            trades_file = "data/ml_trades.csv"
-            if not os.path.exists(trades_file):
-                await update.message.reply_text("📭 No trade history found")
-                return
-
+            # Load trades from last 7 days - prioritize bot_state.json over CSV
             now = datetime.now()
             week_ago = now - timedelta(days=7)
             weekly_trades = []
 
-            with open(trades_file, 'r') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    try:
-                        # Parse date and time from CSV
-                        trade_date = row.get('Date', '')
-                        trade_time = row.get('Time', '')
-                        if trade_date and trade_time:
-                            trade_datetime = datetime.strptime(f"{trade_date} {trade_time}", "%Y-%m-%d %H:%M:%S")
-                            if trade_datetime >= week_ago:
-                                # Convert CSV row to trade dict (strip $ and % formatting)
-                                pnl_str = row.get('PnL ($)', '$0').replace('$', '').strip()
-                                pnl_pct_str = row.get('PnL (%)', '0%').replace('%', '').replace('+', '').strip()
-                                win_loss = row.get('Win/Loss', '').upper()
-                                trade = {
-                                    'pnl': float(pnl_str) if pnl_str else 0,
-                                    'win': win_loss == 'WIN',
-                                    'loss': win_loss == 'LOSS',
-                                    'breakeven': win_loss == 'BREAK-EVEN',
-                                    'exit_reason': row.get('Exit Reason', 'unknown'),
-                                    'symbol': row.get('Symbol', ''),
-                                    'pnl_percent': float(pnl_pct_str) if pnl_pct_str else 0,
-                                    'exit_time': trade_datetime
-                                }
-                                weekly_trades.append(trade)
-                    except Exception as e:
-                        logger.debug(f"Skipping row in /weekly: {e}")
-                        continue
+            # Try loading from bot_state.json first (has ALL trade history)
+            state_file = "bot_state.json"
+            if os.path.exists(state_file):
+                try:
+                    with open(state_file, 'r') as f:
+                        state = json.load(f)
+                        closed_trades = state.get('closed_trades', [])
+
+                        for trade in closed_trades:
+                            try:
+                                # Parse timestamp from trade
+                                timestamp_str = trade.get('timestamp', '')
+                                if timestamp_str:
+                                    trade_datetime = datetime.fromisoformat(timestamp_str)
+                                    if trade_datetime >= week_ago:
+                                        pnl = trade.get('pnl', 0)
+                                        pnl_percent = trade.get('pnl_percent', 0)
+                                        trade_dict = {
+                                            'pnl': pnl,
+                                            'win': pnl > 0,
+                                            'loss': pnl < 0,
+                                            'breakeven': pnl == 0,
+                                            'exit_reason': trade.get('reason', 'unknown'),
+                                            'symbol': trade.get('symbol', ''),
+                                            'pnl_percent': pnl_percent,
+                                            'exit_time': trade_datetime
+                                        }
+                                        weekly_trades.append(trade_dict)
+                            except Exception as e:
+                                logger.debug(f"Skipping trade in /weekly: {e}")
+                                continue
+
+                    logger.info(f"Loaded {len(weekly_trades)} trades from bot_state.json for /weekly")
+                except Exception as e:
+                    logger.warning(f"Failed to load from bot_state.json: {e}, falling back to CSV")
+
+            # Fallback to CSV if no trades from bot_state.json
+            if not weekly_trades:
+                trades_file = "data/ml_trades.csv"
+                if not os.path.exists(trades_file):
+                    await update.message.reply_text("📭 No trade history found")
+                    return
+
+                with open(trades_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        try:
+                            # Parse date and time from CSV
+                            trade_date = row.get('Date', '')
+                            trade_time = row.get('Time', '')
+                            if trade_date and trade_time:
+                                trade_datetime = datetime.strptime(f"{trade_date} {trade_time}", "%Y-%m-%d %H:%M:%S")
+                                if trade_datetime >= week_ago:
+                                    # Convert CSV row to trade dict (strip $ and % formatting)
+                                    pnl_str = row.get('PnL ($)', '$0').replace('$', '').strip()
+                                    pnl_pct_str = row.get('PnL (%)', '0%').replace('%', '').replace('+', '').strip()
+                                    win_loss = row.get('Win/Loss', '').upper()
+                                    trade = {
+                                        'pnl': float(pnl_str) if pnl_str else 0,
+                                        'win': win_loss == 'WIN',
+                                        'loss': win_loss == 'LOSS',
+                                        'breakeven': win_loss == 'BREAK-EVEN',
+                                        'exit_reason': row.get('Exit Reason', 'unknown'),
+                                        'symbol': row.get('Symbol', ''),
+                                        'pnl_percent': float(pnl_pct_str) if pnl_pct_str else 0,
+                                        'exit_time': trade_datetime
+                                    }
+                                    weekly_trades.append(trade)
+                        except Exception as e:
+                            logger.debug(f"Skipping row in /weekly CSV: {e}")
+                            continue
 
             if not weekly_trades:
                 await update.message.reply_text("📭 No trades in the last 7 days")
