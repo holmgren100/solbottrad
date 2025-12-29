@@ -71,6 +71,10 @@ class EnhancedTradeData:
     # Volume data
     volume_24h: float = 0.0
     volume_1h: float = 0.0
+    exit_volume_24h: float = 0.0           # Volume at exit (for spike analysis)
+    exit_volume_1h: float = 0.0            # 1h volume at exit
+    volume_change_24h_percent: float = 0.0 # Entry vs exit volume change
+    volume_change_1h_percent: float = 0.0  # 1h volume change
 
     # Selection scoring
     opportunity_score: float = 0.0
@@ -95,7 +99,11 @@ class EnhancedTradeData:
     # Transaction activity
     txns_h1_buys: int = 0
     txns_h1_sells: int = 0
-    buy_sell_ratio: float = 0.0
+    buy_sell_ratio: float = 0.0            # Buys/Sells ratio
+    entry_buy_ratio: float = 0.0           # Buys/(Buys+Sells) at entry (0-1)
+    exit_buy_ratio: float = 0.0            # Buys/(Buys+Sells) at exit (0-1)
+    exit_txns_h1_buys: int = 0             # Buy transactions at exit
+    exit_txns_h1_sells: int = 0            # Sell transactions at exit
 
     # Position sizing (455-trade optimization)
     position_multiplier: float = 1.0
@@ -107,8 +115,10 @@ class EnhancedTradeData:
     lp_locked: bool = False
     lp_burned: bool = False
     lp_lock_days: int = 0
+    lp_burned_percent: float = 0.0         # % of LP burned (0-100)
 
     # Holder concentration
+    holder_count: int = 0                  # Total number of holders
     top10_concentration: float = 0.0
     top1_concentration: float = 0.0
 
@@ -226,6 +236,32 @@ class CSVTracker:
             if position.txns_h1_sells > 0:
                 buy_sell_ratio = position.txns_h1_buys / position.txns_h1_sells
 
+        # Calculate entry and exit buy ratios (buys / (buys + sells))
+        entry_buy_ratio = 0.0
+        exit_buy_ratio = 0.0
+        entry_buys = getattr(position, 'txns_h1_buys', 0)
+        entry_sells = getattr(position, 'txns_h1_sells', 0)
+        exit_buys = getattr(position, 'exit_txns_h1_buys', entry_buys)  # Fallback to entry if not tracked
+        exit_sells = getattr(position, 'exit_txns_h1_sells', entry_sells)
+
+        if (entry_buys + entry_sells) > 0:
+            entry_buy_ratio = entry_buys / (entry_buys + entry_sells)
+        if (exit_buys + exit_sells) > 0:
+            exit_buy_ratio = exit_buys / (exit_buys + exit_sells)
+
+        # Calculate exit volumes and volume changes
+        exit_volume_24h = getattr(position, 'exit_volume_24h', 0.0)
+        exit_volume_1h = getattr(position, 'exit_volume_1h', 0.0)
+        entry_volume_24h = getattr(position, 'volume_24h', 0.0)
+        entry_volume_1h = getattr(position, 'volume_1h', 0.0)
+
+        volume_change_24h_percent = 0.0
+        volume_change_1h_percent = 0.0
+        if entry_volume_24h > 0:
+            volume_change_24h_percent = ((exit_volume_24h - entry_volume_24h) / entry_volume_24h) * 100
+        if entry_volume_1h > 0:
+            volume_change_1h_percent = ((exit_volume_1h - entry_volume_1h) / entry_volume_1h) * 100
+
         # Create enhanced trade data
         trade_data = EnhancedTradeData(
             # Core
@@ -253,8 +289,12 @@ class CSVTracker:
             liquidity_change_percent=liquidity_change_percent,
 
             # Volume
-            volume_24h=getattr(position, 'volume_24h', 0.0),
-            volume_1h=getattr(position, 'volume_1h', 0.0),
+            volume_24h=entry_volume_24h,
+            volume_1h=entry_volume_1h,
+            exit_volume_24h=exit_volume_24h,
+            exit_volume_1h=exit_volume_1h,
+            volume_change_24h_percent=volume_change_24h_percent,
+            volume_change_1h_percent=volume_change_1h_percent,
 
             # Scoring
             opportunity_score=getattr(position, 'opportunity_score', 0.0),
@@ -277,9 +317,13 @@ class CSVTracker:
             config_trailing_distance_percent=getattr(position, 'config_trailing_distance_percent', 15.0),
 
             # Transaction activity
-            txns_h1_buys=getattr(position, 'txns_h1_buys', 0),
-            txns_h1_sells=getattr(position, 'txns_h1_sells', 0),
+            txns_h1_buys=entry_buys,
+            txns_h1_sells=entry_sells,
             buy_sell_ratio=buy_sell_ratio,
+            entry_buy_ratio=entry_buy_ratio,
+            exit_buy_ratio=exit_buy_ratio,
+            exit_txns_h1_buys=exit_buys,
+            exit_txns_h1_sells=exit_sells,
 
             # Position sizing
             position_multiplier=getattr(position, 'position_multiplier_applied', 1.0),
@@ -291,8 +335,10 @@ class CSVTracker:
             lp_locked=getattr(position, 'lp_locked', False),
             lp_burned=getattr(position, 'lp_burned', False),
             lp_lock_days=getattr(position, 'lp_lock_days', 0),
+            lp_burned_percent=getattr(position, 'lp_burned_percent', 0.0),
 
             # Holder concentration
+            holder_count=getattr(position, 'holder_count', 0),
             top10_concentration=getattr(position, 'top10_concentration', 0.0),
             top1_concentration=getattr(position, 'top1_concentration', 0.0),
 
@@ -350,6 +396,8 @@ class CSVTracker:
             'Entry Liquidity', 'Exit Liquidity', 'Liquidity Change (%)',
             # Volume
             'Volume 24h', 'Volume 1h',
+            'Exit Volume 24h', 'Exit Volume 1h',
+            'Volume Change 24h (%)', 'Volume Change 1h (%)',
             # Scoring
             'Opportunity Score', 'Risk Score',
             # Source
@@ -361,12 +409,14 @@ class CSVTracker:
             'Config Stop Loss (%)', 'Config Trailing Activation (%)', 'Config Trailing Distance (%)',
             # Transaction activity
             'Txns H1 Buys', 'Txns H1 Sells', 'Buy/Sell Ratio',
+            'Entry Buy Ratio', 'Exit Buy Ratio',
+            'Exit Txns H1 Buys', 'Exit Txns H1 Sells',
             # Position sizing
             'Position Multiplier', 'Golden Range Bonus', 'Preferred Price Bonus', 'Original Position Size',
             # LP lock
-            'LP Locked', 'LP Burned', 'LP Lock Days',
+            'LP Locked', 'LP Burned', 'LP Lock Days', 'LP Burned (%)',
             # Holder concentration
-            'Top 10 Concentration (%)', 'Top 1 Concentration (%)',
+            'Holder Count', 'Top 10 Concentration (%)', 'Top 1 Concentration (%)',
             # Contract safety
             'Mint Authority', 'Freeze Authority', 'Ownership Renounced',
             # Momentum
@@ -415,6 +465,10 @@ class CSVTracker:
                     # Volume
                     'Volume 24h': f"${trade.volume_24h:,.0f}",
                     'Volume 1h': f"${trade.volume_1h:,.0f}",
+                    'Exit Volume 24h': f"${trade.exit_volume_24h:,.0f}",
+                    'Exit Volume 1h': f"${trade.exit_volume_1h:,.0f}",
+                    'Volume Change 24h (%)': f"{trade.volume_change_24h_percent:+.1f}%",
+                    'Volume Change 1h (%)': f"{trade.volume_change_1h_percent:+.1f}%",
                     # Scoring
                     'Opportunity Score': f"{trade.opportunity_score:.1f}",
                     'Risk Score': f"{trade.risk_score:.2f}",
@@ -435,6 +489,10 @@ class CSVTracker:
                     'Txns H1 Buys': trade.txns_h1_buys,
                     'Txns H1 Sells': trade.txns_h1_sells,
                     'Buy/Sell Ratio': f"{trade.buy_sell_ratio:.2f}",
+                    'Entry Buy Ratio': f"{trade.entry_buy_ratio:.3f}",
+                    'Exit Buy Ratio': f"{trade.exit_buy_ratio:.3f}",
+                    'Exit Txns H1 Buys': trade.exit_txns_h1_buys,
+                    'Exit Txns H1 Sells': trade.exit_txns_h1_sells,
                     # Position sizing
                     'Position Multiplier': f"{trade.position_multiplier:.2f}x",
                     'Golden Range Bonus': 'Yes' if trade.golden_range_bonus else 'No',
@@ -444,7 +502,9 @@ class CSVTracker:
                     'LP Locked': 'Yes' if trade.lp_locked else 'No',
                     'LP Burned': 'Yes' if trade.lp_burned else 'No',
                     'LP Lock Days': trade.lp_lock_days,
+                    'LP Burned (%)': f"{trade.lp_burned_percent:.1f}%",
                     # Holder concentration
+                    'Holder Count': trade.holder_count,
                     'Top 10 Concentration (%)': f"{trade.top10_concentration:.1f}%",
                     'Top 1 Concentration (%)': f"{trade.top1_concentration:.1f}%",
                     # Contract safety
