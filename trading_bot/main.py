@@ -262,7 +262,8 @@ class MLBot2Foundation:
         entry_price: float,
         amount_usd: float,
         symbol: str = '',
-        entry_liquidity: float = 0.0
+        entry_liquidity: float = 0.0,
+        **kwargs  # Accept all additional tracking fields
     ) -> Optional[object]:
         """
         Open a new position using protected core.
@@ -296,11 +297,12 @@ class MLBot2Foundation:
             take_profit=take_profit,
             use_trailing_stop=self.config.core_config.use_trailing_stop,
             trailing_stop_percent=self.config.core_config.trailing_stop_percent,
-            entry_liquidity=entry_liquidity
+            entry_liquidity=entry_liquidity,
+            symbol=symbol,  # Pass symbol to position
+            **kwargs  # Pass all additional tracking fields
         )
 
         if position:
-            position.symbol = symbol  # Set symbol for display
 
             logger.info(
                 f"📈 Position opened: {symbol or token_address[:8]}... "
