@@ -129,6 +129,7 @@ class DexScreenerClient:
                         'price_usd': float(pair.get('priceUsd', 0)),
                         'liquidity_usd': float(liquidity.get('usd', 0)),
                         'volume_24h': float(volume.get('h24', 0)),
+                        'volume_1h': float(volume.get('h1', 0)),  # ⚡ 1h volume for spike detection
                         'price_change_5m': float(price_change.get('m5', 0)),
                         'price_change_1h': float(price_change.get('h1', 0)),
                         'price_change_24h': float(price_change.get('h24', 0)),
@@ -142,6 +143,12 @@ class DexScreenerClient:
                         'buy_ratio_1h': buy_ratio_1h,
                         'pair_address': pair.get('pairAddress', ''),
                         'dex_id': pair.get('dexId', ''),
+                        # ⚡ CRITICAL ANALYSIS FIELDS
+                        'pair_created_at': pair.get('pairCreatedAt', 0),  # Timestamp for token age
+                        'fdv': float(pair.get('fdv', 0)),  # Fully diluted valuation
+                        'market_cap': float(pair.get('marketCap', 0)),  # Market cap
+                        'info': pair.get('info', {}),  # Social links, websites
+                        'labels': pair.get('labels', []),  # Community flags (v2, v3, scam, etc)
                     }
                 elif response.status == 404:
                     logger.debug(f"Token {token_address[:8]}... not found on DexScreener (may be too new)")

@@ -70,7 +70,7 @@ class MLBot2Foundation:
         logger.info("  ✅ PositionManager initialized")
 
         # Initialize PriceValidator with API clients
-        from trading_bot.api_clients import DexScreenerClient, JupiterClient
+        from trading_bot.api_clients import DexScreenerClient, JupiterClient, SolscanClient
         dexscreener_client = DexScreenerClient(api_key=config.dexscreener_api_key)
         jupiter_client = JupiterClient()
 
@@ -79,6 +79,14 @@ class MLBot2Foundation:
             jupiter_client=jupiter_client
         )
         logger.info("  ✅ PriceValidator initialized")
+
+        # Initialize SolscanClient for holder analysis
+        if config.solscan_api_key:
+            self.solscan_client = SolscanClient(api_key=config.solscan_api_key)
+            logger.info("  ✅ SolscanClient initialized (holder analysis enabled)")
+        else:
+            self.solscan_client = None
+            logger.warning("  ⚠️  SolscanClient disabled - no API key (holder data unavailable)")
 
         # === ✅ OPTIONAL ENHANCEMENTS ===
         logger.info("Initializing enhancement modules...")
@@ -335,6 +343,25 @@ class MLBot2Foundation:
         if not position:
             logger.warning(f"Cannot close position - no position found for {token_address[:8]}...")
             return None
+
+        # ⚡ Fetch fresh token data at exit for volume/sentiment tracking
+        try:
+            fresh_data = await self.price_validator.dexscreener_client.get_token_profile(token_address)
+            if fresh_data:
+                # Update position with exit volumes and sentiment
+                position.exit_volume_24h = fresh_data.get('volume_24h', 0.0)
+                position.exit_volume_1h = fresh_data.get('volume_1h', 0.0)
+                position.exit_txns_h1_buys = fresh_data.get('buys_1h', 0)
+                position.exit_txns_h1_sells = fresh_data.get('sells_1h', 0)
+                logger.debug(
+                    f"📊 Exit data: Vol 24h: ${fresh_data.get('volume_24h', 0):,.0f}, "
+                    f"1h: ${fresh_data.get('volume_1h', 0):,.0f}, "
+                    f"Buys/Sells: {fresh_data.get('buys_1h', 0)}/{fresh_data.get('sells_1h', 0)}"
+                )
+            else:
+                logger.debug(f"No fresh data available at exit for {token_address[:8]}...")
+        except Exception as e:
+            logger.debug(f"Error fetching exit data for {token_address[:8]}...: {e}")
 
         # 🔒 PROTECTED CORE: Close position
         trade = self.position_manager.close_position(
@@ -711,6 +738,35 @@ class MLBot2Foundation:
             symbol = token_data.get('symbol', '')
 
             logger.info(f"Analyzing: {symbol} ({token_address[:8]}...)")
+
+            # ⚡ Calculate token age from pair creation timestamp
+            pair_created_at = token_data.get('pair_created_at', 0)
+            if pair_created_at and pair_created_at > 0:
+                # DexScreener returns timestamp in milliseconds
+                created_datetime = datetime.fromtimestamp(pair_created_at / 1000)
+                token_age_hours = (datetime.now() - created_datetime).total_seconds() / 3600
+                token_data['token_age_hours'] = token_age_hours
+            else:
+                token_data['token_age_hours'] = 0.0
+
+            # ⚡ Fetch holder analysis from Solscan (if available)
+            if self.solscan_client:
+                try:
+                    async with self.solscan_client:
+                        holder_data = await self.solscan_client.get_holder_analysis(token_address)
+                        if holder_data:
+                            token_data['holder_count'] = holder_data.get('total_holders', 0)
+                            token_data['top10_concentration'] = holder_data.get('top10_concentration', 0.0)
+                            token_data['top1_concentration'] = holder_data.get('top1_concentration', 0.0)
+                            logger.debug(
+                                f"📊 Holder analysis: {holder_data['total_holders']} holders, "
+                                f"Top1: {holder_data['top1_concentration']:.1f}%, "
+                                f"Top10: {holder_data['top10_concentration']:.1f}%"
+                            )
+                        else:
+                            logger.debug(f"No holder data available for {symbol}")
+                except Exception as e:
+                    logger.debug(f"Error fetching holder analysis for {symbol}: {e}")
 
             # === ENTRY QUALITY FILTERS (ML Bot Style) ===
             # Filter #1: Buy/Sell Ratio (Bullish Momentum)
