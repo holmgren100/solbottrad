@@ -868,7 +868,25 @@ class MLBot2Foundation:
                 entry_price=entry_price,
                 amount_usd=position_size_usd,
                 symbol=symbol,
-                entry_liquidity=fresh_liquidity  # Track entry liquidity for drop % calculation
+                entry_liquidity=fresh_liquidity,  # Track entry liquidity for drop % calculation
+                # ⚡ CRITICAL ANALYSIS FIELDS from token_data
+                volume_24h=token_data.get('volume_24h', 0.0),
+                volume_1h=token_data.get('volume_1h', 0.0),
+                dex_platform=token_data.get('dex_id', 'unknown'),
+                token_source=token_data.get('source', 'unknown'),
+                data_provider=data_source,  # DexScreener or Jupiter (from validation)
+                txns_h1_buys=token_data.get('txns_h1_buys', 0),
+                txns_h1_sells=token_data.get('txns_h1_sells', 0),
+                buy_ratio_24h=token_data.get('buy_ratio_24h', 0.0),
+                buy_ratio_1h=token_data.get('buy_ratio_1h', 0.0),
+                holder_count=token_data.get('holder_count', 0),
+                top10_concentration=token_data.get('top10_concentration', 0.0),
+                top1_concentration=token_data.get('top1_concentration', 0.0),
+                lp_locked=token_data.get('lp_locked', False),
+                lp_burned=token_data.get('lp_burned', False),
+                lp_lock_days=token_data.get('lp_lock_days', 0),
+                lp_burned_percent=token_data.get('lp_burned_percent', 0.0),
+                token_age_hours=token_data.get('token_age_hours', 0.0),
             )
 
             if position:

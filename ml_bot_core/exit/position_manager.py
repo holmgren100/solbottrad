@@ -43,6 +43,46 @@ class Position:
     initial_quantity: float = 0.0  # Track original quantity for partial sells
     milestones_hit: set = field(default_factory=set)  # Track which profit milestones have been taken (100, 200, 300, 500)
 
+    # ⚡ CRITICAL ANALYSIS FIELDS (for CSV export & pattern detection)
+    # Volume tracking
+    volume_24h: float = 0.0           # Entry volume 24h
+    volume_1h: float = 0.0            # Entry volume 1h
+    exit_volume_24h: float = 0.0      # Exit volume 24h (populated at close)
+    exit_volume_1h: float = 0.0       # Exit volume 1h (populated at close)
+
+    # DEX & Source tracking
+    dex_platform: str = 'unknown'     # Pump.fun, Raydium, Meteora, etc
+    token_source: str = 'unknown'     # API source (DexScreener, Jupiter)
+    data_provider: str = 'unknown'    # Which provider gave best data
+
+    # Transaction sentiment
+    txns_h1_buys: int = 0             # Buy transactions at entry
+    txns_h1_sells: int = 0            # Sell transactions at entry
+    buy_ratio_24h: float = 0.0        # Buy ratio 24h at entry
+    buy_ratio_1h: float = 0.0         # Buy ratio 1h at entry
+    exit_txns_h1_buys: int = 0        # Buy transactions at exit
+    exit_txns_h1_sells: int = 0       # Sell transactions at exit
+
+    # Holder & LP data
+    holder_count: int = 0             # Number of holders
+    top10_concentration: float = 0.0  # Top 10 holder concentration %
+    top1_concentration: float = 0.0   # Top 1 holder concentration %
+    lp_locked: bool = False           # LP locked status
+    lp_burned: bool = False           # LP burned status
+    lp_lock_days: int = 0             # Days LP is locked
+    lp_burned_percent: float = 0.0    # % of LP burned
+
+    # Token info
+    token_age_hours: float = 0.0      # Hours since token creation
+
+    # Peak tracking (for max gain analysis)
+    peak_time: datetime = None        # When peak was reached
+    peak_price: float = 0.0            # Peak price (same as highest_price but explicit)
+
+    # Drawdown tracking (ML Bot primary signal!)
+    max_drawdown_percent: float = 0.0 # Maximum drawdown from peak
+    current_drawdown_percent: float = 0.0  # Current drawdown from peak
+
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
         # Track if price ACTUALLY changed (not just API responding with same price)
@@ -84,12 +124,22 @@ class Position:
             # Update highest price if current price is higher
             if new_price > self.highest_price:
                 self.highest_price = new_price
+                self.peak_price = new_price  # Track for analysis
+                self.peak_time = datetime.now()  # Track when peak was reached
                 # Calculate new trailing stop (X% below highest price)
                 self.trailing_stop_price = self.highest_price * (1 - self.trailing_stop_percent / 100)
                 logger.debug(
                     f"Trailing stop updated for {self.token_address[:8]}...: "
                     f"Peak ${self.highest_price:.8f} → Stop ${self.trailing_stop_price:.8f}"
                 )
+
+        # === DRAWDOWN TRACKING (ML Bot primary signal!) ===
+        # Calculate current drawdown from peak
+        if self.highest_price > 0:
+            self.current_drawdown_percent = ((self.highest_price - new_price) / self.highest_price) * 100
+            # Update max drawdown if current is worse
+            if self.current_drawdown_percent > self.max_drawdown_percent:
+                self.max_drawdown_percent = self.current_drawdown_percent
 
     def check_profit_milestone(self) -> Optional[int]:
         """
@@ -306,7 +356,26 @@ class PositionManager:
         take_profit: float,
         use_trailing_stop: bool = False,  # Start disabled, activate at 15% gain!
         trailing_stop_percent: float = 15.0,
-        entry_liquidity: float = 0.0
+        entry_liquidity: float = 0.0,
+        # ⚡ CRITICAL ANALYSIS FIELDS
+        volume_24h: float = 0.0,
+        volume_1h: float = 0.0,
+        dex_platform: str = 'unknown',
+        token_source: str = 'unknown',
+        data_provider: str = 'unknown',
+        txns_h1_buys: int = 0,
+        txns_h1_sells: int = 0,
+        buy_ratio_24h: float = 0.0,
+        buy_ratio_1h: float = 0.0,
+        holder_count: int = 0,
+        top10_concentration: float = 0.0,
+        top1_concentration: float = 0.0,
+        lp_locked: bool = False,
+        lp_burned: bool = False,
+        lp_lock_days: int = 0,
+        lp_burned_percent: float = 0.0,
+        token_age_hours: float = 0.0,
+        symbol: str = ''
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -349,7 +418,27 @@ class PositionManager:
             trailing_stop_price=stop_loss,  # Start with regular stop loss
             initial_quantity=quantity,  # Track original quantity for partial profit taking
             last_known_price=entry_price,  # Initialize for frozen price detection
-            entry_liquidity=entry_liquidity  # Track entry liquidity for drop % calculation
+            entry_liquidity=entry_liquidity,  # Track entry liquidity for drop % calculation
+            symbol=symbol,
+            # ⚡ CRITICAL ANALYSIS FIELDS
+            volume_24h=volume_24h,
+            volume_1h=volume_1h,
+            dex_platform=dex_platform,
+            token_source=token_source,
+            data_provider=data_provider,
+            txns_h1_buys=txns_h1_buys,
+            txns_h1_sells=txns_h1_sells,
+            buy_ratio_24h=buy_ratio_24h,
+            buy_ratio_1h=buy_ratio_1h,
+            holder_count=holder_count,
+            top10_concentration=top10_concentration,
+            top1_concentration=top1_concentration,
+            lp_locked=lp_locked,
+            lp_burned=lp_burned,
+            lp_lock_days=lp_lock_days,
+            lp_burned_percent=lp_burned_percent,
+            token_age_hours=token_age_hours,
+            peak_price=entry_price,  # Initialize peak with entry
         )
 
         self.open_positions[token_address] = position
