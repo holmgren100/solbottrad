@@ -25,12 +25,14 @@ Usage:
 
 from enhanced_modules.csv_tracker import CSVTracker, EnhancedTradeData
 from enhanced_modules.safety_filters import SafetyFilters, SafetyConfig
+from enhanced_modules.rejected_tracker import RejectedTracker
 
 __all__ = [
     'CSVTracker',
     'EnhancedTradeData',
     'SafetyFilters',
     'SafetyConfig',
+    'RejectedTracker',
 ]
 
 __version__ = "1.0.0"

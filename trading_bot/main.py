@@ -103,6 +103,11 @@ class MLBot2Foundation:
             self.csv_tracker = None
             logger.warning("  ⚠️  CSVTracker disabled - no data for optimization!")
 
+        # Rejected Tracker (learn from what you're missing!)
+        from enhanced_modules import RejectedTracker
+        self.rejected_tracker = RejectedTracker(export_path='data/rejected_trades.csv')
+        logger.info("  ✅ RejectedTracker enabled (learn from rejected tokens)")
+
         # Safety Filters (test impact!)
         if config.enable_safety_filters:
             self.safety_filters = SafetyFilters(
@@ -781,6 +786,14 @@ class MLBot2Foundation:
                     f"⛔ Skipped {symbol}: Low buy ratio {buy_ratio:.1%} (need 50%+). "
                     f"24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}"
                 )
+                # Track rejection for analysis
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"low_buy_ratio_{buy_ratio:.1%}",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='screening'
+                )
                 return
 
             # Filter #2: Activity Check (Real Interest)
@@ -791,6 +804,14 @@ class MLBot2Foundation:
                 logger.info(
                     f"⛔ Skipped {symbol}: Low activity {txns_24h} txns (need 50+). "
                     f"24h: {txns_24h}, 1h: {txns_1h}"
+                )
+                # Track rejection for analysis
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"low_activity_{txns_24h}_txns",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='screening'
                 )
                 return
 
@@ -803,6 +824,14 @@ class MLBot2Foundation:
                     f"⛔ Skipped {symbol}: Too high liquidity ${liquidity_usd:,.0f} (max ${MAX_LIQUIDITY:,.0f}). "
                     f"This is an established token, not a new opportunity."
                 )
+                # Track rejection for analysis
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"high_liquidity_${liquidity_usd:,.0f}",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='screening'
+                )
                 return
 
             # Filter #4: MAX Volume (Skip Established Tokens)
@@ -813,6 +842,14 @@ class MLBot2Foundation:
                 logger.info(
                     f"⛔ Skipped {symbol}: Too high volume ${volume_24h:,.0f} (max ${MAX_VOLUME_24H:,.0f}). "
                     f"This is an established token, not a new opportunity."
+                )
+                # Track rejection for analysis
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"high_volume_${volume_24h:,.0f}",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='screening'
                 )
                 return
 
@@ -867,6 +904,14 @@ class MLBot2Foundation:
 
             if not should_trade:
                 logger.debug(f"Token rejected: {symbol} - {reason}")
+                # Track rejection for analysis (safety filter or risk assessor)
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=reason,
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='safety_filter' if 'safety_filter' in reason else 'risk_assessor'
+                )
                 return
 
             # === EXECUTE TRADE ===
