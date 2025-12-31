@@ -837,7 +837,7 @@ class MLBot2Foundation:
             # Filter #4: MAX Volume (DISABLED - Data shows high volume = runners!)
             # Analysis: 59 rejected high volume trades had +4,038% avg gain! 🔥
             # High volume with good metrics = opportunity, not risk!
-            # volume_24h = token_data.get('volume_24h', 0)
+            volume_24h = token_data.get('volume_24h', 0)  # Still needed for logging
             # MAX_VOLUME_24H = 1_000_000  # DISABLED
 
             logger.info(
