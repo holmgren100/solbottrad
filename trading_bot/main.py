@@ -977,6 +977,9 @@ class MLBot2Foundation:
                 lp_lock_days=token_data.get('lp_lock_days', 0),
                 lp_burned_percent=token_data.get('lp_burned_percent', 0.0),
                 token_age_hours=token_data.get('token_age_hours', 0.0),
+                # ⚡ TIMING ANALYSIS FIELDS
+                price_change_5m=token_data.get('price_change_5m', 0.0),
+                price_change_1h=token_data.get('price_change_1h', 0.0),
             )
 
             if position:

@@ -84,6 +84,15 @@ class RejectedToken:
 
     # Token info
     token_age_hours: float = 0.0
+    token_age_minutes: float = 0.0    # For 5-30m timing analysis
+
+    # Volume/Liquidity momentum
+    vol_liq_ratio: float = 0.0        # volume_24h / liquidity
+
+    # Entry momentum
+    entry_price_change_5m: float = 0.0
+    entry_price_change_1h: float = 0.0
+
     dex_platform: str = ''
     data_provider: str = ''
 
@@ -150,7 +159,12 @@ class RejectedTracker:
                 'LP Locked', 'LP Burned', 'LP Lock Days', 'LP Burned (%)',
 
                 # Token info
-                'Token Age (hours)', 'DEX Platform', 'Data Provider',
+                'Token Age (hours)', 'Token Age (minutes)',
+
+                # Timing & Momentum Analysis
+                'Vol/Liq Ratio', 'Entry Price Change 5m (%)', 'Entry Price Change 1h (%)',
+
+                'DEX Platform', 'Data Provider',
 
                 # DEX info
                 'Pair Address', 'Labels'
@@ -225,6 +239,16 @@ class RejectedTracker:
 
                 # Token info
                 token_age_hours=token_data.get('token_age_hours', 0.0),
+                token_age_minutes=token_data.get('token_age_hours', 0.0) * 60,  # Convert to minutes
+
+                # Volume/Liquidity momentum
+                vol_liq_ratio=(token_data.get('volume_24h', 0.0) / token_data.get('liquidity_usd', 1.0)
+                              if token_data.get('liquidity_usd', 0) > 0 else 0),
+
+                # Entry momentum
+                entry_price_change_5m=token_data.get('price_change_5m', 0.0),
+                entry_price_change_1h=token_data.get('price_change_1h', 0.0),
+
                 dex_platform=token_data.get('dex_id', ''),
                 data_provider=token_data.get('source', ''),
 
@@ -268,6 +292,10 @@ class RejectedTracker:
                     rejected.lp_lock_days,
                     f"{rejected.lp_burned_percent:.1f}%",
                     f"{rejected.token_age_hours:.1f}",
+                    f"{rejected.token_age_minutes:.1f}",
+                    f"{rejected.vol_liq_ratio:.2f}x",
+                    f"{rejected.entry_price_change_5m:+.2f}%",
+                    f"{rejected.entry_price_change_1h:+.2f}%",
                     rejected.dex_platform,
                     rejected.data_provider,
                     rejected.pair_address,

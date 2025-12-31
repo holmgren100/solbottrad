@@ -74,6 +74,14 @@ class Position:
 
     # Token info
     token_age_hours: float = 0.0      # Hours since token creation
+    token_age_minutes: float = 0.0    # Minutes since creation (for 5-30m timing)
+
+    # Volume/Liquidity analysis
+    vol_liq_ratio: float = 0.0        # volume_24h / liquidity (momentum indicator)
+
+    # Entry momentum (for timing analysis)
+    entry_price_change_5m: float = 0.0   # Price change last 5 min at entry
+    entry_price_change_1h: float = 0.0   # Price change last 1h at entry
 
     # Peak tracking (for max gain analysis)
     peak_time: datetime = None        # When peak was reached
@@ -375,6 +383,8 @@ class PositionManager:
         lp_lock_days: int = 0,
         lp_burned_percent: float = 0.0,
         token_age_hours: float = 0.0,
+        price_change_5m: float = 0.0,      # For timing analysis
+        price_change_1h: float = 0.0,      # For timing analysis
         symbol: str = ''
     ) -> Optional[Position]:
         """
@@ -402,6 +412,10 @@ class PositionManager:
             return None
 
         quantity = amount_usd / entry_price if entry_price > 0 else 0
+
+        # ⚡ Calculate timing & momentum indicators
+        token_age_minutes = token_age_hours * 60  # Convert hours to minutes for timing analysis
+        vol_liq_ratio = volume_24h / entry_liquidity if entry_liquidity > 0 else 0
 
         position = Position(
             token_address=token_address,
@@ -438,6 +452,10 @@ class PositionManager:
             lp_lock_days=lp_lock_days,
             lp_burned_percent=lp_burned_percent,
             token_age_hours=token_age_hours,
+            token_age_minutes=token_age_minutes,  # For 5-30m timing window analysis
+            vol_liq_ratio=vol_liq_ratio,  # Volume/liquidity momentum indicator
+            entry_price_change_5m=price_change_5m,  # Entry momentum tracking
+            entry_price_change_1h=price_change_1h,  # Entry momentum tracking
             peak_price=entry_price,  # Initialize peak with entry
         )
 

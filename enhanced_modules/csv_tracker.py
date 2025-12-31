@@ -142,6 +142,14 @@ class EnhancedTradeData:
 
     # Token age (bluechip filter)
     token_age_hours: float = 0.0           # Hours since token creation
+    token_age_minutes: float = 0.0         # Minutes (for 5-30m timing analysis)
+
+    # Volume/Liquidity momentum
+    vol_liq_ratio: float = 0.0             # volume_24h / liquidity (momentum indicator)
+
+    # Entry momentum (timing analysis)
+    entry_price_change_5m: float = 0.0     # Price change 5m at entry
+    entry_price_change_1h: float = 0.0     # Price change 1h at entry
 
     # Data provider tracking (which source works best?)
     data_provider: str = 'unknown'         # DexScreener, Jupiter, etc.
@@ -424,7 +432,10 @@ class CSVTracker:
             'Volume Spike Ratio', 'Buy Pressure', 'Momentum Accelerating',
             # ⚡ Critical Analysis Fields (401-trade analysis)
             'Current Drawdown (%)', 'Max Drawdown (%)',
-            'Token Age (hours)', 'Data Provider',
+            'Token Age (hours)', 'Token Age (minutes)',
+            # ⚡ Timing & Momentum Analysis
+            'Vol/Liq Ratio', 'Entry Price Change 5m (%)', 'Entry Price Change 1h (%)',
+            'Data Provider',
             'Price Frozen', 'Failed Updates Count',
         ]
 
@@ -522,6 +533,11 @@ class CSVTracker:
                     'Current Drawdown (%)': f"{trade.current_drawdown_percent:.2f}%",
                     'Max Drawdown (%)': f"{trade.max_drawdown_percent:.2f}%",
                     'Token Age (hours)': f"{trade.token_age_hours:.1f}",
+                    'Token Age (minutes)': f"{trade.token_age_minutes:.1f}",
+                    # ⚡ Timing & Momentum Analysis
+                    'Vol/Liq Ratio': f"{trade.vol_liq_ratio:.2f}x",
+                    'Entry Price Change 5m (%)': f"{trade.entry_price_change_5m:+.2f}%",
+                    'Entry Price Change 1h (%)': f"{trade.entry_price_change_1h:+.2f}%",
                     'Data Provider': trade.data_provider,
                     'Price Frozen': 'Yes' if trade.price_frozen else 'No',
                     'Failed Updates Count': trade.consecutive_failed_updates,
