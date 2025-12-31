@@ -817,7 +817,7 @@ class MLBot2Foundation:
 
             # Filter #3: MAX Liquidity (Skip Bluechips)
             liquidity_usd = token_data.get('liquidity_usd', 0)
-            MAX_LIQUIDITY = 500_000  # Skip tokens with >$500k liquidity (established tokens)
+            MAX_LIQUIDITY = 1_000_000  # Skip tokens with >$1M liquidity (data collection mode - raised from 500k)
 
             if liquidity_usd > MAX_LIQUIDITY:
                 logger.info(
