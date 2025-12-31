@@ -4,6 +4,9 @@ API Clients for Token Discovery and Price Data
 Integrates with:
 - DexScreener: Token profiles, price, volume, liquidity
 - Jupiter: Price validation, swap quotes
+- Birdeye: Solana-native trending, security data
+- CoinGecko: Cross-chain gainers, trending tokens
+- Solscan: Holder analysis, token metadata
 """
 
 import asyncio
@@ -580,3 +583,332 @@ class SolscanClient:
         except Exception as e:
             logger.error(f"Error getting holder analysis: {e}")
             return None
+
+
+class BirdeyeClient:
+    """
+    Birdeye API Client - Solana-native token discovery & security data
+    
+    Features:
+    - Trending tokens by volume/price change
+    - Security data (freeze authority, holder concentration)
+    - New listings discovery
+    - Token overview (price, liquidity, volume)
+    
+    Rate Limits: 100 requests/minute (free tier)
+    """
+    
+    BASE_URL = "https://public-api.birdeye.so"
+    
+    # Cycling through different discovery methods
+    DISCOVERY_CYCLES = [
+        'priceChange24h',   # 24h GAINERS (tokens up 50-200%+)
+        'priceChange1h',    # 1h MOVERS (tokens moving NOW)
+        'volume24hUSD',     # High volume (interest)
+        'liquidity',        # Liquid tokens (can sell)
+        'rank'              # Trending rank
+    ]
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.current_cycle = 0
+        
+    async def __aenter__(self):
+        """Async context manager entry."""
+        self.session = aiohttp.ClientSession()
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        if self.session:
+            await self.session.close()
+    
+    async def get_trending_tokens(self, limit: int = 30) -> List[Dict]:
+        """
+        Get trending Solana tokens with cycling discovery methods.
+        
+        Rotates through: priceChange24h → priceChange1h → volume → liquidity → rank
+        """
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+        
+        # Import monitor here to avoid circular imports
+        from trading_bot.api_monitor import api_monitor
+        
+        # Check rate limits
+        if not api_monitor.can_call('birdeye'):
+            wait_time = api_monitor.get_wait_time('birdeye')
+            logger.warning(f"⚠️  Birdeye rate limit - waiting {wait_time:.1f}s")
+            await asyncio.sleep(wait_time)
+        
+        # Cycle through discovery methods
+        sort_by = self.DISCOVERY_CYCLES[self.current_cycle]
+        self.current_cycle = (self.current_cycle + 1) % len(self.DISCOVERY_CYCLES)
+        
+        url = f"{self.BASE_URL}/defi/token_trending"
+        headers = {
+            'X-API-KEY': self.api_key,
+            'x-chain': 'solana'
+        }
+        params = {
+            'sort_by': sort_by,
+            'sort_type': 'desc',
+            'offset': 0,
+            'limit': limit
+        }
+        
+        start_time = api_monitor.record_call_start('birdeye')
+        
+        try:
+            async with self.session.get(url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 429:
+                    api_monitor.record_call_failure('birdeye', 'Rate limit exceeded', is_rate_limit=True)
+                    return []
+                
+                if response.status != 200:
+                    error_msg = f"HTTP {response.status}"
+                    api_monitor.record_call_failure('birdeye', error_msg)
+                    logger.error(f"Birdeye trending error: {error_msg}")
+                    return []
+                
+                data = await response.json()
+                api_monitor.record_call_success('birdeye', start_time)
+                
+                tokens = data.get('data', {}).get('tokens', [])
+                logger.info(f"✅ Birdeye: Found {len(tokens)} tokens (sorted by {sort_by})")
+                
+                # Normalize to standard format
+                normalized = []
+                for token in tokens:
+                    normalized.append({
+                        'address': token.get('address'),
+                        'symbol': token.get('symbol'),
+                        'name': token.get('name'),
+                        'price_usd': token.get('price', 0),
+                        'liquidity_usd': token.get('liquidity', 0),
+                        'volume_24h': token.get('volume24h', 0),
+                        'price_change_24h': token.get('priceChange24h', 0),
+                        'price_change_1h': token.get('priceChange1h', 0),
+                        'trending_rank': token.get('rank', 0),
+                        'source': 'birdeye',
+                        'birdeye_sort': sort_by
+                    })
+                
+                return normalized
+                
+        except asyncio.TimeoutError:
+            api_monitor.record_call_failure('birdeye', 'Timeout')
+            logger.error("Birdeye request timeout")
+            return []
+        except Exception as e:
+            api_monitor.record_call_failure('birdeye', str(e))
+            logger.error(f"Birdeye error: {e}")
+            return []
+    
+    async def get_token_security(self, token_address: str) -> Optional[Dict]:
+        """
+        Get security data for a token.
+        
+        Returns:
+        - freeze_authority: Can token be frozen?
+        - mint_authority: Can supply be minted?
+        - top10_holder_percent: Concentration risk
+        """
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+        
+        from trading_bot.api_monitor import api_monitor
+        
+        if not api_monitor.can_call('birdeye'):
+            return None
+        
+        url = f"{self.BASE_URL}/defi/token_security"
+        headers = {'X-API-KEY': self.api_key}
+        params = {'address': token_address}
+        
+        start_time = api_monitor.record_call_start('birdeye')
+        
+        try:
+            async with self.session.get(url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    api_monitor.record_call_success('birdeye', start_time)
+                    
+                    security = data.get('data', {})
+                    return {
+                        'freeze_authority': security.get('freezeAuthority'),
+                        'mint_authority': security.get('mintAuthority'),
+                        'top10_holder_percent': security.get('top10HolderPercent', 0),
+                        'creator_address': security.get('creatorAddress')
+                    }
+                else:
+                    api_monitor.record_call_failure('birdeye', f"HTTP {response.status}")
+                    return None
+                    
+        except Exception as e:
+            api_monitor.record_call_failure('birdeye', str(e))
+            return None
+
+
+class CoinGeckoClient:
+    """
+    CoinGecko API Client - Cross-chain gainers & trending tokens
+    
+    Features:
+    - Top gainers across all chains (filter for Solana)
+    - Trending searches (market sentiment)
+    - Market-wide momentum signals
+    
+    Rate Limits: 30 calls/minute (free tier)
+    """
+    
+    BASE_URL = "https://api.coingecko.com/api/v3"
+    
+    # Cycling between discovery methods
+    DISCOVERY_CYCLES = [
+        'top_gainers',      # Top gainers (biggest 24h price increases)
+        'trending',         # Trending searches (most popular)
+    ]
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.current_cycle = 0
+        
+    async def __aenter__(self):
+        """Async context manager entry."""
+        self.session = aiohttp.ClientSession()
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        if self.session:
+            await self.session.close()
+    
+    async def get_top_gainers(self, limit: int = 50) -> List[Dict]:
+        """
+        Get top gaining tokens across all chains.
+        
+        Returns tokens sorted by 24h price change (highest first).
+        Filters for positive movers only.
+        """
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+        
+        from trading_bot.api_monitor import api_monitor
+        
+        if not api_monitor.can_call('coingecko'):
+            wait_time = api_monitor.get_wait_time('coingecko')
+            logger.warning(f"⚠️  CoinGecko rate limit - waiting {wait_time:.1f}s")
+            await asyncio.sleep(wait_time)
+        
+        url = f"{self.BASE_URL}/coins/markets"
+        params = {
+            'vs_currency': 'usd',
+            'order': 'price_change_percentage_24h_desc',  # Sort by gainers
+            'per_page': str(limit),
+            'page': '1',
+            'sparkline': 'false',
+            'price_change_percentage': '24h',
+            'x_cg_demo_api_key': self.api_key
+        }
+        
+        start_time = api_monitor.record_call_start('coingecko')
+        
+        try:
+            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 429:
+                    api_monitor.record_call_failure('coingecko', 'Rate limit exceeded', is_rate_limit=True)
+                    return []
+                
+                if response.status != 200:
+                    error_msg = f"HTTP {response.status}"
+                    api_monitor.record_call_failure('coingecko', error_msg)
+                    logger.error(f"CoinGecko error: {error_msg}")
+                    return []
+                
+                data = await response.json()
+                api_monitor.record_call_success('coingecko', start_time)
+                
+                # Filter for positive movers only
+                gainers = [token for token in data if token.get('price_change_percentage_24h', 0) > 0]
+                logger.info(f"✅ CoinGecko: Found {len(gainers)} gainers")
+                
+                # Normalize to standard format
+                normalized = []
+                for token in gainers:
+                    normalized.append({
+                        'coingecko_id': token.get('id'),
+                        'symbol': token.get('symbol', '').upper(),
+                        'name': token.get('name'),
+                        'price_usd': token.get('current_price', 0),
+                        'market_cap': token.get('market_cap', 0),
+                        'volume_24h': token.get('total_volume', 0),
+                        'price_change_24h': token.get('price_change_percentage_24h', 0),
+                        'market_cap_rank': token.get('market_cap_rank', 0),
+                        'source': 'coingecko',
+                        'coingecko_category': 'top_gainers'
+                    })
+                
+                return normalized
+                
+        except asyncio.TimeoutError:
+            api_monitor.record_call_failure('coingecko', 'Timeout')
+            logger.error("CoinGecko request timeout")
+            return []
+        except Exception as e:
+            api_monitor.record_call_failure('coingecko', str(e))
+            logger.error(f"CoinGecko error: {e}")
+            return []
+    
+    async def get_trending(self) -> List[Dict]:
+        """
+        Get trending search tokens (market sentiment indicator).
+        
+        Returns tokens that are most searched on CoinGecko.
+        """
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+        
+        from trading_bot.api_monitor import api_monitor
+        
+        if not api_monitor.can_call('coingecko'):
+            return []
+        
+        url = f"{self.BASE_URL}/search/trending"
+        params = {'x_cg_demo_api_key': self.api_key}
+        
+        start_time = api_monitor.record_call_start('coingecko')
+        
+        try:
+            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    api_monitor.record_call_success('coingecko', start_time)
+                    
+                    coins = data.get('coins', [])
+                    logger.info(f"✅ CoinGecko: Found {len(coins)} trending tokens")
+                    
+                    # Normalize
+                    normalized = []
+                    for item in coins:
+                        coin = item.get('item', {})
+                        normalized.append({
+                            'coingecko_id': coin.get('id'),
+                            'symbol': coin.get('symbol', '').upper(),
+                            'name': coin.get('name'),
+                            'market_cap_rank': coin.get('market_cap_rank', 0),
+                            'trending_score': coin.get('score', 0),
+                            'source': 'coingecko',
+                            'coingecko_category': 'trending'
+                        })
+                    
+                    return normalized
+                else:
+                    api_monitor.record_call_failure('coingecko', f"HTTP {response.status}")
+                    return []
+                    
+        except Exception as e:
+            api_monitor.record_call_failure('coingecko', str(e))
+            return []
