@@ -501,6 +501,70 @@ class TelegramCommandHandler:
             logger.error(f"Error in /export command: {e}")
             await update.message.reply_text(f"❌ Error exporting trades: {str(e)}")
 
+    async def cmd_export_rejected(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Export rejected trades CSV for analysis.
+
+        Usage:
+            /export_rejected - Export all rejected tokens
+        """
+        if not self.is_authorized(update):
+            await update.message.reply_text("⛔ Unauthorized")
+            return
+
+        try:
+            from datetime import datetime
+            import os
+
+            # Path to rejected trades CSV
+            filepath = 'data/rejected_trades.csv'
+
+            # Check if file exists
+            if not os.path.exists(filepath):
+                await update.message.reply_text("📭 No rejected trades data available yet")
+                return
+
+            # Count lines (excluding header)
+            with open(filepath, 'r') as f:
+                line_count = sum(1 for _ in f) - 1  # -1 for header
+
+            if line_count == 0:
+                await update.message.reply_text("📭 No rejected trades recorded yet")
+                return
+
+            # Send file info
+            await update.message.reply_text(
+                f"📊 Exporting {line_count} rejected tokens...\n\n"
+                f"✅ *Data Columns:*\n"
+                f"• Timestamp & Token Info\n"
+                f"• Rejection Reason & Stage\n"
+                f"• Price, Liquidity, Volume\n"
+                f"• Market Cap, FDV\n"
+                f"• Transaction Activity\n"
+                f"• Buy/Sell Ratios\n"
+                f"• Holder Concentration\n"
+                f"• LP Lock/Burn Status\n"
+                f"• Token Age & DEX Platform\n"
+                f"• Labels & Flags\n\n"
+                f"📈 Analyze what you're missing!",
+                parse_mode='Markdown'
+            )
+
+            # Send CSV file
+            with open(filepath, 'rb') as f:
+                filename = f"rejected_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                await update.message.reply_document(
+                    document=f,
+                    filename=filename,
+                    caption=f"✅ {line_count} rejected tokens"
+                )
+
+            logger.info(f"Exported {line_count} rejected trades via /export_rejected command")
+
+        except Exception as e:
+            logger.error(f"Error in /export_rejected command: {e}")
+            await update.message.reply_text(f"❌ Error exporting rejected trades: {str(e)}")
+
     async def cmd_pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Pause trading (monitoring continues)."""
         if not self.is_authorized(update):
@@ -947,6 +1011,7 @@ class TelegramCommandHandler:
 /export daily - Export last 24 hours
 /export weekly - Export last 7 days
 /export monthly - Export last 30 days
+/export_rejected - Export rejected tokens for analysis
 
 *Controls*
 /pause - Pause trading
@@ -988,6 +1053,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("closeall", self.cmd_closeall))
         self.application.add_handler(CommandHandler("cleanup", self.cmd_cleanup))
         self.application.add_handler(CommandHandler("export", self.cmd_export))
+        self.application.add_handler(CommandHandler("export_rejected", self.cmd_export_rejected))
         self.application.add_handler(CommandHandler("pause", self.cmd_pause))
         self.application.add_handler(CommandHandler("resume", self.cmd_resume))
         self.application.add_handler(CommandHandler("help", self.cmd_help))
