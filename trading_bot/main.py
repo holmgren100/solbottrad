@@ -834,24 +834,11 @@ class MLBot2Foundation:
                 )
                 return
 
-            # Filter #4: MAX Volume (Skip Established Tokens)
-            volume_24h = token_data.get('volume_24h', 0)
-            MAX_VOLUME_24H = 1_000_000  # Skip tokens with >$1M daily volume
-
-            if volume_24h > MAX_VOLUME_24H:
-                logger.info(
-                    f"⛔ Skipped {symbol}: Too high volume ${volume_24h:,.0f} (max ${MAX_VOLUME_24H:,.0f}). "
-                    f"This is an established token, not a new opportunity."
-                )
-                # Track rejection for analysis
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"high_volume_${volume_24h:,.0f}",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='screening'
-                )
-                return
+            # Filter #4: MAX Volume (DISABLED - Data shows high volume = runners!)
+            # Analysis: 59 rejected high volume trades had +4,038% avg gain! 🔥
+            # High volume with good metrics = opportunity, not risk!
+            # volume_24h = token_data.get('volume_24h', 0)
+            # MAX_VOLUME_24H = 1_000_000  # DISABLED
 
             logger.info(
                 f"✅ Quality checks passed: {symbol} - "
