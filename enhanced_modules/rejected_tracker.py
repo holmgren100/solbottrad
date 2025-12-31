@@ -93,8 +93,19 @@ class RejectedToken:
     entry_price_change_5m: float = 0.0
     entry_price_change_1h: float = 0.0
 
+    # Multi-source data validation
+    birdeye_security_score: float = 0.0
+    birdeye_trending_rank: int = 0
+    coingecko_trending_score: float = 0.0
+    has_freeze_authority: bool = False
+    has_mint_authority: bool = False
+    volume_crosscheck_percent: float = 0.0
+    liquidity_crosscheck_percent: float = 0.0
+    jupiter_organic_score: float = 0.0
+
     dex_platform: str = ''
     data_provider: str = ''
+    discovery_source: str = ''
 
     # DEX info
     pair_address: str = ''
@@ -164,7 +175,13 @@ class RejectedTracker:
                 # Timing & Momentum Analysis
                 'Vol/Liq Ratio', 'Entry Price Change 5m (%)', 'Entry Price Change 1h (%)',
 
-                'DEX Platform', 'Data Provider',
+                # Multi-Source Data Validation
+                'Birdeye Security Score', 'Birdeye Trending Rank', 'CoinGecko Trending Score',
+                'Has Freeze Authority', 'Has Mint Authority',
+                'Volume Crosscheck (%)', 'Liquidity Crosscheck (%)',
+                'Jupiter Organic Score',
+
+                'DEX Platform', 'Data Provider', 'Discovery Source',
 
                 # DEX info
                 'Pair Address', 'Labels'
@@ -296,8 +313,17 @@ class RejectedTracker:
                     f"{rejected.vol_liq_ratio:.2f}x",
                     f"{rejected.entry_price_change_5m:+.2f}%",
                     f"{rejected.entry_price_change_1h:+.2f}%",
+                    f"{rejected.birdeye_security_score:.2f}",
+                    rejected.birdeye_trending_rank,
+                    f"{rejected.coingecko_trending_score:.2f}",
+                    'Yes' if rejected.has_freeze_authority else 'No',
+                    'Yes' if rejected.has_mint_authority else 'No',
+                    f"{rejected.volume_crosscheck_percent:+.1f}%",
+                    f"{rejected.liquidity_crosscheck_percent:+.1f}%",
+                    f"{rejected.jupiter_organic_score:.2f}",
                     rejected.dex_platform,
                     rejected.data_provider,
+                    rejected.discovery_source,
                     rejected.pair_address,
                     rejected.labels
                 ])

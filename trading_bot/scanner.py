@@ -10,7 +10,8 @@ import logging
 from typing import List, Dict, Set, Optional
 from datetime import datetime, timedelta
 
-from trading_bot.api_clients import DexScreenerClient, JupiterClient
+from trading_bot.api_clients import DexScreenerClient, JupiterClient, BirdeyeClient, CoinGeckoClient
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,12 @@ class TokenScanner:
         self.dexscreener = DexScreenerClient(api_key=dexscreener_api_key)
         self.jupiter = JupiterClient()
 
+        # Multi-source API clients (optional)
+        birdeye_key = os.getenv('BIRDEYE_API_KEY')
+        coingecko_key = os.getenv('COINGECKO_API_KEY')
+        self.birdeye = BirdeyeClient(birdeye_key) if birdeye_key and os.getenv('ENABLE_BIRDEYE', 'false').lower() == 'true' else None
+        self.coingecko = CoinGeckoClient(coingecko_key) if coingecko_key and os.getenv('ENABLE_COINGECKO', 'false').lower() == 'true' else None
+
         # Track scanned tokens to avoid duplicates within same session
         self.scanned_tokens: Set[str] = set()
         self.last_scan_time: Optional[datetime] = None
@@ -55,12 +62,20 @@ class TokenScanner:
         """Async context manager entry."""
         await self.dexscreener.__aenter__()
         await self.jupiter.__aenter__()
+        if self.birdeye:
+            await self.birdeye.__aenter__()
+        if self.coingecko:
+            await self.coingecko.__aenter__()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
         await self.dexscreener.__aexit__(exc_type, exc_val, exc_tb)
         await self.jupiter.__aexit__(exc_type, exc_val, exc_tb)
+        if self.birdeye:
+            await self.birdeye.__aexit__(exc_type, exc_val, exc_tb)
+        if self.coingecko:
+            await self.coingecko.__aexit__(exc_type, exc_val, exc_tb)
 
     async def scan_new_tokens(self, limit: int = 20) -> List[Dict]:
         """
@@ -100,11 +115,33 @@ class TokenScanner:
             except Exception as e:
                 logger.warning(f"  ⚠️  DexScreener scan failed: {e}")
 
+            # === SOURCE 3: BIRDEYE (Solana-native trending + security) ===
+            if self.birdeye:
+                try:
+                    logger.info("  🔍 Querying Birdeye API...")
+                    birdeye_tokens = await self.birdeye.get_trending_tokens(limit=30)
+                    all_tokens.extend(birdeye_tokens)
+                    logger.info(f"  📊 Birdeye: {len(birdeye_tokens)} tokens")
+                except Exception as e:
+                    logger.warning(f"  ⚠️  Birdeye scan failed: {e}")
+
+            # === SOURCE 4: COINGECKO (Cross-chain gainers) ===
+            if self.coingecko:
+                try:
+                    logger.info("  🔍 Querying CoinGecko API...")
+                    coingecko_tokens = await self.coingecko.get_top_gainers(limit=30)
+                    # Note: CoinGecko returns cross-chain data, will need address mapping for Solana
+                    all_tokens.extend(coingecko_tokens)
+                    logger.info(f"  📊 CoinGecko: {len(coingecko_tokens)} gainers")
+                except Exception as e:
+                    logger.warning(f"  ⚠️  CoinGecko scan failed: {e}")
+
             if not all_tokens:
                 logger.warning("❌ No tokens found from any source")
                 return []
 
-            logger.info(f"  📥 Total collected: {len(all_tokens)} tokens from {2} sources")
+            source_count = 2 + (1 if self.birdeye else 0) + (1 if self.coingecko else 0)
+            logger.info(f"  📥 Total collected: {len(all_tokens)} tokens from {source_count} sources")
 
             # === DEDUPLICATION ===
             # Group by address to count sources and merge data

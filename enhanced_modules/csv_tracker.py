@@ -151,8 +151,19 @@ class EnhancedTradeData:
     entry_price_change_5m: float = 0.0     # Price change 5m at entry
     entry_price_change_1h: float = 0.0     # Price change 1h at entry
 
+    # Multi-source data validation (cross-check APIs)
+    birdeye_security_score: float = 0.0    # Birdeye security rating
+    birdeye_trending_rank: int = 0         # Birdeye trending position
+    coingecko_trending_score: float = 0.0  # CoinGecko trending score
+    has_freeze_authority: bool = False     # Can token be frozen?
+    has_mint_authority: bool = False       # Can supply be minted?
+    volume_crosscheck_percent: float = 0.0 # DexScreener vs Birdeye volume difference %
+    liquidity_crosscheck_percent: float = 0.0  # DexScreener vs Birdeye liq difference %
+    jupiter_organic_score: float = 0.0     # Jupiter organic activity score
+
     # Data provider tracking (which source works best?)
     data_provider: str = 'unknown'         # DexScreener, Jupiter, etc.
+    discovery_source: str = 'unknown'      # Where token was discovered
 
     # Rug detection indicators
     price_frozen: bool = False             # Price hasn't moved >0.1% in 15+ min
@@ -435,7 +446,12 @@ class CSVTracker:
             'Token Age (hours)', 'Token Age (minutes)',
             # ⚡ Timing & Momentum Analysis
             'Vol/Liq Ratio', 'Entry Price Change 5m (%)', 'Entry Price Change 1h (%)',
-            'Data Provider',
+            # ⚡ Multi-Source Data Validation
+            'Birdeye Security Score', 'Birdeye Trending Rank', 'CoinGecko Trending Score',
+            'Has Freeze Authority', 'Has Mint Authority',
+            'Volume Crosscheck (%)', 'Liquidity Crosscheck (%)',
+            'Jupiter Organic Score',
+            'Data Provider', 'Discovery Source',
             'Price Frozen', 'Failed Updates Count',
         ]
 
@@ -538,7 +554,17 @@ class CSVTracker:
                     'Vol/Liq Ratio': f"{trade.vol_liq_ratio:.2f}x",
                     'Entry Price Change 5m (%)': f"{trade.entry_price_change_5m:+.2f}%",
                     'Entry Price Change 1h (%)': f"{trade.entry_price_change_1h:+.2f}%",
+                    # ⚡ Multi-Source Data Validation
+                    'Birdeye Security Score': f"{trade.birdeye_security_score:.2f}",
+                    'Birdeye Trending Rank': trade.birdeye_trending_rank,
+                    'CoinGecko Trending Score': f"{trade.coingecko_trending_score:.2f}",
+                    'Has Freeze Authority': 'Yes' if trade.has_freeze_authority else 'No',
+                    'Has Mint Authority': 'Yes' if trade.has_mint_authority else 'No',
+                    'Volume Crosscheck (%)': f"{trade.volume_crosscheck_percent:+.1f}%",
+                    'Liquidity Crosscheck (%)': f"{trade.liquidity_crosscheck_percent:+.1f}%",
+                    'Jupiter Organic Score': f"{trade.jupiter_organic_score:.2f}",
                     'Data Provider': trade.data_provider,
+                    'Discovery Source': trade.discovery_source,
                     'Price Frozen': 'Yes' if trade.price_frozen else 'No',
                     'Failed Updates Count': trade.consecutive_failed_updates,
                 })
