@@ -654,8 +654,7 @@ class BirdeyeClient:
         params = {
             'sort_by': sort_by,
             'sort_type': 'desc',
-            'offset': 0,
-            'limit': limit
+            'limit': min(limit, 50)  # API max is 50, no offset parameter
         }
         
         start_time = api_monitor.record_call_start('birdeye')
