@@ -182,7 +182,11 @@ class DexScreenerClient:
 
             url = f"{self.base_url}/token-profiles/{category}/v1"
 
-            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as response:
+            headers = {}
+            if self.api_key:
+                headers['X-Api-Key'] = self.api_key
+
+            async with self.session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status == 200:
                     data = await response.json()
 
@@ -228,7 +232,11 @@ class DexScreenerClient:
         try:
             url = f"{self.base_url}/token-profiles/trending/v1"
 
-            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as response:
+            headers = {}
+            if self.api_key:
+                headers['X-Api-Key'] = self.api_key
+
+            async with self.session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status == 200:
                     data = await response.json()
 
