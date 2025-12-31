@@ -24,7 +24,7 @@ class DexScreenerClient:
     # PHASE 2: Category Discovery - Cycling strategies
     DISCOVERY_CATEGORIES = [
         'latest',    # Cycle 1: Latest tokens (newly created)
-        'trending'   # Cycle 2: Trending tokens (proven activity)
+        # 'trending'   # Cycle 2: DISABLED - returns 404 error
     ]
 
     def __init__(self, api_key: Optional[str] = None):
