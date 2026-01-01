@@ -781,9 +781,9 @@ class MLBot2Foundation:
             # Use 1h if available (recent activity), otherwise 24h
             buy_ratio = buy_ratio_1h if buy_ratio_1h > 0 else buy_ratio_24h
 
-            if buy_ratio < 0.50:  # Require 50%+ buyers (data collection mode)
+            if buy_ratio < 0.47:  # Require 47%+ buyers (testing lower threshold)
                 logger.info(
-                    f"⛔ Skipped {symbol}: Low buy ratio {buy_ratio:.1%} (need 50%+). "
+                    f"⛔ Skipped {symbol}: Low buy ratio {buy_ratio:.1%} (need 47%+). "
                     f"24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}"
                 )
                 # Track rejection for analysis
