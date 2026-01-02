@@ -54,3 +54,4 @@ trading_bot.log
 /data/
 !src/data/
 paper_trading_state.json
+backups/
