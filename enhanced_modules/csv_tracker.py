@@ -56,6 +56,10 @@ class EnhancedTradeData:
     pnl_percent: float = 0.0
     exit_reason: str = ''
 
+    # Rug detection tracking
+    is_rug: bool = False                        # True if exit was due to rug detection
+    rug_type: str = ''                          # stale_price, frozen_price, liquidity_dead, or empty
+
     # Partial profit tracking
     partial_profit_usd: float = 0.0         # Total profit from partial sells
     partial_profit_count: int = 0           # Number of partial profit milestones hit
@@ -305,6 +309,13 @@ class CSVTracker:
         if entry_volume_1h > 0:
             volume_change_1h_percent = ((exit_volume_1h - entry_volume_1h) / entry_volume_1h) * 100
 
+        # Detect if this is a rug exit
+        is_rug = exit_reason.startswith('rug_')
+        rug_type = ''
+        if is_rug:
+            # Extract rug type from exit_reason (e.g., 'rug_stale_price' -> 'stale_price')
+            rug_type = exit_reason.replace('rug_', '')
+
         # Create enhanced trade data
         trade_data = EnhancedTradeData(
             # Core
@@ -318,6 +329,10 @@ class CSVTracker:
             pnl_usd=pnl_usd,
             pnl_percent=pnl_percent,
             exit_reason=exit_reason,
+
+            # Rug detection tracking
+            is_rug=is_rug,
+            rug_type=rug_type,
 
             # Partial profit tracking
             partial_profit_usd=partial_profit_usd,

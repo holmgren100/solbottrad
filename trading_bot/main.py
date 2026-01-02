@@ -597,16 +597,47 @@ class MLBot2Foundation:
                                 f"Held {duration:.0f}min - time to exit"
                             )
 
-                    # Log detailed rug info
-                    liq_drop = position.get_liquidity_drop_percent()
-                    logger.error(
-                        f"🚨 Rug detected: {position.symbol or position.token_address[:8]}... "
-                        f"Liq drop: {liq_drop:.0f}%, Current: ${position.current_liquidity:.0f}"
-                    )
+                    # Determine specific rug type for accurate data tracking
+                    rug_reason = 'rug_unknown'  # Default fallback
+
+                    # Check which condition triggered (in priority order)
+                    if position.is_price_stale(self.config.core_config.stale_price_minutes):
+                        minutes_since = (datetime.now() - position.last_price_update).total_seconds() / 60
+                        logger.error(
+                            f"🚨 RUG: STALE PRICE - {position.symbol or position.token_address[:8]}... "
+                            f"No price update for {minutes_since:.1f} minutes (token likely dead/delisted)"
+                        )
+                        rug_reason = 'rug_stale_price'
+
+                    elif position.is_price_frozen(freeze_minutes=2):  # Use frozen price threshold
+                        minutes_frozen = (datetime.now() - position.last_price_change).total_seconds() / 60
+                        logger.error(
+                            f"🚨 RUG: FROZEN PRICE - {position.symbol or position.token_address[:8]}... "
+                            f"Price hasn't moved for {minutes_frozen:.1f} minutes @ ${position.current_price:.8f} (likely honeypot)"
+                        )
+                        rug_reason = 'rug_frozen_price'
+
+                    elif position.is_liquidity_dead(self.config.core_config.min_position_liquidity):
+                        liq_drop = position.get_liquidity_drop_percent()
+                        logger.error(
+                            f"🚨 RUG: LIQUIDITY DEAD - {position.symbol or position.token_address[:8]}... "
+                            f"Liq drop: {liq_drop:.0f}%, Current: ${position.current_liquidity:.0f} (rug pull)"
+                        )
+                        rug_reason = 'rug_liquidity_dead'
+
+                    else:
+                        # Generic low liquidity (not necessarily rug)
+                        liq_drop = position.get_liquidity_drop_percent()
+                        logger.warning(
+                            f"⚠️  Low liquidity: {position.symbol or position.token_address[:8]}... "
+                            f"Liq drop: {liq_drop:.0f}%, Current: ${position.current_liquidity:.0f}"
+                        )
+                        rug_reason = 'low_liquidity'
+
                     await self.close_position(
                         position.token_address,
                         position.current_price,
-                        'low_liquidity'
+                        rug_reason  # Specific rug type
                     )
                     continue
 
