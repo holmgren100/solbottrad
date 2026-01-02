@@ -247,8 +247,11 @@ The Solana trading bot has been shut down.
         # Use provided source if available, otherwise fall back to token_data
         display_source = (source or token_data.get('primary_source', 'UNKNOWN')).upper()
 
+        # Escape symbol for Markdown safety
+        safe_symbol = escape_markdown(symbol)
+
         message = (
-            f"{confidence_emoji} *ENTERED: {symbol}* {token_emoji}\n"
+            f"{confidence_emoji} *ENTERED: {safe_symbol}* {token_emoji}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"💰 Position: ${position_size:.2f}\n"
             f"💲 Entry: ${entry_price:.8f}\n"
@@ -352,8 +355,11 @@ The Solana trading bot has been shut down.
         }
         reason_emoji = reason_emojis.get(exit_reason.lower(), '📊')
 
+        # Escape symbol for Markdown safety
+        safe_symbol = escape_markdown(symbol)
+
         message = (
-            f"{outcome_emoji} *EXITED: {symbol}* {reason_emoji}\n"
+            f"{outcome_emoji} *EXITED: {safe_symbol}* {reason_emoji}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"💰 Total P&L: ${pnl:+.2f} ({pnl_percent:+.2f}%)\n"
             f"📊 Outcome: *{outcome_text}*\n"

@@ -958,9 +958,24 @@ class PositionManager:
         if executor_state and self.executor and hasattr(self.executor, 'restore_state'):
             self.executor.restore_state(executor_state)
 
-        # Restore open positions
+        # Restore open positions (skip old positions to avoid stale data)
+        MAX_POSITION_AGE_HOURS = 2  # Don't load positions older than 2 hours
+        skipped_count = 0
+
         for address, pos_dict in state.get('open_positions', {}).items():
             try:
+                # Check position age
+                entry_time = datetime.fromisoformat(pos_dict['entry_time'])
+                age_hours = (datetime.now() - entry_time).total_seconds() / 3600
+
+                if age_hours > MAX_POSITION_AGE_HOURS:
+                    logger.info(
+                        f"⏭️  Skipping old position: {pos_dict.get('symbol', address[:8])}... "
+                        f"(age: {age_hours:.1f}h, entry: ${pos_dict['entry_price']:.8f})"
+                    )
+                    skipped_count += 1
+                    continue
+
                 position = Position(
                     token_address=pos_dict['token_address'],
                     entry_price=pos_dict['entry_price'],
@@ -985,6 +1000,13 @@ class PositionManager:
                 logger.info(f"📂 Restored position: {position.symbol or address[:8]}... @ ${position.entry_price:.8f}")
             except Exception as e:
                 logger.error(f"Failed to restore position {address[:8]}...: {e}")
+
+        # Log restoration summary
+        if skipped_count > 0:
+            logger.info(
+                f"📊 Position restoration: {len(self.open_positions)} loaded, "
+                f"{skipped_count} skipped (too old > {MAX_POSITION_AGE_HOURS}h)"
+            )
 
         # Restore closed trades
         for trade_dict in state.get('closed_trades', []):
