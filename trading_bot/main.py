@@ -527,6 +527,15 @@ class MLBot2Foundation:
                                 f"Remaining: {position.quantity:.2f} tokens (${position.amount_usd:.2f} cost basis)"
                             )
 
+        # === RUG DETECTION (once per monitor cycle) ===
+        # Get dead positions ONCE before the loop to avoid duplicate logging
+        dead_positions = []
+        if self.config.core_config.rug_detection_enabled:
+            dead_positions = self.position_manager.get_dead_positions(
+                stale_minutes=self.config.core_config.stale_price_minutes,
+                min_liquidity=self.config.core_config.min_position_liquidity
+            )
+
         # Check exit conditions for remaining positions
         for position in list(self.position_manager.get_all_positions()):
             # === EXIT PRIORITY (ML Bot Style) ===
@@ -562,13 +571,8 @@ class MLBot2Foundation:
                 continue
 
             # 3. Rug Detection - RELAXED (only severe cases)
-            if self.config.core_config.rug_detection_enabled:
-                dead_positions = self.position_manager.get_dead_positions(
-                    stale_minutes=self.config.core_config.stale_price_minutes,
-                    min_liquidity=self.config.core_config.min_position_liquidity
-                )
-
-                if position.token_address in dead_positions:
+            # Use pre-fetched dead_positions list (fetched once before loop)
+            if self.config.core_config.rug_detection_enabled and position.token_address in dead_positions:
                     # === WINNER HOLD LOGIC ===
                     # If position shows winner pattern (low drawdown), hold longer!
                     # Don't exit on small liquidity fluctuations

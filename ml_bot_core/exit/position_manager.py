@@ -473,13 +473,7 @@ class PositionManager:
         )
         self.daily_trades.append(buy_trade)
 
-        mode = "trailing stop" if use_trailing_stop else "fixed TP"
-        logger.info(
-            f"Opened position: {token_address[:8]}... "
-            f"@ ${entry_price:.8f}, size: ${amount_usd:.2f}, mode: {mode}"
-        )
-
-        # Save state after opening position
+        # Save state after opening position (logging handled by caller)
         self._save_state()
 
         return position
@@ -543,14 +537,7 @@ class PositionManager:
         # Remove from open positions
         del self.open_positions[token_address]
 
-        logger.info(
-            f"Closed position: {token_address[:8]}... "
-            f"@ ${exit_price:.8f}, "
-            f"PnL: ${pnl:.2f} ({pnl_percent:+.1f}%), "
-            f"Reason: {reason}"
-        )
-
-        # Save state after closing position
+        # Save state after closing position (logging handled by caller)
         self._save_state()
 
         return sell_trade
