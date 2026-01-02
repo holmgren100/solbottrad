@@ -146,8 +146,8 @@ def load_config(env_file: str = '.env') -> BotConfig:
     core_config.rug_detection_enabled = _get_bool('RUG_DETECTION_ENABLED', True)
     core_config.stale_price_minutes = _get_int('STALE_PRICE_MINUTES', 5)
     core_config.min_position_liquidity = _get_float('MIN_POSITION_LIQUIDITY', 5000.0)
-    core_config.scan_interval = _get_int('SCAN_INTERVAL', 120)
-    core_config.monitor_interval = _get_int('MONITOR_INTERVAL', 60)
+    core_config.scan_interval = _get_int('SCAN_INTERVAL', 60)
+    core_config.monitor_interval = _get_int('MONITOR_INTERVAL', 10)
 
     # Partial profit settings (ML Bot Style)
     partial_profit_enabled = _get_bool('PARTIAL_PROFIT_ENABLED', False)
