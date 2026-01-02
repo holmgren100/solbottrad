@@ -159,8 +159,6 @@ def load_config(env_file: str = '.env') -> BotConfig:
         'milestone_300': _get_float('PROFIT_MILESTONE_300', 15),  # 15% at 300%
         'milestone_400': _get_float('PROFIT_MILESTONE_400', 15),  # 15% at 400%
         'milestone_500': _get_float('PROFIT_MILESTONE_500', 10),  # 10% at 500%
-        'milestone_600': _get_float('PROFIT_MILESTONE_600', 10),  # 10% at 600%
-        'milestone_700': _get_float('PROFIT_MILESTONE_700', 10),  # 10% at 700%
     }
 
     # === SAFETY FILTERS CONFIGURATION ===
