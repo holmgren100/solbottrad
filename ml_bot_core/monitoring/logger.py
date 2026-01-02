@@ -28,6 +28,9 @@ def get_logger(name: str, level: Optional[int] = None) -> logging.Logger:
 
     logger.setLevel(level)
 
+    # Prevent propagation to root logger (avoid duplicate logging)
+    logger.propagate = False
+
     # Add handler if none exists
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
