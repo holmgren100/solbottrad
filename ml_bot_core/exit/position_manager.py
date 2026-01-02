@@ -154,10 +154,10 @@ class Position:
         Check if position has hit a new profit milestone.
 
         Returns:
-            Milestone level (100, 200, 300, 500) if new milestone hit, None otherwise
+            Milestone level (50, 100, 200, 300, 500, etc.) if new milestone hit, None otherwise
         """
         # Check milestones in order from highest to lowest
-        milestones = [700, 600, 500, 400, 300, 200, 100]
+        milestones = [700, 600, 500, 400, 300, 200, 100, 50]
 
         for milestone in milestones:
             if self.unrealized_pnl_percent >= milestone and milestone not in self.milestones_hit:

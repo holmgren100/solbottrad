@@ -153,9 +153,10 @@ def load_config(env_file: str = '.env') -> BotConfig:
     partial_profit_enabled = _get_bool('PARTIAL_PROFIT_ENABLED', False)
     partial_profit_settings = {
         'enabled': partial_profit_enabled,
+        'milestone_50': _get_float('PROFIT_MILESTONE_50', 20),   # NEW: 20% at 50%
         'milestone_100': _get_float('PROFIT_MILESTONE_100', 20),  # ML Bot: 20% at 100%
-        'milestone_200': _get_float('PROFIT_MILESTONE_200', 20),  # ML Bot: 20% at 200%
-        'milestone_300': _get_float('PROFIT_MILESTONE_300', 15),  # ML Bot: 15% at 300%
+        'milestone_200': _get_float('PROFIT_MILESTONE_200', 17),  # Adjusted: 17% at 200%
+        'milestone_300': _get_float('PROFIT_MILESTONE_300', 12),  # Adjusted: 12% at 300%
         'milestone_400': _get_float('PROFIT_MILESTONE_400', 10),  # ML Bot: 10% at 400%
         'milestone_500': _get_float('PROFIT_MILESTONE_500', 10),  # ML Bot: 10% at 500%
         'milestone_600': _get_float('PROFIT_MILESTONE_600', 10),  # ML Bot: 10% at 600%
