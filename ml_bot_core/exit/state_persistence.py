@@ -80,9 +80,10 @@ class StatePersistence:
                     'trailing_stop_price': position.trailing_stop_price,
                     'symbol': position.symbol,
                     'current_liquidity': position.current_liquidity,
-                    'entry_liquidity': position.entry_liquidity,  # NEW: Save entry liquidity
+                    'entry_liquidity': position.entry_liquidity,
                     'initial_quantity': position.initial_quantity,
                     'milestones_hit': list(position.milestones_hit) if position.milestones_hit else [],
+                    'total_partial_profit_usd': getattr(position, 'total_partial_profit_usd', 0.0),  # Save partial profits
                 }
                 state['open_positions'][address] = pos_dict
 

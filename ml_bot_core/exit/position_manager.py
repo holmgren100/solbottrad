@@ -989,9 +989,10 @@ class PositionManager:
                     trailing_stop_price=pos_dict.get('trailing_stop_price', 0.0),
                     symbol=pos_dict.get('symbol', ''),
                     current_liquidity=pos_dict.get('current_liquidity', 0.0),
-                    entry_liquidity=pos_dict.get('entry_liquidity', 0.0),  # NEW: Load entry liquidity
+                    entry_liquidity=pos_dict.get('entry_liquidity', 0.0),
                     initial_quantity=pos_dict.get('initial_quantity', pos_dict['quantity']),
-                    milestones_hit=set(pos_dict.get('milestones_hit', []))
+                    milestones_hit=set(pos_dict.get('milestones_hit', [])),
+                    total_partial_profit_usd=pos_dict.get('total_partial_profit_usd', 0.0)  # Restore partial profits
                 )
                 self.open_positions[address] = position
                 logger.info(f"📂 Restored position: {position.symbol or address[:8]}... @ ${position.entry_price:.8f}")
