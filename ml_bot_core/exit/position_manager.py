@@ -291,7 +291,7 @@ class Position:
         # RELAXED THRESHOLD: 70% drop (not 30%!)
         if liq_drop_pct > 70:
             # COMBINATION SIGNAL: Also check if price is frozen
-            if self.is_price_frozen(minutes=10):
+            if self.is_price_frozen(freeze_minutes=10):
                 # Both conditions met - likely rug!
                 return True
             else:
