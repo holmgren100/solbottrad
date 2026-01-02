@@ -368,6 +368,11 @@ class MLBot2Foundation:
         except Exception as e:
             logger.debug(f"Error fetching exit data for {token_address[:8]}...: {e}")
 
+        # Capture partial profit data before closing position
+        partial_profit_usd = getattr(position, 'total_partial_profit_usd', 0.0)
+        milestones_hit_set = getattr(position, 'milestones_hit', set())
+        milestones_hit_str = ','.join(str(m) for m in sorted(milestones_hit_set)) if milestones_hit_set else ''
+
         # 🔒 PROTECTED CORE: Close position
         trade = self.position_manager.close_position(
             token_address=token_address,
@@ -413,7 +418,9 @@ class MLBot2Foundation:
                     pnl_percent=trade.pnl_percent,
                     hold_time_hours=hold_time_hours,
                     exit_reason=reason,
-                    liquidity_change=None  # Not tracked in Position dataclass
+                    liquidity_change=None,  # Not tracked in Position dataclass
+                    partial_profit_usd=partial_profit_usd,
+                    milestones_hit=milestones_hit_str
                 )
 
             # === OPTIONAL: Track in CSV ===
@@ -512,8 +519,11 @@ class MLBot2Foundation:
                             cost_basis = position.entry_price * sell_quantity
                             partial_profit = sell_value - cost_basis
 
+                            # Track total partial profits for final P&L calculation
+                            position.total_partial_profit_usd += partial_profit
+
                             logger.info(
-                                f"💵 Locked in ${partial_profit:.2f} profit, "
+                                f"💵 Locked in ${partial_profit:.2f} profit (Total partials: ${position.total_partial_profit_usd:.2f}), "
                                 f"Remaining: {position.quantity:.2f} tokens (${position.amount_usd:.2f} cost basis)"
                             )
 

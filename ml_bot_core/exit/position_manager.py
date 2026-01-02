@@ -41,7 +41,8 @@ class Position:
     price_update_failures: int = 0  # Count consecutive failed price updates
     # Partial profit taking fields
     initial_quantity: float = 0.0  # Track original quantity for partial sells
-    milestones_hit: set = field(default_factory=set)  # Track which profit milestones have been taken (100, 200, 300, 500)
+    milestones_hit: set = field(default_factory=set)  # Track which profit milestones have been taken (50, 100, 200, 300, 400, 500)
+    total_partial_profit_usd: float = 0.0  # Total USD profit from all partial sells
 
     # ⚡ CRITICAL ANALYSIS FIELDS (for CSV export & pattern detection)
     # Volume tracking
@@ -507,9 +508,18 @@ class PositionManager:
         position = self.open_positions[token_address]
         position.update_price(exit_price)
 
-        # Calculate PnL
-        pnl = position.unrealized_pnl
-        pnl_percent = position.unrealized_pnl_percent
+        # Calculate PnL (final exit only, based on remaining quantity)
+        final_exit_pnl = position.unrealized_pnl
+
+        # Add partial profits to get total realized P&L
+        total_partial_profit = getattr(position, 'total_partial_profit_usd', 0.0)
+        total_pnl = final_exit_pnl + total_partial_profit
+
+        # Calculate total P&L percentage based on INITIAL quantity/cost basis
+        initial_cost_basis = position.entry_price * getattr(position, 'initial_quantity', position.quantity)
+        pnl_percent = (total_pnl / initial_cost_basis * 100) if initial_cost_basis > 0 else 0
+
+        pnl = total_pnl  # Use total realized P&L for the trade record
 
         # Create sell trade with full details for CSV export
         sell_trade = Trade(

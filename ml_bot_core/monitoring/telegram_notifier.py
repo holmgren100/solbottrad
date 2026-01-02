@@ -304,7 +304,9 @@ The Solana trading bot has been shut down.
         pnl_percent: float,
         hold_time_hours: float,
         exit_reason: str,
-        liquidity_change: dict = None
+        liquidity_change: dict = None,
+        partial_profit_usd: float = 0.0,
+        milestones_hit: str = ''
     ) -> bool:
         """
         Send enhanced exit notification with comprehensive data.
@@ -316,11 +318,13 @@ The Solana trading bot has been shut down.
             entry_price: Entry price
             exit_price: Exit price
             position_size: Position size in USD
-            pnl: Profit/loss in USD
+            pnl: Total realized profit/loss in USD (includes partial profits)
             pnl_percent: Profit/loss percentage
             hold_time_hours: How long position was held
             exit_reason: Reason for exit
             liquidity_change: Liquidity changes during hold (optional)
+            partial_profit_usd: Total profit from partial sells (optional)
+            milestones_hit: Comma-separated milestones hit (e.g., "50,100,200")
 
         Returns:
             True if successful
@@ -351,9 +355,22 @@ The Solana trading bot has been shut down.
         message = (
             f"{outcome_emoji} *EXITED: {symbol}* {reason_emoji}\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"💰 P&L: ${pnl:+.2f} ({pnl_percent:+.2f}%)\n"
+            f"💰 Total P&L: ${pnl:+.2f} ({pnl_percent:+.2f}%)\n"
             f"📊 Outcome: *{outcome_text}*\n"
             f"\n"
+        )
+
+        # Add partial profit breakdown if any partials were taken
+        if partial_profit_usd > 0 and milestones_hit:
+            final_exit_pnl = pnl - partial_profit_usd
+            message += (
+                f"💎 Partial Profits: ${partial_profit_usd:+.2f}\n"
+                f"📈 Milestones Hit: {milestones_hit}%\n"
+                f"🎯 Final Exit P&L: ${final_exit_pnl:+.2f}\n"
+                f"\n"
+            )
+
+        message += (
             f"💲 Entry: ${entry_price:.8f}\n"
             f"💲 Exit: ${exit_price:.8f}\n"
             f"💼 Size: ${position_size:.2f}\n"

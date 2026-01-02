@@ -56,6 +56,13 @@ class EnhancedTradeData:
     pnl_percent: float = 0.0
     exit_reason: str = ''
 
+    # Partial profit tracking
+    partial_profit_usd: float = 0.0         # Total profit from partial sells
+    partial_profit_count: int = 0           # Number of partial profit milestones hit
+    milestones_hit: str = ''                # Comma-separated list of milestones (e.g., "50,100,200")
+    remaining_quantity_percent: float = 100.0  # % of position remaining at final exit
+    total_realized_pnl_usd: float = 0.0     # Partial profits + final exit profit
+
     # Timing data
     entry_time: datetime = None
     exit_time: datetime = None
@@ -225,9 +232,26 @@ class CSVTracker:
         # Calculate duration
         duration_minutes = (exit_time - position.entry_time).total_seconds() / 60
 
-        # Calculate PnL
-        pnl_usd = (exit_price - position.entry_price) * position.quantity
+        # Calculate PnL for final exit (remaining position only)
+        final_exit_pnl_usd = (exit_price - position.entry_price) * position.quantity
         pnl_percent = ((exit_price - position.entry_price) / position.entry_price) * 100 if position.entry_price > 0 else 0
+
+        # Get partial profit data
+        partial_profit_usd = getattr(position, 'total_partial_profit_usd', 0.0)
+        milestones_hit_set = getattr(position, 'milestones_hit', set())
+        initial_quantity = getattr(position, 'initial_quantity', position.quantity)
+
+        # Calculate total realized P&L (partial profits + final exit)
+        total_realized_pnl_usd = partial_profit_usd + final_exit_pnl_usd
+
+        # Calculate remaining quantity percentage
+        remaining_quantity_percent = (position.quantity / initial_quantity * 100) if initial_quantity > 0 else 100.0
+
+        # Format milestones as comma-separated string
+        milestones_hit_str = ','.join(str(m) for m in sorted(milestones_hit_set)) if milestones_hit_set else ''
+
+        # Use total realized PnL as the main pnl_usd field
+        pnl_usd = total_realized_pnl_usd
 
         # Calculate liquidity change
         liquidity_change_percent = 0.0
@@ -294,6 +318,13 @@ class CSVTracker:
             pnl_usd=pnl_usd,
             pnl_percent=pnl_percent,
             exit_reason=exit_reason,
+
+            # Partial profit tracking
+            partial_profit_usd=partial_profit_usd,
+            partial_profit_count=len(milestones_hit_set),
+            milestones_hit=milestones_hit_str,
+            remaining_quantity_percent=remaining_quantity_percent,
+            total_realized_pnl_usd=total_realized_pnl_usd,
 
             # Timing
             entry_time=position.entry_time,
