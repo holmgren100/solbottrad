@@ -538,122 +538,78 @@ class MLBot2Foundation:
 
         # Check exit conditions for remaining positions
         for position in list(self.position_manager.get_all_positions()):
-            # === EXIT PRIORITY (ML Bot Style) ===
-            # 1. DRAWDOWN PRIMARY - Loser pattern detection (>30% drawdown)
-            # 2. Stop Loss - Safety net
-            # 3. Rug Detection - Severe only (70% liq drop + frozen)
-            # 4. Trailing Stop - After winners develop
-            # 5. Winner Hold Logic - Don't exit winners too early!
+            # === OPTIMIZED 2-PATH EXIT LOGIC ===
+            # Priority: Emergency rugs > Winners maximize profit > Losers minimize loss
 
-            # 1. DRAWDOWN PRIMARY - Check loser pattern FIRST!
-            if position.is_loser_pattern():
-                drawdown = position.get_drawdown_percent()
-                duration = position.get_duration_minutes()
-                logger.warning(
-                    f"🚨 LOSER PATTERN: {position.symbol or position.token_address[:8]}... "
-                    f"Drawdown: {drawdown:.1f}% (>{30}%), Duration: {duration:.0f}min"
-                )
-                await self.close_position(
-                    position.token_address,
-                    position.current_price,
-                    'stop_loss'  # Use stop_loss reason for loser pattern
-                )
-                continue
-
-            # 2. Stop Loss - Safety net (should rarely trigger if drawdown works)
-            if self.position_manager.check_stop_loss(position.token_address):
-                logger.warning(f"🛑 Stop loss hit: {position.symbol or position.token_address[:8]}...")
-                await self.close_position(
-                    position.token_address,
-                    position.current_price,
-                    'stop_loss'
-                )
-                continue
-
-            # 3. Rug Detection - RELAXED (only severe cases)
-            # Use pre-fetched dead_positions list (fetched once before loop)
+            # === EMERGENCY OVERRIDE: RUG DETECTION (HIGHEST PRIORITY) ===
             if self.config.core_config.rug_detection_enabled and position.token_address in dead_positions:
-                    # === WINNER HOLD LOGIC ===
-                    # If position shows winner pattern (low drawdown), hold longer!
-                    # Don't exit on small liquidity fluctuations
-                    if position.is_winner_pattern():
-                        duration = position.get_duration_minutes()
-                        drawdown = position.get_drawdown_percent()
+                # Determine specific rug type for accurate data tracking
+                rug_reason = 'rug_unknown'  # Default fallback
 
-                        # Winner pattern: Hold 25-35 min minimum (ML Bot style)
-                        if duration < 25:
-                            logger.info(
-                                f"✅ WINNER HOLD: {position.symbol or position.token_address[:8]}... "
-                                f"Low drawdown {drawdown:.1f}% - holding to 25+ min (now {duration:.0f}min)"
-                            )
-                            continue  # Skip exit, keep holding!
+                # Check which condition triggered (in priority order)
+                if position.is_price_stale(self.config.core_config.stale_price_minutes):
+                    minutes_since = (datetime.now() - position.last_price_update).total_seconds() / 60
+                    logger.error(
+                        f"🚨 RUG: STALE PRICE - {position.symbol or position.token_address[:8]}... "
+                        f"No price update for {minutes_since:.1f} minutes (token likely dead/delisted)"
+                    )
+                    rug_reason = 'rug_stale_price'
 
-                        # Optimal exit window: 25-35 min
-                        if duration < 35:
-                            logger.info(
-                                f"✅ WINNER OPTIMAL: {position.symbol or position.token_address[:8]}... "
-                                f"In optimal window ({duration:.0f}min) - can exit or hold to 35min"
-                            )
-                            # Exit at optimal time
-                        else:
-                            logger.info(
-                                f"✅ WINNER MATURE: {position.symbol or position.token_address[:8]}... "
-                                f"Held {duration:.0f}min - time to exit"
-                            )
+                elif position.is_price_frozen(freeze_minutes=2):
+                    minutes_frozen = (datetime.now() - position.last_price_change).total_seconds() / 60
+                    logger.error(
+                        f"🚨 RUG: FROZEN PRICE - {position.symbol or position.token_address[:8]}... "
+                        f"Price hasn't moved for {minutes_frozen:.1f} minutes @ ${position.current_price:.8f} (likely honeypot)"
+                    )
+                    rug_reason = 'rug_frozen_price'
 
-                    # Determine specific rug type for accurate data tracking
-                    rug_reason = 'rug_unknown'  # Default fallback
+                elif position.is_liquidity_dead(self.config.core_config.min_position_liquidity):
+                    liq_drop = position.get_liquidity_drop_percent()
+                    logger.error(
+                        f"🚨 RUG: LIQUIDITY DEAD - {position.symbol or position.token_address[:8]}... "
+                        f"Liq drop: {liq_drop:.0f}%, Current: ${position.current_liquidity:.0f} (rug pull)"
+                    )
+                    rug_reason = 'rug_liquidity_dead'
 
-                    # Check which condition triggered (in priority order)
-                    if position.is_price_stale(self.config.core_config.stale_price_minutes):
-                        minutes_since = (datetime.now() - position.last_price_update).total_seconds() / 60
-                        logger.error(
-                            f"🚨 RUG: STALE PRICE - {position.symbol or position.token_address[:8]}... "
-                            f"No price update for {minutes_since:.1f} minutes (token likely dead/delisted)"
-                        )
-                        rug_reason = 'rug_stale_price'
+                else:
+                    # Generic low liquidity (not necessarily rug)
+                    liq_drop = position.get_liquidity_drop_percent()
+                    logger.warning(
+                        f"⚠️  Low liquidity: {position.symbol or position.token_address[:8]}... "
+                        f"Liq drop: {liq_drop:.0f}%, Current: ${position.current_liquidity:.0f}"
+                    )
+                    rug_reason = 'low_liquidity'
 
-                    elif position.is_price_frozen(freeze_minutes=2):  # Use frozen price threshold
-                        minutes_frozen = (datetime.now() - position.last_price_change).total_seconds() / 60
-                        logger.error(
-                            f"🚨 RUG: FROZEN PRICE - {position.symbol or position.token_address[:8]}... "
-                            f"Price hasn't moved for {minutes_frozen:.1f} minutes @ ${position.current_price:.8f} (likely honeypot)"
-                        )
-                        rug_reason = 'rug_frozen_price'
+                await self.close_position(
+                    position.token_address,
+                    position.current_price,
+                    rug_reason
+                )
+                continue
 
-                    elif position.is_liquidity_dead(self.config.core_config.min_position_liquidity):
-                        liq_drop = position.get_liquidity_drop_percent()
-                        logger.error(
-                            f"🚨 RUG: LIQUIDITY DEAD - {position.symbol or position.token_address[:8]}... "
-                            f"Liq drop: {liq_drop:.0f}%, Current: ${position.current_liquidity:.0f} (rug pull)"
-                        )
-                        rug_reason = 'rug_liquidity_dead'
-
-                    else:
-                        # Generic low liquidity (not necessarily rug)
-                        liq_drop = position.get_liquidity_drop_percent()
-                        logger.warning(
-                            f"⚠️  Low liquidity: {position.symbol or position.token_address[:8]}... "
-                            f"Liq drop: {liq_drop:.0f}%, Current: ${position.current_liquidity:.0f}"
-                        )
-                        rug_reason = 'low_liquidity'
-
+            # === PATH 1: WINNERS - MAXIMIZE PROFIT ===
+            if position.unrealized_pnl > 0:
+                # For winners, check trailing stop FIRST (capture profits quickly!)
+                if self.position_manager.check_trailing_stop(position.token_address):
+                    logger.info(f"📊 Trailing stop hit: {position.symbol or position.token_address[:8]}...")
                     await self.close_position(
                         position.token_address,
                         position.current_price,
-                        rug_reason  # Specific rug type
+                        'trailing_stop'
                     )
                     continue
 
-            # 4. Trailing Stop - Unchanged for now
-            if self.position_manager.check_trailing_stop(position.token_address):
-                logger.info(f"📊 Trailing stop hit: {position.symbol or position.token_address[:8]}...")
-                await self.close_position(
-                    position.token_address,
-                    position.current_price,
-                    'trailing_stop'
-                )
-                continue
+            # === PATH 2: LOSERS - MINIMIZE LOSS ===
+            else:
+                # For losers, check stop loss FIRST (cut losses fast!)
+                if self.position_manager.check_stop_loss(position.token_address):
+                    logger.warning(f"🛑 Stop loss hit: {position.symbol or position.token_address[:8]}...")
+                    await self.close_position(
+                        position.token_address,
+                        position.current_price,
+                        'stop_loss'
+                    )
+                    continue
 
     def get_statistics(self) -> Dict:
         """
