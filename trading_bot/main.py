@@ -798,9 +798,9 @@ class MLBot2Foundation:
             # Use 1h if available (recent activity), otherwise 24h
             buy_ratio = buy_ratio_1h if buy_ratio_1h > 0 else buy_ratio_24h
 
-            if buy_ratio < 0.43:  # Require 43%+ buyers (catch more winners like FLIGHT 673%!)
+            if buy_ratio < 0.39:  # Require 39%+ buyers (balanced with strong activity filters)
                 logger.info(
-                    f"⛔ Skipped {symbol}: Low buy ratio {buy_ratio:.1%} (need 43%+). "
+                    f"⛔ Skipped {symbol}: Low buy ratio {buy_ratio:.1%} (need 39%+). "
                     f"24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}"
                 )
                 # Track rejection for analysis
