@@ -832,9 +832,25 @@ class MLBot2Foundation:
                 )
                 return
 
-            # Filter #3: MAX Liquidity (Skip Bluechips)
+            # Filter #3: Liquidity Range (Sweet Spot)
             liquidity_usd = token_data.get('liquidity_usd', 0)
-            MAX_LIQUIDITY = 1_000_000  # Skip tokens with >$1M liquidity (data collection mode - raised from 500k)
+            MIN_LIQUIDITY = 30_000  # Minimum $30k (can enter/exit)
+            MAX_LIQUIDITY = 3_000_000  # Maximum $3M (still agile, can pump fast)
+
+            if liquidity_usd < MIN_LIQUIDITY:
+                logger.info(
+                    f"⛔ Skipped {symbol}: Too low liquidity ${liquidity_usd:,.0f} (min ${MIN_LIQUIDITY:,.0f}). "
+                    f"Cannot enter/exit safely."
+                )
+                # Track rejection for analysis
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"low_liquidity_${liquidity_usd:,.0f}",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='screening'
+                )
+                return
 
             if liquidity_usd > MAX_LIQUIDITY:
                 logger.info(
@@ -857,11 +873,50 @@ class MLBot2Foundation:
             volume_24h = token_data.get('volume_24h', 0)  # Still needed for logging
             # MAX_VOLUME_24H = 1_000_000  # DISABLED
 
+            # Filter #5: Recent Activity (1h Volume)
+            volume_1h = token_data.get('volume_1h', 0)
+            MIN_VOLUME_1H = 3_000  # Minimum $3k/hour activity
+
+            if volume_1h > 0 and volume_1h < MIN_VOLUME_1H:
+                logger.info(
+                    f"⛔ Skipped {symbol}: Low recent volume ${volume_1h:,.0f}/1h (need ${MIN_VOLUME_1H:,.0f}+). "
+                    f"Dead/low activity token."
+                )
+                # Track rejection for analysis
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"low_volume_1h_${volume_1h:,.0f}",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='screening'
+                )
+                return
+
+            # Filter #6: Recent Buyers (1h Buys)
+            buys_1h = token_data.get('buys_1h', 0)
+            MIN_BUYS_1H = 10  # Minimum 10 buy transactions per hour
+
+            if buys_1h > 0 and buys_1h < MIN_BUYS_1H:
+                logger.info(
+                    f"⛔ Skipped {symbol}: Low recent buys {buys_1h}/1h (need {MIN_BUYS_1H}+). "
+                    f"No buying interest."
+                )
+                # Track rejection for analysis
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"low_buys_1h_{buys_1h}",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='screening'
+                )
+                return
+
             logger.info(
                 f"✅ Quality checks passed: {symbol} - "
                 f"Buy ratio: {buy_ratio:.1%} (24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}), "
-                f"Activity: {txns_24h} txns, "
-                f"Liq: ${liquidity_usd:,.0f}, Vol: ${volume_24h:,.0f}"
+                f"Activity: {txns_24h} txns (1h: {txns_1h}), "
+                f"Liq: ${liquidity_usd:,.0f}, Vol: ${volume_24h:,.0f} (1h: ${volume_1h:,.0f}), "
+                f"Buys/1h: {buys_1h}"
             )
 
             # Prepare data for risk assessment
