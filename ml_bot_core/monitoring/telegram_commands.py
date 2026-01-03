@@ -214,24 +214,24 @@ class TelegramCommandHandler:
                 await update.message.reply_text(f"❌ No valid price data for {matching_pos.token_address[:8]}")
                 return
 
-            # Close the position at CURRENT price
-            result = await self.bot.trading_engine.execute_sell(
-                matching_pos.token_address,
-                current_price,
+            # Close the position using bot's close_position method
+            trade = await self.bot.close_position(
+                token_address=matching_pos.token_address,
+                exit_price=current_price,
                 reason='manual_telegram'
             )
 
-            if result['status'] == 'success':
+            if trade:
                 await update.message.reply_text(
                     f"✅ Closed position\n"
                     f"Token: {matching_pos.token_address[:8]}...\n"
                     f"Entry: ${matching_pos.entry_price:.8f}\n"
                     f"Exit: ${current_price:.8f}\n"
-                    f"P&L: ${result['pnl']:.2f} ({result['pnl_percent']:+.2f}%)"
+                    f"P&L: ${trade.pnl:.2f} ({trade.pnl_percent:+.2f}%)"
                 )
                 logger.info(f"Position {matching_pos.token_address[:8]} closed via Telegram at ${current_price:.8f}")
             else:
-                await update.message.reply_text(f"❌ Failed to close: {result.get('reason', 'unknown')}")
+                await update.message.reply_text(f"❌ Failed to close position")
 
         except Exception as e:
             logger.error(f"Error in /close command: {e}")
@@ -269,25 +269,27 @@ class TelegramCommandHandler:
                         results.append(f"❌ {pos.token_address[:8]}: No price data")
                         continue
 
-                    # Close the position
-                    result = await self.bot.trading_engine.execute_sell(
-                        pos.token_address,
-                        current_price,
+                    # Close the position using bot's close_position method
+                    # This handles everything: executor sell + position manager update + CSV tracking
+                    trade = await self.bot.close_position(
+                        token_address=pos.token_address,
+                        exit_price=current_price,
                         reason='manual_closeall'
                     )
 
-                    if result['status'] == 'success':
+                    if trade:  # close_position returns Trade object on success, None on failure
                         closed_count += 1
-                        total_pnl += result['pnl']
-                        pnl_pct = result['pnl_percent']
-                        emoji = "🟢" if pnl_pct > 0 else "🔴" if pnl_pct < 0 else "⚪"
-                        results.append(f"{emoji} {pos.token_address[:8]}: {pnl_pct:+.2f}%")
+                        total_pnl += trade.pnl
+                        emoji = "🟢" if trade.pnl_percent > 0 else "🔴" if trade.pnl_percent < 0 else "⚪"
+                        results.append(f"{emoji} {pos.token_address[:8]}: {trade.pnl_percent:+.2f}%")
                     else:
-                        results.append(f"❌ {pos.token_address[:8]}: Failed")
+                        results.append(f"❌ {pos.token_address[:8]}: Close failed")
 
                 except Exception as e:
                     logger.error(f"Error closing {pos.token_address[:8]}: {e}")
-                    results.append(f"❌ {pos.token_address[:8]}: Error")
+                    # Show actual error message for debugging
+                    error_msg = str(e)[:50]  # Truncate long errors
+                    results.append(f"❌ {pos.token_address[:8]}: {error_msg}")
 
             # Send summary
             message = f"✅ Closed {closed_count}/{len(positions)} positions\n"
