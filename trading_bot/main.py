@@ -874,49 +874,53 @@ class MLBot2Foundation:
             # MAX_VOLUME_24H = 1_000_000  # DISABLED
 
             # Filter #5: Recent Activity (1h Volume)
-            volume_1h = token_data.get('volume_1h', 0)
+            volume_1h = token_data.get('volume_1h', None)  # None if not available
             MIN_VOLUME_1H = 3_000  # Minimum $3k/hour activity
 
-            if volume_1h > 0 and volume_1h < MIN_VOLUME_1H:
-                logger.info(
-                    f"⛔ Skipped {symbol}: Low recent volume ${volume_1h:,.0f}/1h (need ${MIN_VOLUME_1H:,.0f}+). "
-                    f"Dead/low activity token."
-                )
-                # Track rejection for analysis
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"low_volume_1h_${volume_1h:,.0f}",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='screening'
-                )
-                return
+            # Only check if 1h data is available
+            if volume_1h is not None:
+                if volume_1h < MIN_VOLUME_1H:  # Includes 0 (dead token!)
+                    logger.info(
+                        f"⛔ Skipped {symbol}: Dead/low recent volume ${volume_1h:,.0f}/1h (need ${MIN_VOLUME_1H:,.0f}+). "
+                        f"No recent activity = no momentum."
+                    )
+                    # Track rejection for analysis
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"low_volume_1h_${volume_1h:,.0f}",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='screening'
+                    )
+                    return
 
             # Filter #6: Recent Buyers (1h Buys)
-            buys_1h = token_data.get('buys_1h', 0)
+            buys_1h = token_data.get('buys_1h', None)  # None if not available
             MIN_BUYS_1H = 10  # Minimum 10 buy transactions per hour
 
-            if buys_1h > 0 and buys_1h < MIN_BUYS_1H:
-                logger.info(
-                    f"⛔ Skipped {symbol}: Low recent buys {buys_1h}/1h (need {MIN_BUYS_1H}+). "
-                    f"No buying interest."
-                )
-                # Track rejection for analysis
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"low_buys_1h_{buys_1h}",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='screening'
-                )
-                return
+            # Only check if 1h data is available
+            if buys_1h is not None:
+                if buys_1h < MIN_BUYS_1H:  # Includes 0 (no buyers!)
+                    logger.info(
+                        f"⛔ Skipped {symbol}: No recent buyers {buys_1h}/1h (need {MIN_BUYS_1H}+). "
+                        f"Dead token = no momentum."
+                    )
+                    # Track rejection for analysis
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"low_buys_1h_{buys_1h}",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='screening'
+                    )
+                    return
 
             logger.info(
                 f"✅ Quality checks passed: {symbol} - "
                 f"Buy ratio: {buy_ratio:.1%} (24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}), "
                 f"Activity: {txns_24h} txns (1h: {txns_1h}), "
-                f"Liq: ${liquidity_usd:,.0f}, Vol: ${volume_24h:,.0f} (1h: ${volume_1h:,.0f}), "
-                f"Buys/1h: {buys_1h}"
+                f"Liq: ${liquidity_usd:,.0f}, Vol: ${volume_24h:,.0f} (1h: ${volume_1h:,.0f if volume_1h else 'N/A'}), "
+                f"Buys/1h: {buys_1h if buys_1h is not None else 'N/A'}"
             )
 
             # Prepare data for risk assessment
