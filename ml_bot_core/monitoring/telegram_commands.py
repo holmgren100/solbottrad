@@ -206,21 +206,13 @@ class TelegramCommandHandler:
                 await update.message.reply_text(f"❌ No position found for {token_address}")
                 return
 
-            # IMPORTANT: Fetch CURRENT price before closing (don't use cached price!)
-            await update.message.reply_text(f"🔄 Fetching current price for {matching_pos.token_address[:8]}...")
+            # Use cached price from position (already updated by monitoring loop)
+            current_price = matching_pos.current_price
 
-            dex_profile = await self.bot.dexscreener.get_token_profile(matching_pos.token_address)
-            current_price = dex_profile['price_usd'] if dex_profile else matching_pos.current_price
-
-            # If DexScreener fails, try Jupiter
+            # Sanity check
             if not current_price or current_price == 0:
-                jupiter_data = await self.bot.jupiter.get_token_price_data(matching_pos.token_address)
-                current_price = jupiter_data['price_usd'] if jupiter_data else matching_pos.current_price
-
-            # Fallback to cached price if all sources fail
-            if not current_price or current_price == 0:
-                current_price = matching_pos.current_price
-                await update.message.reply_text(f"⚠️ Using cached price (sources unavailable)")
+                await update.message.reply_text(f"❌ No valid price data for {matching_pos.token_address[:8]}")
+                return
 
             # Close the position at CURRENT price
             result = await self.bot.trading_engine.execute_sell(
@@ -267,18 +259,15 @@ class TelegramCommandHandler:
 
             for pos in positions:
                 try:
-                    # Fetch CURRENT price for each position
-                    dex_profile = await self.bot.dexscreener.get_token_profile(pos.token_address)
-                    current_price = dex_profile['price_usd'] if dex_profile else None
+                    # Use cached price from position (already updated by monitoring loop)
+                    # Safer than fetching fresh price which may fail
+                    current_price = pos.current_price
 
-                    # If DexScreener fails, try Jupiter
+                    # Sanity check
                     if not current_price or current_price == 0:
-                        jupiter_data = await self.bot.jupiter.get_token_price_data(pos.token_address)
-                        current_price = jupiter_data['price_usd'] if jupiter_data else None
-
-                    # Fallback to cached price if all sources fail
-                    if not current_price or current_price == 0:
-                        current_price = pos.current_price
+                        logger.warning(f"No valid price for {pos.token_address[:8]}, skipping")
+                        results.append(f"❌ {pos.token_address[:8]}: No price data")
+                        continue
 
                     # Close the position
                     result = await self.bot.trading_engine.execute_sell(
