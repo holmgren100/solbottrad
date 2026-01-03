@@ -158,6 +158,9 @@ class MLBot2Foundation:
         else:
             raise NotImplementedError("Live trading not implemented yet! Use PAPER_TRADING_MODE=true")
 
+        # Link executor to position_manager for state persistence
+        self.position_manager.executor = self.executor
+
         # Compatibility attributes for TelegramCommandHandler
         self.trading_engine = self.executor  # Alias for telegram commands
         self.trading_engine.position_manager = self.position_manager  # Add position_manager to executor
