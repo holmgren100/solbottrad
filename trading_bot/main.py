@@ -915,12 +915,16 @@ class MLBot2Foundation:
                     )
                     return
 
+            # Format 1h data for logging (handle None values)
+            vol_1h_str = f"${volume_1h:,.0f}" if volume_1h is not None else "N/A"
+            buys_1h_str = str(buys_1h) if buys_1h is not None else "N/A"
+
             logger.info(
                 f"✅ Quality checks passed: {symbol} - "
                 f"Buy ratio: {buy_ratio:.1%} (24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}), "
                 f"Activity: {txns_24h} txns (1h: {txns_1h}), "
-                f"Liq: ${liquidity_usd:,.0f}, Vol: ${volume_24h:,.0f} (1h: ${volume_1h:,.0f if volume_1h else 'N/A'}), "
-                f"Buys/1h: {buys_1h if buys_1h is not None else 'N/A'}"
+                f"Liq: ${liquidity_usd:,.0f}, Vol: ${volume_24h:,.0f} (1h: {vol_1h_str}), "
+                f"Buys/1h: {buys_1h_str}"
             )
 
             # Prepare data for risk assessment
