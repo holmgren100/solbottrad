@@ -61,12 +61,28 @@ class TelegramCommandHandler:
             if positions:
                 message += f"📈 *Open Positions ({len(positions)})*\n"
                 for pos in positions:
-                    pnl_pct = pos.unrealized_pnl_percent
-                    emoji = "🟢" if pnl_pct > 0 else "🔴" if pnl_pct < 0 else "⚪"
+                    # Calculate token price change %
+                    token_price_change_pct = ((pos.current_price - pos.entry_price) / pos.entry_price) * 100 if pos.entry_price > 0 else 0
+
+                    # Calculate actual position P&L % (including partial profits)
+                    partial_profit_usd = getattr(pos, 'total_partial_profit_usd', 0.0)
+                    initial_quantity = getattr(pos, 'initial_quantity', pos.quantity)
+                    initial_investment_usd = pos.entry_price * initial_quantity
+
+                    # Remaining position value
+                    remaining_pnl_usd = (pos.current_price - pos.entry_price) * pos.quantity
+
+                    # Total P&L including partials
+                    total_pnl_usd = partial_profit_usd + remaining_pnl_usd
+                    position_pnl_pct = (total_pnl_usd / initial_investment_usd) * 100 if initial_investment_usd > 0 else 0
+
+                    emoji = "🟢" if position_pnl_pct > 0 else "🔴" if position_pnl_pct < 0 else "⚪"
                     message += f"{emoji} {pos.token_address[:8]}...\n"
                     message += f"   Entry: ${pos.entry_price:.8f}\n"
                     message += f"   Current: ${pos.current_price:.8f}\n"
-                    message += f"   P&L: {pnl_pct:+.2f}%\n"
+                    message += f"   Token: {token_price_change_pct:+.2f}% | Position: {position_pnl_pct:+.2f}%\n"
+                    if partial_profit_usd > 0:
+                        message += f"   Partials: ${partial_profit_usd:.2f}\n"
                     message += f"   Size: ${pos.amount_usd:.2f}\n\n"
             else:
                 message += "📭 No open positions\n\n"

@@ -53,7 +53,9 @@ class EnhancedTradeData:
     position_size_usd: float = 0.0
     quantity: float = 0.0
     pnl_usd: float = 0.0
-    pnl_percent: float = 0.0
+    pnl_percent: float = 0.0                    # DEPRECATED: Use token_price_change_percent instead
+    token_price_change_percent: float = 0.0     # How much the token price changed (entry -> exit)
+    position_pnl_percent: float = 0.0           # Actual position P&L % (includes partial profits)
     exit_reason: str = ''
 
     # Rug detection tracking
@@ -238,7 +240,6 @@ class CSVTracker:
 
         # Calculate PnL for final exit (remaining position only)
         final_exit_pnl_usd = (exit_price - position.entry_price) * position.quantity
-        pnl_percent = ((exit_price - position.entry_price) / position.entry_price) * 100 if position.entry_price > 0 else 0
 
         # Get partial profit data
         partial_profit_usd = getattr(position, 'total_partial_profit_usd', 0.0)
@@ -247,6 +248,14 @@ class CSVTracker:
 
         # Calculate total realized P&L (partial profits + final exit)
         total_realized_pnl_usd = partial_profit_usd + final_exit_pnl_usd
+
+        # Calculate initial investment (original position size)
+        initial_investment_usd = position.entry_price * initial_quantity
+
+        # Calculate P&L percentages
+        token_price_change_percent = ((exit_price - position.entry_price) / position.entry_price) * 100 if position.entry_price > 0 else 0
+        position_pnl_percent = (total_realized_pnl_usd / initial_investment_usd) * 100 if initial_investment_usd > 0 else 0
+        pnl_percent = token_price_change_percent  # Keep for backward compatibility
 
         # Calculate remaining quantity percentage
         remaining_quantity_percent = (position.quantity / initial_quantity * 100) if initial_quantity > 0 else 100.0
@@ -328,6 +337,8 @@ class CSVTracker:
             quantity=position.quantity,
             pnl_usd=pnl_usd,
             pnl_percent=pnl_percent,
+            token_price_change_percent=token_price_change_percent,
+            position_pnl_percent=position_pnl_percent,
             exit_reason=exit_reason,
 
             # Rug detection tracking
@@ -455,7 +466,7 @@ class CSVTracker:
             'Token', 'Symbol',
             'Entry Price', 'Exit Price', 'Price Change ($)', 'Price Change (%)',
             'Position Size ($)', 'Quantity', 'Tokens per Dollar',
-            'PnL ($)', 'PnL (%)', 'Win/Loss', 'Exit Reason',
+            'PnL ($)', 'PnL (%)', 'Token Price Change (%)', 'Position PnL (%)', 'Win/Loss', 'Exit Reason',
             'Duration (min)',
             # Liquidity
             'Entry Liquidity', 'Exit Liquidity', 'Liquidity Change (%)',
@@ -528,6 +539,8 @@ class CSVTracker:
                     'Tokens per Dollar': f"{tokens_per_dollar:.0f}",
                     'PnL ($)': f"${trade.pnl_usd:.2f}",
                     'PnL (%)': f"{trade.pnl_percent:+.2f}%",
+                    'Token Price Change (%)': f"{trade.token_price_change_percent:+.2f}%",
+                    'Position PnL (%)': f"{trade.position_pnl_percent:+.2f}%",
                     'Win/Loss': win_loss,
                     'Exit Reason': trade.exit_reason,
                     'Duration (min)': f"{trade.duration_minutes:.1f}",
