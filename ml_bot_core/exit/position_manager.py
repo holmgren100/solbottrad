@@ -689,8 +689,9 @@ class PositionManager:
 
             # Check if price hasn't actually changed (fake updates / minimal movement)
             # If price moved less than 1% after 5+ minutes, likely honeypot/dead/manipulated
+            # SKIP if liquidity is still high (stable token, not dead)
             minutes_held = (datetime.now() - position.entry_time).total_seconds() / 60
-            if minutes_held >= 5:
+            if minutes_held >= 5 and position.current_liquidity < 50000:  # Only for low liq tokens
                 price_change_pct = abs((position.current_price - position.entry_price) / position.entry_price) * 100
                 if price_change_pct < 1.0:  # Less than 1% movement in 5+ minutes
                     logger.warning(
