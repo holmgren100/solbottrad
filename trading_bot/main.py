@@ -549,9 +549,22 @@ class MLBot2Foundation:
                 # Check which condition triggered (in priority order)
                 if position.is_price_stale(self.config.core_config.stale_price_minutes):
                     minutes_since = (datetime.now() - position.last_price_update).total_seconds() / 60
+
+                    # ✅ WINNER with stale price = Low volume token, NOT a rug!
+                    # Let trailing stop handle the exit at the right time
+                    if position.unrealized_pnl > 0:
+                        logger.warning(
+                            f"⚠️  LOW VOLUME (profitable): {position.symbol or position.token_address[:8]}... "
+                            f"Stale {minutes_since:.1f}min but +{position.unrealized_pnl_percent:.1f}% - continuing"
+                        )
+                        # Remove from dead_positions and skip rug exit
+                        dead_positions.remove(position.token_address)
+                        continue  # Let winners run to trailing stop!
+
+                    # ❌ LOSER + stale price = Real rug!
                     logger.error(
                         f"🚨 RUG: STALE PRICE - {position.symbol or position.token_address[:8]}... "
-                        f"No price update for {minutes_since:.1f} minutes (token likely dead/delisted)"
+                        f"No price update for {minutes_since:.1f} minutes (losing position, likely dead)"
                     )
                     rug_reason = 'rug_stale_price'
 
@@ -782,9 +795,9 @@ class MLBot2Foundation:
             # Use 1h if available (recent activity), otherwise 24h
             buy_ratio = buy_ratio_1h if buy_ratio_1h > 0 else buy_ratio_24h
 
-            if buy_ratio < 0.47:  # Require 47%+ buyers (testing lower threshold)
+            if buy_ratio < 0.43:  # Require 43%+ buyers (catch more winners like FLIGHT 673%!)
                 logger.info(
-                    f"⛔ Skipped {symbol}: Low buy ratio {buy_ratio:.1%} (need 47%+). "
+                    f"⛔ Skipped {symbol}: Low buy ratio {buy_ratio:.1%} (need 43%+). "
                     f"24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}"
                 )
                 # Track rejection for analysis
