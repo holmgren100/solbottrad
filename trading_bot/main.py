@@ -876,7 +876,7 @@ class MLBot2Foundation:
 
             # Filter #3: Liquidity Range (Sweet Spot)
             liquidity_usd = token_data.get('liquidity_usd', 0)
-            MIN_LIQUIDITY = 30_000  # Minimum $30k (can enter/exit)
+            MIN_LIQUIDITY = 20_000  # Minimum $20k (can enter/exit older tokens)
             MAX_LIQUIDITY = 3_000_000  # Maximum $3M (still agile, can pump fast)
 
             if liquidity_usd < MIN_LIQUIDITY:
