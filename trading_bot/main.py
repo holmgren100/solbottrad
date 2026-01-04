@@ -793,6 +793,26 @@ class MLBot2Foundation:
             else:
                 token_data['token_age_hours'] = 0.0
 
+            # === AGE FILTER: Avoid old bluechips/slow movers ===
+            MAX_AGE_HOURS = 2160  # 3 months (90 days)
+            token_age_hours = token_data.get('token_age_hours', 0.0)
+
+            if token_age_hours > MAX_AGE_HOURS:
+                logger.info(
+                    f"⛔ Skipped {symbol}: Too old {token_age_hours:.0f}h ({token_age_hours/24:.0f} days). "
+                    f"Max age: {MAX_AGE_HOURS}h ({MAX_AGE_HOURS/24:.0f} days). "
+                    f"Avoiding bluechips/slow movers."
+                )
+                # Track rejection for analysis
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"too_old_{token_age_hours:.0f}h",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='screening'
+                )
+                return
+
             # ⚡ Fetch holder analysis from Solscan (if available)
             if self.solscan_client:
                 try:
