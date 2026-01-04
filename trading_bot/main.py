@@ -798,20 +798,33 @@ class MLBot2Foundation:
             token_age_hours = token_data.get('token_age_hours', 0.0)
 
             if token_age_hours > MAX_AGE_HOURS:
-                logger.info(
-                    f"⛔ Skipped {symbol}: Too old {token_age_hours:.0f}h ({token_age_hours/24:.0f} days). "
-                    f"Max age: {MAX_AGE_HOURS}h ({MAX_AGE_HOURS/24:.0f} days). "
-                    f"Avoiding bluechips/slow movers."
-                )
-                # Track rejection for analysis
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"too_old_{token_age_hours:.0f}h",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='screening'
-                )
-                return
+                # EXCEPTION: Active pump RIGHT NOW! 🔥
+                # Data shows: 9% of old tokens pump >20% if active (avg 145% gain!)
+                price_change_5m = token_data.get('price_change_5m', 0)
+                volume_1h = token_data.get('volume_1h', 0)
+
+                # If pumping hard OR high volume → allow despite age!
+                if price_change_5m > 20 or volume_1h > 100000:
+                    logger.info(
+                        f"✅ {symbol}: Old ({token_age_hours:.0f}h / {token_age_hours/24:.0f}d) BUT ACTIVE PUMP! "
+                        f"Price 5m: {price_change_5m:+.1f}%, Vol 1h: ${volume_1h:,.0f} - allowing!"
+                    )
+                    # Continue to other checks! ⚡
+                else:
+                    # Old AND slow - reject
+                    logger.info(
+                        f"⛔ Skipped {symbol}: Too old {token_age_hours:.0f}h ({token_age_hours/24:.0f} days) + not active. "
+                        f"Max age: {MAX_AGE_HOURS}h ({MAX_AGE_HOURS/24:.0f} days). Avoiding bluechips/slow movers."
+                    )
+                    # Track rejection for analysis
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"too_old_{token_age_hours:.0f}h",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='screening'
+                    )
+                    return
 
             # ⚡ Fetch holder analysis from Solscan (if available)
             if self.solscan_client:
@@ -831,6 +844,41 @@ class MLBot2Foundation:
                             logger.debug(f"No holder data available for {symbol}")
                 except Exception as e:
                     logger.debug(f"Error fetching holder analysis for {symbol}: {e}")
+
+            # === ENTRY RUG DETECTION: Block instant rugs BEFORE buying ===
+            # Data shows: 14 of 17 deep stops at 0.00h = instant rugs! 🚨
+
+            # Check 1: Minimum holder count (if data available)
+            holder_count = token_data.get('holder_count', 0)
+            if holder_count > 0 and holder_count < 20:
+                logger.info(
+                    f"⛔ Skipped {symbol}: Too few holders ({holder_count}, need 20+). "
+                    f"Honeypot/instant rug risk."
+                )
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"too_few_holders_{holder_count}",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='rug_detection'
+                )
+                return
+
+            # Check 2: Top holder concentration (if data available)
+            top1_concentration = token_data.get('top1_concentration', 0)
+            if top1_concentration > 50:
+                logger.info(
+                    f"⛔ Skipped {symbol}: Top holder owns {top1_concentration:.1f}% (max 50%). "
+                    f"Rug pull risk - whale can dump."
+                )
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"top_holder_{top1_concentration:.1f}%",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='rug_detection'
+                )
+                return
 
             # === ENTRY QUALITY FILTERS (ML Bot Style) ===
             # Filter #1: Buy/Sell Ratio (Bullish Momentum)
@@ -880,17 +928,26 @@ class MLBot2Foundation:
             MAX_LIQUIDITY = 3_000_000  # Maximum $3M (still agile, can pump fast)
 
             if liquidity_usd < MIN_LIQUIDITY:
-                # ⚡ EXCEPTION: New launches (< 30 min) with strong activity BUT $0 liquidity
-                # This is normal - DexScreener hasn't indexed liquidity yet, but trading is happening!
+                # ⚡ EXCEPTION: New launches with $0 liquidity BUT strong activity
+                # Data shows: 93% of liq $0 are <24h, 43% pump >20%! 🔥
                 token_age_hours = token_data.get('token_age_hours', 999)  # Default to old if unknown
 
-                # If token is VERY new (< 0.5 hours = 30 min) AND has strong activity, allow it
+                # TIER 1: VERY new launches (<30 min) - lenient
                 if liquidity_usd == 0 and token_age_hours < 0.5 and volume_1h and volume_1h >= 5000 and txns_1h and txns_1h >= 100:
                     logger.info(
-                        f"✅ {symbol}: $0 liquidity BUT new launch ({token_age_hours*60:.0f} min old) + strong activity "
-                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns) - API delay, allowing!"
+                        f"✅ {symbol}: $0 liq BUT brand new ({token_age_hours*60:.0f} min old) + activity "
+                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns) - API delay!"
                     )
-                    # Continue to other checks (don't reject!)
+                    # Continue to other checks!
+
+                # TIER 2: New launches (<24h) - stricter criteria 🔥
+                elif liquidity_usd == 0 and token_age_hours < 24 and volume_1h and volume_1h >= 20000 and txns_1h and txns_1h >= 100 and buy_ratio >= 0.50:
+                    logger.info(
+                        f"✅ {symbol}: $0 liq BUT new launch ({token_age_hours:.1f}h old) + STRONG activity "
+                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns, {buy_ratio:.1%} buy) - API lag, allowing!"
+                    )
+                    # Continue to other checks! ⚡
+
                 else:
                     # Truly low liquidity - reject
                     logger.info(
