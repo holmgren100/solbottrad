@@ -54,8 +54,9 @@ class TokenScanner:
         self.birdeye = BirdeyeClient(birdeye_key) if birdeye_key and os.getenv('ENABLE_BIRDEYE', 'false').lower() == 'true' else None
         self.coingecko = CoinGeckoClient(coingecko_key) if coingecko_key and os.getenv('ENABLE_COINGECKO', 'false').lower() == 'true' else None
 
-        # Track scanned tokens to avoid duplicates within same session
-        self.scanned_tokens: Set[str] = set()
+        # Track scanned tokens with timestamps (allow re-entry after cooldown)
+        self.scanned_tokens: Dict[str, datetime] = {}  # address -> last_scan_time
+        self.scan_cooldown_minutes = 30  # Allow re-entry after 30 min
         self.last_scan_time: Optional[datetime] = None
 
     async def __aenter__(self):
@@ -242,9 +243,18 @@ class TokenScanner:
                     logger.debug(f"Skipped {address[:8]}... ({symbol}) - Stablecoin/bluechip pattern")
                     continue
 
-                # FILTER 3: Skip if already scanned in this session
+                # FILTER 3: Skip if scanned recently (allow re-entry after cooldown)
                 if address in self.scanned_tokens:
-                    continue
+                    last_scan = self.scanned_tokens[address]
+                    time_since_scan = (datetime.now() - last_scan).total_seconds() / 60  # minutes
+
+                    if time_since_scan < self.scan_cooldown_minutes:
+                        # Too soon - skip to avoid duplicate entries
+                        logger.debug(f"Skipped {address[:8]}... - Scanned {time_since_scan:.0f}min ago (cooldown: {self.scan_cooldown_minutes}min)")
+                        continue
+                    else:
+                        # Cooldown expired - allow re-entry!
+                        logger.debug(f"Re-entry allowed: {address[:8]}... - {time_since_scan:.0f}min since last scan")
 
                 # FILTER 4: Skip if already have open position
                 if self.position_manager:
@@ -262,7 +272,7 @@ class TokenScanner:
 
                 # Add to filtered list (no filters)
                 filtered_tokens.append(token)
-                self.scanned_tokens.add(address)
+                self.scanned_tokens[address] = datetime.now()  # Track scan time for cooldown
 
                 if len(filtered_tokens) >= limit:
                     break
@@ -332,10 +342,19 @@ class TokenScanner:
         Args:
             hours: Clear entries older than this many hours
         """
-        # For now, just clear all (could add timestamp tracking)
+        cutoff_time = datetime.now() - timedelta(hours=hours)
         old_count = len(self.scanned_tokens)
-        self.scanned_tokens.clear()
-        logger.info(f"Cleared {old_count} entries from scan history")
+
+        # Remove entries older than cutoff
+        self.scanned_tokens = {
+            addr: scan_time
+            for addr, scan_time in self.scanned_tokens.items()
+            if scan_time > cutoff_time
+        }
+
+        cleared = old_count - len(self.scanned_tokens)
+        if cleared > 0:
+            logger.info(f"Cleared {cleared} old entries from scan history (kept {len(self.scanned_tokens)} recent)")
 
     def get_stats(self) -> Dict:
         """Get scanner statistics."""
