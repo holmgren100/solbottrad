@@ -931,9 +931,11 @@ class MLBot2Foundation:
                 # ⚡ EXCEPTION: New launches with $0 liquidity BUT strong activity
                 # Data shows: 93% of liq $0 are <24h, 43% pump >20%! 🔥
                 token_age_hours = token_data.get('token_age_hours', 999)  # Default to old if unknown
+                volume_1h = token_data.get('volume_1h', 0)  # Get from token_data
+                txns_1h = token_data.get('txns_1h', 0)
 
                 # TIER 1: VERY new launches (<30 min) - lenient
-                if liquidity_usd == 0 and token_age_hours < 0.5 and volume_1h and volume_1h >= 5000 and txns_1h and txns_1h >= 100:
+                if liquidity_usd == 0 and token_age_hours < 0.5 and volume_1h >= 5000 and txns_1h >= 100:
                     logger.info(
                         f"✅ {symbol}: $0 liq BUT brand new ({token_age_hours*60:.0f} min old) + activity "
                         f"(${volume_1h:,.0f}/1h, {txns_1h} txns) - API delay!"
@@ -941,7 +943,7 @@ class MLBot2Foundation:
                     # Continue to other checks!
 
                 # TIER 2: New launches (<24h) - stricter criteria 🔥
-                elif liquidity_usd == 0 and token_age_hours < 24 and volume_1h and volume_1h >= 20000 and txns_1h and txns_1h >= 100 and buy_ratio >= 0.50:
+                elif liquidity_usd == 0 and token_age_hours < 24 and volume_1h >= 20000 and txns_1h >= 100 and buy_ratio >= 0.50:
                     logger.info(
                         f"✅ {symbol}: $0 liq BUT new launch ({token_age_hours:.1f}h old) + STRONG activity "
                         f"(${volume_1h:,.0f}/1h, {txns_1h} txns, {buy_ratio:.1%} buy) - API lag, allowing!"
