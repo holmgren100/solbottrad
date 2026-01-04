@@ -564,10 +564,32 @@ class MLBot2Foundation:
                         dead_positions.remove(position.token_address)
                         continue  # Let winners run to trailing stop!
 
-                    # ❌ LOSER + stale price = Real rug!
+                    # ❌ LOSER + stale price = Check if actually dead or just low volatility
+                    # Fetch fresh token data to check recent activity
+                    try:
+                        fresh_data = await self.price_validator.dexscreener_client.get_token_profile(position.token_address)
+                        if fresh_data:
+                            recent_volume_1h = fresh_data.get('volume_1h', 0)
+                            recent_txns_1h = fresh_data.get('txns_1h', 0)
+
+                            # If still trading activity, it's NOT a rug - just low volatility/consolidation
+                            if recent_volume_1h >= 1000 and recent_txns_1h >= 5:
+                                logger.warning(
+                                    f"⚠️  STALE but TRADING: {position.symbol or position.token_address[:8]}... "
+                                    f"Stale {minutes_since:.1f}min BUT ${recent_volume_1h:,.0f}/1h, {recent_txns_1h} txns - "
+                                    f"NOT a rug, just consolidating. Letting stop loss handle it."
+                                )
+                                # Remove from dead_positions and skip rug exit
+                                dead_positions.remove(position.token_address)
+                                continue  # Let stop loss handle exit
+
+                    except Exception as e:
+                        logger.debug(f"Error checking activity for {position.symbol}: {e}")
+
+                    # No activity = actual rug
                     logger.error(
                         f"🚨 RUG: STALE PRICE - {position.symbol or position.token_address[:8]}... "
-                        f"No price update for {minutes_since:.1f} minutes (losing position, likely dead)"
+                        f"No price update for {minutes_since:.1f} minutes AND no trading activity (dead token)"
                     )
                     rug_reason = 'rug_stale_price'
 
@@ -798,9 +820,9 @@ class MLBot2Foundation:
             # Use 1h if available (recent activity), otherwise 24h
             buy_ratio = buy_ratio_1h if buy_ratio_1h > 0 else buy_ratio_24h
 
-            if buy_ratio < 0.39:  # Require 39%+ buyers (balanced with strong activity filters)
+            if buy_ratio < 0.35:  # Require 35%+ buyers (we have strong activity filters)
                 logger.info(
-                    f"⛔ Skipped {symbol}: Low buy ratio {buy_ratio:.1%} (need 39%+). "
+                    f"⛔ Skipped {symbol}: Low buy ratio {buy_ratio:.1%} (need 35%+). "
                     f"24h: {buy_ratio_24h:.1%}, 1h: {buy_ratio_1h:.1%}"
                 )
                 # Track rejection for analysis
@@ -838,19 +860,32 @@ class MLBot2Foundation:
             MAX_LIQUIDITY = 3_000_000  # Maximum $3M (still agile, can pump fast)
 
             if liquidity_usd < MIN_LIQUIDITY:
-                logger.info(
-                    f"⛔ Skipped {symbol}: Too low liquidity ${liquidity_usd:,.0f} (min ${MIN_LIQUIDITY:,.0f}). "
-                    f"Cannot enter/exit safely."
-                )
-                # Track rejection for analysis
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"low_liquidity_${liquidity_usd:,.0f}",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='screening'
-                )
-                return
+                # ⚡ EXCEPTION: New launches (< 30 min) with strong activity BUT $0 liquidity
+                # This is normal - DexScreener hasn't indexed liquidity yet, but trading is happening!
+                token_age_hours = token_data.get('token_age_hours', 999)  # Default to old if unknown
+
+                # If token is VERY new (< 0.5 hours = 30 min) AND has strong activity, allow it
+                if liquidity_usd == 0 and token_age_hours < 0.5 and volume_1h and volume_1h >= 5000 and txns_1h and txns_1h >= 100:
+                    logger.info(
+                        f"✅ {symbol}: $0 liquidity BUT new launch ({token_age_hours*60:.0f} min old) + strong activity "
+                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns) - API delay, allowing!"
+                    )
+                    # Continue to other checks (don't reject!)
+                else:
+                    # Truly low liquidity - reject
+                    logger.info(
+                        f"⛔ Skipped {symbol}: Too low liquidity ${liquidity_usd:,.0f} (min ${MIN_LIQUIDITY:,.0f}). "
+                        f"Age: {token_age_hours:.1f}h. Cannot enter/exit safely."
+                    )
+                    # Track rejection for analysis
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"low_liquidity_${liquidity_usd:,.0f}",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='screening'
+                    )
+                    return
 
             if liquidity_usd > MAX_LIQUIDITY:
                 logger.info(
