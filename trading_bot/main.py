@@ -38,40 +38,69 @@ logger = logging.getLogger(__name__)
 
 class StopLossCooldown:
     """
-    Track tokens that hit stop loss to prevent immediate re-entry.
-    Data shows: gm 6x, meme 6x, MADURO 6x = repeat losses!
-    """
-    def __init__(self, cooldown_hours: float = 1.0):
-        self.stopped_tokens: Dict[str, datetime] = {}  # symbol -> timestamp
-        self.cooldown_hours = cooldown_hours
+    Smart cooldown based on stop loss depth.
+    Deep stops (>-15%) = avoid repeating (30min)
+    Normal stops (-10 to -15%) = short cooldown (10min)
+    Shallow stops (<-10%) = no cooldown (token recovers!)
 
-    def add_stop(self, symbol: str):
-        """Record a stop loss for this symbol."""
-        self.stopped_tokens[symbol] = datetime.now()
-        logger.debug(f"Cooldown added: {symbol} for {self.cooldown_hours}h")
+    Data: ADIEU stopped at -10.1% then pumped 3964% - blocked by 1h cooldown! 💀
+    Solution: Smart cooldown allows recovery entries on shallow stops.
+    """
+    def __init__(self):
+        self.stopped_tokens: Dict[str, dict] = {}  # symbol -> {timestamp, stop_percent, cooldown_hours}
+
+    def add_stop(self, symbol: str, stop_loss_percent: float):
+        """Record a stop loss with its depth."""
+        cooldown_hours = self._get_cooldown_hours(stop_loss_percent)
+        self.stopped_tokens[symbol] = {
+            'timestamp': datetime.now(),
+            'stop_percent': stop_loss_percent,
+            'cooldown_hours': cooldown_hours
+        }
+        logger.info(
+            f"📊 Cooldown: {symbol} stopped at {stop_loss_percent:.1f}% "
+            f"→ {cooldown_hours*60:.0f}min cooldown"
+        )
+
+    def _get_cooldown_hours(self, stop_loss_percent: float) -> float:
+        """Smart cooldown based on stop depth."""
+        if stop_loss_percent < -15:
+            return 0.5  # 30min - deep rug, avoid!
+        elif stop_loss_percent < -10:
+            return 0.17  # 10min - normal vol
+        else:
+            return 0  # No cooldown - can recover! (ADIEU 3964% case)
 
     def is_on_cooldown(self, symbol: str) -> bool:
         """Check if symbol is still on cooldown."""
         if symbol not in self.stopped_tokens:
             return False
 
-        time_since = (datetime.now() - self.stopped_tokens[symbol]).total_seconds() / 3600
-        return time_since < self.cooldown_hours
+        stop_data = self.stopped_tokens[symbol]
+        time_since = (datetime.now() - stop_data['timestamp']).total_seconds() / 3600
+        return time_since < stop_data['cooldown_hours']
 
     def get_time_remaining(self, symbol: str) -> float:
         """Get hours remaining on cooldown."""
         if symbol not in self.stopped_tokens:
             return 0.0
 
-        time_since = (datetime.now() - self.stopped_tokens[symbol]).total_seconds() / 3600
-        return max(0.0, self.cooldown_hours - time_since)
+        stop_data = self.stopped_tokens[symbol]
+        time_since = (datetime.now() - stop_data['timestamp']).total_seconds() / 3600
+        return max(0.0, stop_data['cooldown_hours'] - time_since)
+
+    def get_stop_percent(self, symbol: str) -> float:
+        """Get the stop loss percent that triggered."""
+        if symbol not in self.stopped_tokens:
+            return 0.0
+        return self.stopped_tokens[symbol]['stop_percent']
 
     def clear_old(self, hours: int = 24):
         """Clear cooldowns older than specified hours."""
         cutoff = datetime.now() - timedelta(hours=hours)
         self.stopped_tokens = {
-            sym: ts for sym, ts in self.stopped_tokens.items()
-            if ts > cutoff
+            sym: data for sym, data in self.stopped_tokens.items()
+            if data['timestamp'] > cutoff
         }
 
 
@@ -96,8 +125,8 @@ class MLBot2Foundation:
         self.running = False
 
         # === STOP LOSS COOLDOWN ===
-        self.stop_cooldown = StopLossCooldown(cooldown_hours=1.0)
-        logger.info("  ✅ StopLossCooldown initialized (1h cooldown)")
+        self.stop_cooldown = StopLossCooldown()
+        logger.info("  ✅ StopLossCooldown initialized (smart duration based on stop depth)")
 
         # === 🔒 PROTECTED CORE (Never Modified!) ===
         logger.info("Initializing protected core...")
@@ -337,10 +366,13 @@ class MLBot2Foundation:
         Returns:
             Position object or None if failed
         """
-        # Calculate stop loss and take profit
+        # Progressive stop loss: Tighter first 2 min to catch instant rugs!
+        # Data shows: 54% stops <5min avg -15.8% = instant rugs!
+        # Solution: Start with -5%, widen to -6% after 2 min
+        initial_stop_percent = 5.0  # Tighter for first 2 min
         stop_loss = self.risk_assessor.calculate_stop_loss(
             entry_price,
-            self.config.core_config.stop_loss_percent
+            initial_stop_percent  # Start tight, will adjust after 2 min
         )
         take_profit = self.risk_assessor.calculate_take_profit(
             entry_price,
@@ -584,6 +616,27 @@ class MLBot2Foundation:
 
         # Check exit conditions for remaining positions
         for position in list(self.position_manager.get_all_positions()):
+            # === PROGRESSIVE STOP LOSS: Widen after 2 min ===
+            # Start tight (-5%) to catch instant rugs, widen to normal (-6%) after 2 min
+            position_duration_min = (datetime.now() - position.entry_time).total_seconds() / 60
+
+            if position_duration_min >= 2.0:
+                # After 2 min: Use normal stop loss
+                normal_stop_percent = self.config.core_config.stop_loss_percent  # 6.0%
+                normal_stop_price = self.risk_assessor.calculate_stop_loss(
+                    position.entry_price,
+                    normal_stop_percent
+                )
+
+                # Only widen stop (never tighten)
+                if normal_stop_price < position.stop_loss:
+                    old_stop = position.stop_loss
+                    position.stop_loss = normal_stop_price
+                    logger.debug(
+                        f"📊 {position.symbol}: Widened stop from ${old_stop:.8f} to ${normal_stop_price:.8f} "
+                        f"after {position_duration_min:.0f}min (progressive stop: -5% → -6%)"
+                    )
+
             # === OPTIMIZED 2-PATH EXIT LOGIC ===
             # Priority: Emergency rugs > Winners maximize profit > Losers minimize loss
 
@@ -684,11 +737,13 @@ class MLBot2Foundation:
             else:
                 # For losers, check stop loss FIRST (cut losses fast!)
                 if self.position_manager.check_stop_loss(position.token_address):
-                    logger.warning(f"🛑 Stop loss hit: {position.symbol or position.token_address[:8]}...")
+                    # Calculate stop loss percent for smart cooldown
+                    stop_percent = ((position.current_price - position.entry_price) / position.entry_price) * 100
+                    logger.warning(f"🛑 Stop loss hit: {position.symbol or position.token_address[:8]}... ({stop_percent:.1f}%)")
 
-                    # Add to cooldown BEFORE closing
+                    # Add to cooldown BEFORE closing (smart duration based on depth)
                     if position.symbol:
-                        self.stop_cooldown.add_stop(position.symbol)
+                        self.stop_cooldown.add_stop(position.symbol, stop_percent)
 
                     await self.close_position(
                         position.token_address,
@@ -818,6 +873,79 @@ class MLBot2Foundation:
         except Exception as e:
             logger.error(f"Error in scan_and_trade: {e}", exc_info=True)
 
+    async def check_momentum(self, token_address: str, symbol: str, token_data: dict) -> bool:
+        """
+        Check if token has positive momentum (not falling/dumping).
+        Prevents entering falling knives that cause instant stops.
+
+        Data shows: 54% stops <5min = entering falling tokens! 🚨
+        This check saves $700-900 by blocking bad entries.
+        """
+        try:
+            # Get price change data
+            price_change_5m = token_data.get('price_change_5m', 0)
+            price_change_1h = token_data.get('price_change_1h', 0)
+
+            # Get transaction data
+            txns_h1_buys = token_data.get('txns_h1_buys', 0)
+            txns_h1_sells = token_data.get('txns_h1_sells', 0)
+            total_txns = txns_h1_buys + txns_h1_sells
+
+            # Check 1: Price falling in last 5 min?
+            if price_change_5m < -5:  # Down >5% in 5min
+                logger.info(
+                    f"⛔ Skipped {symbol}: Falling knife! Price down {price_change_5m:.1f}% in 5min. "
+                    f"Avoid entering dumps (causes instant stops)."
+                )
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"falling_knife_{price_change_5m:.1f}%_5m",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='momentum'
+                )
+                return False
+
+            # Check 2: High sell pressure right now?
+            if total_txns >= 50:  # Only check if enough txns
+                sell_pressure = txns_h1_sells / total_txns if total_txns > 0 else 0
+
+                if sell_pressure > 0.60:  # >60% sells (dumping!)
+                    logger.info(
+                        f"⛔ Skipped {symbol}: High sell pressure! {sell_pressure:.0%} sells "
+                        f"({txns_h1_sells} sells vs {txns_h1_buys} buys). Token dumping!"
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"sell_pressure_{sell_pressure:.0%}",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='momentum'
+                    )
+                    return False
+
+            # Check 3: Falling for extended period?
+            if price_change_1h < -15:  # Down >15% in 1h
+                logger.info(
+                    f"⛔ Skipped {symbol}: Extended dump! Price down {price_change_1h:.1f}% in 1h. "
+                    f"Wait for recovery signal."
+                )
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"extended_dump_{price_change_1h:.1f}%_1h",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='momentum'
+                )
+                return False
+
+            # All momentum checks passed! ✅
+            return True
+
+        except Exception as e:
+            logger.warning(f"Momentum check failed for {symbol}: {e}")
+            return True  # Don't block on errors
+
     async def analyze_and_trade_token(self, token_data: dict):
         """
         Analyze token and execute trade if approved.
@@ -835,9 +963,11 @@ class MLBot2Foundation:
             # Block re-entry on tokens that recently stopped out
             if self.stop_cooldown.is_on_cooldown(symbol):
                 time_remaining = self.stop_cooldown.get_time_remaining(symbol)
+                stop_percent = self.stop_cooldown.get_stop_percent(symbol)
                 logger.info(
                     f"⛔ Skipped {symbol}: On stop loss cooldown "
-                    f"({time_remaining*60:.0f} min remaining). Prevents repeat losses."
+                    f"({time_remaining*60:.0f}min remaining from {stop_percent:.1f}% stop). "
+                    f"Smart cooldown: Deep stops wait longer!"
                 )
                 self.rejected_tracker.record_rejection(
                     token_address=token_address,
@@ -847,6 +977,11 @@ class MLBot2Foundation:
                     rejection_stage='cooldown'
                 )
                 return
+
+            # === MOMENTUM CHECK: Don't enter falling knives! ===
+            # Data shows: 134 stops <5min (54%!) = entering dumps! 🚨
+            if not await self.check_momentum(token_address, symbol, token_data):
+                return  # Momentum check already logged rejection
 
             # ⚡ Calculate token age from pair creation timestamp
             pair_created_at = token_data.get('pair_created_at', 0)
@@ -963,6 +1098,43 @@ class MLBot2Foundation:
                 )
                 return
 
+            # Check 3: LP locked or burned? (if low liquidity)
+            # For tokens <$100k liq, require LP safety
+            liquidity_usd = token_data.get('liquidity_usd', 0)
+            if liquidity_usd < 100_000:
+                lp_locked = token_data.get('lp_locked', False)
+                lp_burned = token_data.get('lp_burned', False)
+
+                if not lp_locked and not lp_burned:
+                    logger.info(
+                        f"⛔ Skipped {symbol}: LP not locked/burned + low liq ${liquidity_usd:,.0f}. "
+                        f"Rug pull risk - dev can drain liquidity!"
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"lp_unlocked_${liquidity_usd:,.0f}",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='rug_detection'
+                    )
+                    return
+
+            # Check 4: Freeze authority? (can freeze wallets!)
+            has_freeze_authority = token_data.get('has_freeze_authority', False)
+            if has_freeze_authority:
+                logger.info(
+                    f"⛔ Skipped {symbol}: Has freeze authority - can freeze wallets! "
+                    f"Honeypot risk."
+                )
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason="freeze_authority",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='rug_detection'
+                )
+                return
+
             # === ENTRY QUALITY FILTERS (ML Bot Style) ===
             # Filter #1: Buy/Sell Ratio (Bullish Momentum)
             buy_ratio_24h = token_data.get('buy_ratio_24h', 0)
@@ -1013,15 +1185,27 @@ class MLBot2Foundation:
             if liquidity_usd < MIN_LIQUIDITY:
                 # ⚡ EXCEPTION: New launches with $0 liquidity BUT strong activity
                 # Data shows: 93% of liq $0 are <24h, 43% pump >20%! 🔥
-                token_age_hours = token_data.get('token_age_hours', 999)  # Default to old if unknown
-                volume_1h = token_data.get('volume_1h', 0)  # Get from token_data
+                token_age_hours = token_data.get('token_age_hours', 999)
+                volume_1h = token_data.get('volume_1h', 0)
                 txns_1h = token_data.get('txns_1h', 0)
+
+                # 🔍 DEBUG: Log why liq $0 tokens are blocked
+                if liquidity_usd == 0:
+                    logger.warning(
+                        f"🔍 Liq $0 debug for {symbol}:\n"
+                        f"  Age: {token_age_hours:.2f}h\n"
+                        f"  Vol 1h: ${volume_1h:,.0f}\n"
+                        f"  Txns 1h: {txns_1h}\n"
+                        f"  Buy ratio: {buy_ratio:.1%}\n"
+                        f"  TIER 1 check (<30min): age={token_age_hours < 0.5}, vol={volume_1h >= 5000}, txns={txns_1h >= 100}\n"
+                        f"  TIER 2 check (<24h): age={token_age_hours < 24}, vol={volume_1h >= 20000}, txns={txns_1h >= 100}, buy={buy_ratio >= 0.50}"
+                    )
 
                 # TIER 1: VERY new launches (<30 min) - lenient
                 if liquidity_usd == 0 and token_age_hours < 0.5 and volume_1h >= 5000 and txns_1h >= 100:
                     logger.info(
                         f"✅ {symbol}: $0 liq BUT brand new ({token_age_hours*60:.0f} min old) + activity "
-                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns) - API delay!"
+                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns) - API delay! TIER 1 exception."
                     )
                     # Continue to other checks!
 
@@ -1029,27 +1213,33 @@ class MLBot2Foundation:
                 elif liquidity_usd == 0 and token_age_hours < 24 and volume_1h >= 20000 and txns_1h >= 100 and buy_ratio >= 0.50:
                     logger.info(
                         f"✅ {symbol}: $0 liq BUT new launch ({token_age_hours:.1f}h old) + STRONG activity "
-                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns, {buy_ratio:.1%} buy) - API lag, allowing!"
+                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns, {buy_ratio:.1%} buy) - API lag! TIER 2 exception."
                     )
                     # Continue to other checks! ⚡
 
                 # TIER 3: Low liquidity ($0-$20k) but HIGH volume compensates
                 elif liquidity_usd < 20_000 and volume_1h >= 50000:
                     logger.info(
-                        f"✅ {symbol}: Low liq ${liquidity_usd:,.0f} BUT HIGH volume ${volume_1h:,.0f}/1h compensates!"
+                        f"✅ {symbol}: Low liq ${liquidity_usd:,.0f} BUT HIGH volume ${volume_1h:,.0f}/1h compensates! "
+                        f"TIER 3 exception (Ralph example: $15k liq, 272% pump!)."
                     )
-                    # Continue to other checks! (Ralph example: $15k liq, 272% pump!)
+                    # Continue to other checks!
 
                 else:
                     # Truly low liquidity - reject
+                    reason = f"low_liquidity_${liquidity_usd:,.0f}"
+                    if liquidity_usd == 0:
+                        reason += f"_age{token_age_hours:.1f}h_vol${volume_1h:,.0f}_txns{txns_1h}"
+
                     logger.info(
                         f"⛔ Skipped {symbol}: Too low liquidity ${liquidity_usd:,.0f} (min ${MIN_LIQUIDITY:,.0f}). "
-                        f"Age: {token_age_hours:.1f}h. Cannot enter/exit safely."
+                        f"Age: {token_age_hours:.1f}h, Vol: ${volume_1h:,.0f}, Txns: {txns_1h}. "
+                        f"Failed all 3 tiers. Cannot enter/exit safely."
                     )
                     # Track rejection for analysis
                     self.rejected_tracker.record_rejection(
                         token_address=token_address,
-                        rejection_reason=f"low_liquidity_${liquidity_usd:,.0f}",
+                        rejection_reason=reason,
                         token_data=token_data,
                         symbol=symbol,
                         rejection_stage='screening'
