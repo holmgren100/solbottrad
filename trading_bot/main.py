@@ -798,22 +798,40 @@ class MLBot2Foundation:
             token_age_hours = token_data.get('token_age_hours', 0.0)
 
             if token_age_hours > MAX_AGE_HOURS:
-                # EXCEPTION: Active pump RIGHT NOW! 🔥
-                # Data shows: 9% of old tokens pump >20% if active (avg 145% gain!)
+                # HARD CAP: No exceptions beyond 6 months! (Avoid bluechips like Bonk)
+                MAX_AGE_EXCEPTION = 4320  # 6 months (180 days)
+
+                if token_age_hours > MAX_AGE_EXCEPTION:
+                    logger.info(
+                        f"⛔ Skipped {symbol}: WAY too old {token_age_hours:.0f}h ({token_age_hours/24:.0f}d) - "
+                        f">6 months = bluechip territory! Max exception age: {MAX_AGE_EXCEPTION}h ({MAX_AGE_EXCEPTION/24:.0f}d)."
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"too_old_bluechip_{token_age_hours:.0f}h",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='screening'
+                    )
+                    return
+
+                # EXCEPTION: Active pump RIGHT NOW (3-6 months only)! 🔥
+                # Requires BOTH pumping AND volume (not just high volume like Bonk!)
                 price_change_5m = token_data.get('price_change_5m', 0)
                 volume_1h = token_data.get('volume_1h', 0)
 
-                # If pumping hard OR high volume → allow despite age!
-                if price_change_5m > 20 or volume_1h > 100000:
+                # Changed: OR → AND! Must be BOTH pumping AND active!
+                if price_change_5m > 20 and volume_1h > 30000:
                     logger.info(
-                        f"✅ {symbol}: Old ({token_age_hours:.0f}h / {token_age_hours/24:.0f}d) BUT ACTIVE PUMP! "
-                        f"Price 5m: {price_change_5m:+.1f}%, Vol 1h: ${volume_1h:,.0f} - allowing!"
+                        f"✅ {symbol}: Old ({token_age_hours:.0f}h / {token_age_hours/24:.0f}d) BUT PUMPING NOW! "
+                        f"Price 5m: {price_change_5m:+.1f}%, Vol 1h: ${volume_1h:,.0f} - allowing active pump!"
                     )
                     # Continue to other checks! ⚡
                 else:
-                    # Old AND slow - reject
+                    # Old AND (not pumping OR low volume) - reject
                     logger.info(
-                        f"⛔ Skipped {symbol}: Too old {token_age_hours:.0f}h ({token_age_hours/24:.0f} days) + not active. "
+                        f"⛔ Skipped {symbol}: Too old {token_age_hours:.0f}h ({token_age_hours/24:.0f} days) + not active pump. "
+                        f"Price 5m: {price_change_5m:+.1f}%, Vol 1h: ${volume_1h:,.0f}. "
                         f"Max age: {MAX_AGE_HOURS}h ({MAX_AGE_HOURS/24:.0f} days). Avoiding bluechips/slow movers."
                     )
                     # Track rejection for analysis
