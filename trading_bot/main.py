@@ -36,6 +36,45 @@ from trading_bot.config import load_config, BotConfig
 logger = logging.getLogger(__name__)
 
 
+class StopLossCooldown:
+    """
+    Track tokens that hit stop loss to prevent immediate re-entry.
+    Data shows: gm 6x, meme 6x, MADURO 6x = repeat losses!
+    """
+    def __init__(self, cooldown_hours: float = 1.0):
+        self.stopped_tokens: Dict[str, datetime] = {}  # symbol -> timestamp
+        self.cooldown_hours = cooldown_hours
+
+    def add_stop(self, symbol: str):
+        """Record a stop loss for this symbol."""
+        self.stopped_tokens[symbol] = datetime.now()
+        logger.debug(f"Cooldown added: {symbol} for {self.cooldown_hours}h")
+
+    def is_on_cooldown(self, symbol: str) -> bool:
+        """Check if symbol is still on cooldown."""
+        if symbol not in self.stopped_tokens:
+            return False
+
+        time_since = (datetime.now() - self.stopped_tokens[symbol]).total_seconds() / 3600
+        return time_since < self.cooldown_hours
+
+    def get_time_remaining(self, symbol: str) -> float:
+        """Get hours remaining on cooldown."""
+        if symbol not in self.stopped_tokens:
+            return 0.0
+
+        time_since = (datetime.now() - self.stopped_tokens[symbol]).total_seconds() / 3600
+        return max(0.0, self.cooldown_hours - time_since)
+
+    def clear_old(self, hours: int = 24):
+        """Clear cooldowns older than specified hours."""
+        cutoff = datetime.now() - timedelta(hours=hours)
+        self.stopped_tokens = {
+            sym: ts for sym, ts in self.stopped_tokens.items()
+            if ts > cutoff
+        }
+
+
 class MLBot2Foundation:
     """
     ML Bot 2 Foundation - Protected Core + Optional Enhancements
@@ -55,6 +94,10 @@ class MLBot2Foundation:
         """
         self.config = config
         self.running = False
+
+        # === STOP LOSS COOLDOWN ===
+        self.stop_cooldown = StopLossCooldown(cooldown_hours=1.0)
+        logger.info("  ✅ StopLossCooldown initialized (1h cooldown)")
 
         # === 🔒 PROTECTED CORE (Never Modified!) ===
         logger.info("Initializing protected core...")
@@ -642,6 +685,11 @@ class MLBot2Foundation:
                 # For losers, check stop loss FIRST (cut losses fast!)
                 if self.position_manager.check_stop_loss(position.token_address):
                     logger.warning(f"🛑 Stop loss hit: {position.symbol or position.token_address[:8]}...")
+
+                    # Add to cooldown BEFORE closing
+                    if position.symbol:
+                        self.stop_cooldown.add_stop(position.symbol)
+
                     await self.close_position(
                         position.token_address,
                         position.current_price,
@@ -782,6 +830,23 @@ class MLBot2Foundation:
             symbol = token_data.get('symbol', '')
 
             logger.info(f"Analyzing: {symbol} ({token_address[:8]}...)")
+
+            # === STOP LOSS COOLDOWN CHECK ===
+            # Block re-entry on tokens that recently stopped out
+            if self.stop_cooldown.is_on_cooldown(symbol):
+                time_remaining = self.stop_cooldown.get_time_remaining(symbol)
+                logger.info(
+                    f"⛔ Skipped {symbol}: On stop loss cooldown "
+                    f"({time_remaining*60:.0f} min remaining). Prevents repeat losses."
+                )
+                self.rejected_tracker.record_rejection(
+                    token_address=token_address,
+                    rejection_reason=f"stop_cooldown_{time_remaining*60:.0f}min",
+                    token_data=token_data,
+                    symbol=symbol,
+                    rejection_stage='cooldown'
+                )
+                return
 
             # ⚡ Calculate token age from pair creation timestamp
             pair_created_at = token_data.get('pair_created_at', 0)
@@ -942,7 +1007,7 @@ class MLBot2Foundation:
 
             # Filter #3: Liquidity Range (Sweet Spot)
             liquidity_usd = token_data.get('liquidity_usd', 0)
-            MIN_LIQUIDITY = 20_000  # Minimum $20k (can enter/exit older tokens)
+            MIN_LIQUIDITY = 10_000  # Lowered from $20k (Ralph example: $15k but 272% pump!)
             MAX_LIQUIDITY = 3_000_000  # Maximum $3M (still agile, can pump fast)
 
             if liquidity_usd < MIN_LIQUIDITY:
@@ -967,6 +1032,13 @@ class MLBot2Foundation:
                         f"(${volume_1h:,.0f}/1h, {txns_1h} txns, {buy_ratio:.1%} buy) - API lag, allowing!"
                     )
                     # Continue to other checks! ⚡
+
+                # TIER 3: Low liquidity ($0-$20k) but HIGH volume compensates
+                elif liquidity_usd < 20_000 and volume_1h >= 50000:
+                    logger.info(
+                        f"✅ {symbol}: Low liq ${liquidity_usd:,.0f} BUT HIGH volume ${volume_1h:,.0f}/1h compensates!"
+                    )
+                    # Continue to other checks! (Ralph example: $15k liq, 272% pump!)
 
                 else:
                     # Truly low liquidity - reject
