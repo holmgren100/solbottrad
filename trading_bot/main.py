@@ -891,20 +891,43 @@ class MLBot2Foundation:
             txns_h1_sells = token_data.get('txns_h1_sells', 0)
             total_txns = txns_h1_buys + txns_h1_sells
 
-            # Check 1: Price falling in last 5 min?
-            if price_change_5m < -5:  # Down >5% in 5min
+            # Check 1: Price falling in last 5 min? (RELAXED - allow recoveries!)
+            if price_change_5m < -10:  # Down >10% = clear dump!
                 logger.info(
-                    f"⛔ Skipped {symbol}: Falling knife! Price down {price_change_5m:.1f}% in 5min. "
-                    f"Avoid entering dumps (causes instant stops)."
+                    f"⛔ Skipped {symbol}: Heavy dump! Price down {price_change_5m:.1f}% in 5min. "
+                    f"Avoid entering deep dumps (causes instant stops)."
                 )
                 self.rejected_tracker.record_rejection(
                     token_address=token_address,
-                    rejection_reason=f"falling_knife_{price_change_5m:.1f}%_5m",
+                    rejection_reason=f"heavy_dump_{price_change_5m:.1f}%_5m",
                     token_data=token_data,
                     symbol=symbol,
                     rejection_stage='momentum'
                 )
                 return False
+
+            elif price_change_5m < -5:  # Down 5-10% = check if recovering!
+                price_change_1m = token_data.get('price_change_1m', 0)
+
+                if price_change_1m > 0:  # Price rising last 1min = recovery!
+                    logger.info(
+                        f"✅ {symbol}: Was falling ({price_change_5m:.1f}% in 5m) BUT recovering "
+                        f"({price_change_1m:+.1f}% in 1m). Allowing recovery entry!"
+                    )
+                    # Continue - recovery allowed! ✅
+                else:
+                    logger.info(
+                        f"⛔ Skipped {symbol}: Falling knife! Price down {price_change_5m:.1f}% in 5min "
+                        f"and still falling ({price_change_1m:+.1f}% in 1m). Not recovering yet."
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"falling_knife_{price_change_5m:.1f}%_5m_no_recovery",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='momentum'
+                    )
+                    return False
 
             # Check 2: High sell pressure right now?
             if total_txns >= 50:  # Only check if enough txns
@@ -1015,29 +1038,42 @@ class MLBot2Foundation:
                     )
                     return
 
-                # EXCEPTION: Active pump RIGHT NOW (3-6 months only)! 🔥
-                # Requires BOTH pumping AND volume (not just high volume like Bonk!)
+                # EXCEPTION: Active pump/trading RIGHT NOW (3-6 months only)! 🔥
+                # Data: Blocked CRUNCH 3788%, OILX 2375%, GOODBURGER 2483% - all active old!
+                # Solution: Allow old tokens with HIGH activity, not just price pumps!
                 price_change_5m = token_data.get('price_change_5m', 0)
                 volume_1h = token_data.get('volume_1h', 0)
+                txns_1h = token_data.get('txns_1h', 0)
+                buy_ratio = token_data.get('buy_ratio_1h', 0) or token_data.get('buy_ratio_24h', 0)
 
-                # Changed: OR → AND! Must be BOTH pumping AND active!
+                # OPTION 1: Pumping RIGHT NOW (price + volume)
                 if price_change_5m > 20 and volume_1h > 30000:
                     logger.info(
                         f"✅ {symbol}: Old ({token_age_hours:.0f}h / {token_age_hours/24:.0f}d) BUT PUMPING NOW! "
                         f"Price 5m: {price_change_5m:+.1f}%, Vol 1h: ${volume_1h:,.0f} - allowing active pump!"
                     )
                     # Continue to other checks! ⚡
-                else:
-                    # Old AND (not pumping OR low volume) - reject
+
+                # OPTION 2: HIGH activity (volume + txns + buy pressure) = Active trading!
+                elif volume_1h > 30000 and txns_1h > 200 and buy_ratio > 0.60:
                     logger.info(
-                        f"⛔ Skipped {symbol}: Too old {token_age_hours:.0f}h ({token_age_hours/24:.0f} days) + not active pump. "
-                        f"Price 5m: {price_change_5m:+.1f}%, Vol 1h: ${volume_1h:,.0f}. "
+                        f"✅ {symbol}: Old ({token_age_hours:.0f}h / {token_age_hours/24:.0f}d) BUT ACTIVELY TRADING! "
+                        f"Vol ${volume_1h:,.0f}/1h, {txns_1h} txns, {buy_ratio:.0%} buy. "
+                        f"High activity = safe old token!"
+                    )
+                    # Continue to other checks! ⚡
+
+                else:
+                    # Old AND (not pumping AND low activity) - reject
+                    logger.info(
+                        f"⛔ Skipped {symbol}: Too old {token_age_hours:.0f}h ({token_age_hours/24:.0f} days) + not active. "
+                        f"Price 5m: {price_change_5m:+.1f}%, Vol ${volume_1h:,.0f}/1h, {txns_1h} txns. "
                         f"Max age: {MAX_AGE_HOURS}h ({MAX_AGE_HOURS/24:.0f} days). Avoiding bluechips/slow movers."
                     )
                     # Track rejection for analysis
                     self.rejected_tracker.record_rejection(
                         token_address=token_address,
-                        rejection_reason=f"too_old_{token_age_hours:.0f}h",
+                        rejection_reason=f"too_old_{token_age_hours:.0f}h_inactive",
                         token_data=token_data,
                         symbol=symbol,
                         rejection_stage='screening'
@@ -1098,26 +1134,52 @@ class MLBot2Foundation:
                 )
                 return
 
-            # Check 3: LP locked or burned? (if low liquidity)
-            # For tokens <$100k liq, require LP safety
+            # Check 3: LP locked or burned? (SMART activity-based check!)
+            # Data: LP unlocked blocked 257 tokens including MFGA 6136%! 💀
+            # Solution: Use activity signals instead of auto-reject!
             liquidity_usd = token_data.get('liquidity_usd', 0)
             if liquidity_usd < 100_000:
                 lp_locked = token_data.get('lp_locked', False)
                 lp_burned = token_data.get('lp_burned', False)
 
                 if not lp_locked and not lp_burned:
-                    logger.info(
-                        f"⛔ Skipped {symbol}: LP not locked/burned + low liq ${liquidity_usd:,.0f}. "
-                        f"Rug pull risk - dev can drain liquidity!"
-                    )
-                    self.rejected_tracker.record_rejection(
-                        token_address=token_address,
-                        rejection_reason=f"lp_unlocked_${liquidity_usd:,.0f}",
-                        token_data=token_data,
-                        symbol=symbol,
-                        rejection_stage='rug_detection'
-                    )
-                    return
+                    # Don't auto-reject! Check activity instead! ✅
+                    volume_1h = token_data.get('volume_1h', 0)
+                    txns_1h = token_data.get('txns_1h', 0)
+                    buy_ratio = token_data.get('buy_ratio_1h', 0) or token_data.get('buy_ratio_24h', 0)
+
+                    # HIGH activity + volume = Active trading, LP unlock OK!
+                    if volume_1h > 30000 and buy_ratio > 0.55 and txns_1h > 100:
+                        logger.info(
+                            f"✅ {symbol}: LP unlocked BUT HIGH activity compensates! "
+                            f"Vol ${volume_1h:,.0f}/1h, {buy_ratio:.0%} buy, {txns_1h} txns. "
+                            f"Active trading = safe despite unlocked LP!"
+                        )
+                        # Continue to other checks! ✅
+
+                    # HIGH liquidity = Dev can't rug much even if unlocked
+                    elif liquidity_usd > 50000 and volume_1h > 100000:
+                        logger.info(
+                            f"✅ {symbol}: LP unlocked BUT high liq ${liquidity_usd:,.0f} + vol ${volume_1h:,.0f}! "
+                            f"Large enough that unlock risk is low."
+                        )
+                        # Continue to other checks! ✅
+
+                    else:
+                        # Low activity + unlocked LP = ACTUAL risk!
+                        logger.info(
+                            f"⛔ Skipped {symbol}: LP unlocked + LOW activity! "
+                            f"Liq ${liquidity_usd:,.0f}, Vol ${volume_1h:,.0f}/1h, {buy_ratio:.0%} buy. "
+                            f"Rug pull risk - dev can drain!"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"lp_unlocked_low_activity_${liquidity_usd:,.0f}_vol${volume_1h:,.0f}",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='rug_detection'
+                        )
+                        return
 
             # Check 4: Freeze authority? (can freeze wallets!)
             has_freeze_authority = token_data.get('has_freeze_authority', False)
