@@ -493,14 +493,16 @@ class TelegramCommandHandler:
                 parse_mode='Markdown'
             )
 
-            # Send CSV file
+            # Send CSV file (read into memory first to avoid file handle issues with async)
             with open(filepath, 'rb') as f:
-                filename = f"trades_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                await update.message.reply_document(
-                    document=f,
-                    filename=filename,
-                    caption=f"✅ {trade_count} trades ({description})"
-                )
+                file_data = f.read()
+
+            filename = f"trades_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            await update.message.reply_document(
+                document=file_data,
+                filename=filename,
+                caption=f"✅ {trade_count} trades ({description})"
+            )
 
             logger.info(f"Exported {trade_count} trades via /export command (timeframe: {timeframe}, limit: {limit})")
 
@@ -557,14 +559,16 @@ class TelegramCommandHandler:
                 parse_mode='Markdown'
             )
 
-            # Send CSV file
+            # Send CSV file (read into memory first to avoid file handle issues with async)
             with open(filepath, 'rb') as f:
-                filename = f"rejected_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                await update.message.reply_document(
-                    document=f,
-                    filename=filename,
-                    caption=f"✅ {line_count} rejected tokens"
-                )
+                file_data = f.read()
+
+            filename = f"rejected_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            await update.message.reply_document(
+                document=file_data,
+                filename=filename,
+                caption=f"✅ {line_count} rejected tokens"
+            )
 
             logger.info(f"Exported {line_count} rejected trades via /export_rejected command")
 
