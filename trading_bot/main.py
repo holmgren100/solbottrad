@@ -996,11 +996,11 @@ class MLBot2Foundation:
             txns_h1_sells = token_data.get('txns_h1_sells', 0)
             total_txns = txns_h1_buys + txns_h1_sells
 
-            # Check 1: Price falling in last 5 min? (RELAXED - allow recoveries!)
-            if price_change_5m < -10:  # Down >10% = clear dump!
+            # Check 1: Price falling in last 5 min? (RELAXED - testing low thresholds!)
+            if price_change_5m < -20:  # Down >20% = extreme dump! (lowered from -10%)
                 logger.info(
                     f"⛔ Skipped {symbol}: Heavy dump! Price down {price_change_5m:.1f}% in 5min. "
-                    f"Avoid entering deep dumps (causes instant stops)."
+                    f"Extreme dump - avoid instant rugs."
                 )
                 self.rejected_tracker.record_rejection(
                     token_address=token_address,
@@ -1011,13 +1011,13 @@ class MLBot2Foundation:
                 )
                 return False
 
-            elif price_change_5m < -5:  # Down 5-10% = check if recovering!
+            elif price_change_5m < -15:  # Down 15-20% = check if recovering! (lowered from -5%)
                 price_change_1m = token_data.get('price_change_1m', 0)
 
                 if price_change_1m > 0:  # Price rising last 1min = recovery!
                     logger.info(
                         f"✅ {symbol}: Was falling ({price_change_5m:.1f}% in 5m) BUT recovering "
-                        f"({price_change_1m:+.1f}% in 1m). Allowing recovery entry!"
+                        f"({price_change_1m:+.1f}% in 1m). Allowing recovery entry (dip-buy)!"
                     )
                     # Continue - recovery allowed! ✅
                 else:
@@ -1140,18 +1140,25 @@ class MLBot2Foundation:
             # Instead: Check if token has REAL activity (not dead/bluechip)
             # Active token = high volume + transactions + buy pressure + liquidity
 
-            # Define activity thresholds
+            # Define activity thresholds (LOW VALUES TO TEST - find sweet spot later!)
             MIN_VOLUME_1H = 30000  # $30k+ volume in 1h (real trading)
-            MIN_TXNS_1H = 500      # 500+ transactions (not bots)
-            MIN_BUY_RATIO = 0.60   # 60%+ buy ratio (bullish)
-            MIN_LIQUIDITY = 50000  # $50k+ liquidity (can't rug easily)
+            MIN_TXNS_1H = 75       # 75+ transactions (lowered from 500 to test!)
+            MIN_BUY_RATIO = 0.45   # 45%+ buy ratio (lowered from 60% to test!)
+            MIN_LIQUIDITY = 10000  # $10k+ liquidity (lowered from $50k to test!)
 
             # Check if token meets activity requirements
+            # FLEXIBLE LOGIC: Reject ONLY if lacking BOTH volume AND txns
+            has_volume = volume_1h >= MIN_VOLUME_1H
+            has_txns = txns_1h >= MIN_TXNS_1H
+            has_buy_pressure = buy_ratio >= MIN_BUY_RATIO
+            has_liquidity = liquidity_usd >= MIN_LIQUIDITY
+
+            # Active if has good volume OR good txns (not both required!)
+            # AND reasonable buy ratio AND minimum liquidity
             is_active = (
-                volume_1h >= MIN_VOLUME_1H and
-                txns_1h >= MIN_TXNS_1H and
-                buy_ratio >= MIN_BUY_RATIO and
-                liquidity_usd >= MIN_LIQUIDITY
+                (has_volume or has_txns) and  # Volume OR txns (flexible!)
+                has_buy_pressure and
+                has_liquidity
             )
 
             if not is_active:
