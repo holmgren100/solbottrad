@@ -71,9 +71,14 @@ class StopLossCooldown:
         else:
             return 0  # No cooldown - can recover! (ADIEU 3964% case)
 
-    def is_on_cooldown(self, symbol: str) -> bool:
-        """Check if symbol is still on cooldown."""
+    def is_on_cooldown(self, symbol: str, volume_1h: float = 0) -> bool:
+        """Check if symbol is still on cooldown. High volume overrides cooldown."""
         if symbol not in self.stopped_tokens:
+            return False
+
+        # 🚀 VOLUME OVERRIDE: $500k+ volume = skip cooldown (catch Sapijuju 1,956%!)
+        if volume_1h >= 500000:
+            logger.info(f"🚀 {symbol}: Volume override! ${volume_1h:,.0f} → Skipping cooldown!")
             return False
 
         stop_data = self.stopped_tokens[symbol]
@@ -718,9 +723,9 @@ class MLBot2Foundation:
             # Data: -20% SL saves 73 shake-outs, +52% PnL improvement!
             position_duration_min = (datetime.now() - position.entry_time).total_seconds() / 60
 
-            # PHASE 1: NO-SL WINDOW (First 3-5 min for initial volatility)
-            # Prevents instant shake-outs during launch volatility
-            no_sl_active = position_duration_min < 3.0  # First 3 minutes
+            # PHASE 1: NO-SL WINDOW (First 7 min to avoid "death zone")
+            # Prevents shake-outs during 5-10min "death zone" (-$345, 15.8% win)
+            no_sl_active = position_duration_min < 7.0  # Extended from 3min to 7min
 
             # PHASE 2: BREAK-EVEN TRIGGER (+6-8% → Move SL to +1%)
             # Makes trade risk-free once profit threshold hit!
@@ -731,6 +736,25 @@ class MLBot2Foundation:
                     f"🔒 {position.symbol}: BREAK-EVEN TRIGGERED! Profit {position.unrealized_pnl_percent:.1f}% "
                     f"→ SL moved to +1% (${position.stop_loss:.8f}). Trade now RISK-FREE! ✅"
                 )
+
+            # === ZOMBIE EXIT: CUT STALE POSITIONS ===
+            # Data: >60min positions show 21% win, only +$41 profit
+            # Exit if >45min AND profit <5% (not moving, cut losses!)
+            if position_duration_min > 45 and position.unrealized_pnl_percent < 5.0:
+                logger.info(
+                    f"⏰ {position.symbol}: ZOMBIE EXIT! Duration {position_duration_min:.0f}min "
+                    f"with only {position.unrealized_pnl_percent:.1f}% profit. Position is stale, exiting!"
+                )
+                try:
+                    await self.execution_client.execute_sell(
+                        position=position,
+                        reason="zombie_exit_45min",
+                        current_price=position.current_price
+                    )
+                    self.stop_cooldown.add_stop(position.symbol, position.unrealized_pnl_percent)
+                    continue
+                except Exception as e:
+                    logger.error(f"Failed zombie exit for {position.symbol}: {e}")
 
             # === OPTIMIZED 2-PATH EXIT LOGIC ===
             # Priority: Emergency rugs > Winners maximize profit > Losers minimize loss
@@ -1052,20 +1076,41 @@ class MLBot2Foundation:
                     )
                     return False
 
-            # Check 3: Falling for extended period?
-            if price_change_1h < -15:  # Down >15% in 1h
-                logger.info(
-                    f"⛔ Skipped {symbol}: Extended dump! Price down {price_change_1h:.1f}% in 1h. "
-                    f"Wait for recovery signal."
+            # Check 3: Falling for extended period? Check V-recovery pattern!
+            if price_change_1h < -15:  # Down >15% in 1h - BUT check recovery!
+                # 🔥 V-RECOVERY LOGIC: Catch MADUROIL -17% → 460%!
+                # If recovering from extended dump, this is a BUYING opportunity!
+                price_change_5m = token_data.get('price_change_5m', 0)
+                price_change_1m = token_data.get('price_change_1m', 0)
+                buy_ratio = token_data.get('buy_ratio', 0)
+
+                is_recovering = (
+                    price_change_5m > 10 and  # >10% bounce in 5min
+                    price_change_1m > 3 and   # >3% bounce in 1min
+                    buy_ratio > 0.55          # >55% buying pressure
                 )
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"extended_dump_{price_change_1h:.1f}%_1h",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='momentum'
-                )
-                return False
+
+                if is_recovering:
+                    logger.info(
+                        f"✅ {symbol}: V-RECOVERY! Extended dump {price_change_1h:.1f}% 1h BUT "
+                        f"bouncing {price_change_5m:.1f}% 5m / {price_change_1m:.1f}% 1m "
+                        f"with {buy_ratio:.0%} buy ratio → DIP BUY! 🚀"
+                    )
+                    return True  # Allow entry - this is a bounce play!
+                else:
+                    logger.info(
+                        f"⛔ Skipped {symbol}: Extended dump! Price down {price_change_1h:.1f}% in 1h. "
+                        f"No recovery signal yet (5m: {price_change_5m:.1f}%, 1m: {price_change_1m:.1f}%, "
+                        f"buy: {buy_ratio:.0%})."
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"extended_dump_{price_change_1h:.1f}%_1h_no_recovery",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='momentum'
+                    )
+                    return False
 
             # All momentum checks passed! ✅
             return True
@@ -1088,8 +1133,9 @@ class MLBot2Foundation:
             logger.info(f"Analyzing: {symbol} ({token_address[:8]}...)")
 
             # === STOP LOSS COOLDOWN CHECK ===
-            # Block re-entry on tokens that recently stopped out
-            if self.stop_cooldown.is_on_cooldown(symbol):
+            # Block re-entry on tokens that recently stopped out (UNLESS high volume!)
+            volume_1h = token_data.get('volume_1h', 0)
+            if self.stop_cooldown.is_on_cooldown(symbol, volume_1h):
                 time_remaining = self.stop_cooldown.get_time_remaining(symbol)
                 stop_percent = self.stop_cooldown.get_stop_percent(symbol)
                 logger.info(
@@ -1180,13 +1226,26 @@ class MLBot2Foundation:
                 has_buy_pressure = buy_ratio >= MIN_BUY_RATIO
                 has_liquidity = liquidity_usd >= MIN_LIQUIDITY
 
-                # Active if has good volume OR good txns (not both required!)
-                # AND reasonable buy ratio AND minimum liquidity
-                is_active = (
-                    (has_volume or has_txns) and  # Volume OR txns (flexible!)
-                    has_buy_pressure and
-                    has_liquidity
-                )
+                # 🔧 FIX $0 LIQUIDITY BUG: Volume proves liquidity exists! (API lag)
+                # All top missed opportunities had "$0 liq" but $200k+ volume
+                if liquidity_usd == 0 and volume_1h >= MIN_VOLUME_1H:
+                    logger.info(f"💡 {symbol}: $0 liq but ${volume_1h:,.0f} vol → Override liquidity check!")
+                    has_liquidity = True
+
+                # 🚀 HIGH VOLUME OVERRIDE: Catch TRUMPS 2,536% (893 txns, $32k vol)
+                # If volume OR txns is EXCEPTIONALLY high, relax other requirements
+                is_high_volume = volume_1h >= 50000 or txns_1h >= 800
+                if is_high_volume:
+                    logger.info(f"🔥 {symbol}: HIGH ACTIVITY! Vol=${volume_1h:,.0f}, Txns={txns_1h} → Relaxed filter!")
+                    is_active = True  # Skip all other checks!
+                else:
+                    # Active if has good volume OR good txns (not both required!)
+                    # AND reasonable buy ratio AND minimum liquidity
+                    is_active = (
+                        (has_volume or has_txns) and  # Volume OR txns (flexible!)
+                        has_buy_pressure and
+                        has_liquidity
+                    )
 
                 if not is_active:
                     # Token lacks activity - could be dead/bluechip/slow mover
