@@ -1106,10 +1106,34 @@ class MLBot2Foundation:
                 )
                 return
 
-            # === MOMENTUM CHECK: Don't enter falling knives! ===
-            # Data shows: 134 stops <5min (54%!) = entering dumps! 🚨
-            if not await self.check_momentum(token_address, symbol, token_data):
-                return  # Momentum check already logged rejection
+            # ═══════════════════════════════════════════════════════════════════
+            # 🚀 MOONSHOT DETECTOR - CATCH ROCKETS EARLY! (HIGHEST PRIORITY!)
+            # ═══════════════════════════════════════════════════════════════════
+            # Skip ALL filters (momentum, activity, etc) if token is exploding!
+            # Still do security checks to avoid rugs.
+            # Expected: Catch OilCoal 4,058%, GPU 1,057%, etc!
+            # ═══════════════════════════════════════════════════════════════════
+
+            price_change_5m = token_data.get('price_change_5m', 0)
+            volume_1h = token_data.get('volume_1h', 0)
+
+            is_moonshot = (
+                price_change_5m > 50 and      # >50% in 5min = rocket! 🚀
+                volume_1h > 50000             # $50k+ volume (real action)
+            )
+
+            if is_moonshot:
+                logger.info(
+                    f"🚀🚀🚀 MOONSHOT DETECTED: {symbol}! "
+                    f"Price +{price_change_5m:.1f}% in 5min, Vol ${volume_1h:,.0f}/1h! "
+                    f"Skipping normal filters - priority entry!"
+                )
+                # Skip to security checks! Will handle below after age calc
+            else:
+                # === MOMENTUM CHECK: Don't enter falling knives! ===
+                # Data shows: 134 stops <5min (54%!) = entering dumps! 🚨
+                if not await self.check_momentum(token_address, symbol, token_data):
+                    return  # Momentum check already logged rejection
 
             # ⚡ Calculate token age from pair creation timestamp
             pair_created_at = token_data.get('pair_created_at', 0)
@@ -1128,70 +1152,76 @@ class MLBot2Foundation:
             # Old approach: Block tokens >90 days (missed second leg pumps)
             # New approach: IGNORE age, filter ONLY on activity/liquidity
             # Expected impact: +$800-1,500 (catch active old tokens!)
+            # SKIP if moonshot detected!
             # ═══════════════════════════════════════════════════════════════════
 
-            token_age_hours = token_data.get('token_age_hours', 0.0)
-            volume_1h = token_data.get('volume_1h', 0)
-            txns_1h = token_data.get('txns_1h', 0)
-            liquidity_usd = token_data.get('liquidity_usd', 0)
-            buy_ratio = token_data.get('buy_ratio_1h', 0) or token_data.get('buy_ratio_24h', 0)
+            if not is_moonshot:
+                # Only check activity if NOT a moonshot
+                token_age_hours = token_data.get('token_age_hours', 0.0)
+                volume_1h = token_data.get('volume_1h', 0)
+                txns_1h = token_data.get('txns_1h', 0)
+                liquidity_usd = token_data.get('liquidity_usd', 0)
+                buy_ratio = token_data.get('buy_ratio_1h', 0) or token_data.get('buy_ratio_24h', 0)
 
-            # NO AGE LIMIT! ⚡
-            # Instead: Check if token has REAL activity (not dead/bluechip)
-            # Active token = high volume + transactions + buy pressure + liquidity
+                # NO AGE LIMIT! ⚡
+                # Instead: Check if token has REAL activity (not dead/bluechip)
+                # Active token = high volume + transactions + buy pressure + liquidity
 
-            # Define activity thresholds (LOW VALUES TO TEST - find sweet spot later!)
-            MIN_VOLUME_1H = 30000  # $30k+ volume in 1h (real trading)
-            MIN_TXNS_1H = 75       # 75+ transactions (lowered from 500 to test!)
-            MIN_BUY_RATIO = 0.45   # 45%+ buy ratio (lowered from 60% to test!)
-            MIN_LIQUIDITY = 10000  # $10k+ liquidity (lowered from $50k to test!)
+                # Define activity thresholds (LOW VALUES TO TEST - find sweet spot later!)
+                MIN_VOLUME_1H = 30000  # $30k+ volume in 1h (real trading)
+                MIN_TXNS_1H = 75       # 75+ transactions (lowered from 500 to test!)
+                MIN_BUY_RATIO = 0.45   # 45%+ buy ratio (lowered from 60% to test!)
+                MIN_LIQUIDITY = 10000  # $10k+ liquidity (lowered from $50k to test!)
 
-            # Check if token meets activity requirements
-            # FLEXIBLE LOGIC: Reject ONLY if lacking BOTH volume AND txns
-            has_volume = volume_1h >= MIN_VOLUME_1H
-            has_txns = txns_1h >= MIN_TXNS_1H
-            has_buy_pressure = buy_ratio >= MIN_BUY_RATIO
-            has_liquidity = liquidity_usd >= MIN_LIQUIDITY
+                # Check if token meets activity requirements
+                # FLEXIBLE LOGIC: Reject ONLY if lacking BOTH volume AND txns
+                has_volume = volume_1h >= MIN_VOLUME_1H
+                has_txns = txns_1h >= MIN_TXNS_1H
+                has_buy_pressure = buy_ratio >= MIN_BUY_RATIO
+                has_liquidity = liquidity_usd >= MIN_LIQUIDITY
 
-            # Active if has good volume OR good txns (not both required!)
-            # AND reasonable buy ratio AND minimum liquidity
-            is_active = (
-                (has_volume or has_txns) and  # Volume OR txns (flexible!)
-                has_buy_pressure and
-                has_liquidity
-            )
+                # Active if has good volume OR good txns (not both required!)
+                # AND reasonable buy ratio AND minimum liquidity
+                is_active = (
+                    (has_volume or has_txns) and  # Volume OR txns (flexible!)
+                    has_buy_pressure and
+                    has_liquidity
+                )
 
-            if not is_active:
-                # Token lacks activity - could be dead/bluechip/slow mover
+                if not is_active:
+                    # Token lacks activity - could be dead/bluechip/slow mover
+                    logger.info(
+                        f"⛔ Skipped {symbol}: Insufficient activity! 🚨\n"
+                        f"   Age: {token_age_hours:.0f}h ({token_age_hours/24:.0f}d)\n"
+                        f"   Volume 1h: ${volume_1h:,.0f} (need ${MIN_VOLUME_1H:,.0f}+)\n"
+                        f"   Txns 1h: {txns_1h} (need {MIN_TXNS_1H}+)\n"
+                        f"   Buy ratio: {buy_ratio:.0%} (need {MIN_BUY_RATIO:.0%}+)\n"
+                        f"   Liquidity: ${liquidity_usd:,.0f} (need ${MIN_LIQUIDITY:,.0f}+)\n"
+                        f"   NO AGE LIMIT - but need ACTIVITY to trade!"
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"low_activity_vol${volume_1h:.0f}_txns{txns_1h}_buy{buy_ratio:.0%}",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='activity_filter'
+                    )
+                    return
+
+                # ✅ ACTIVE TOKEN - AGE DOESN'T MATTER!
+                age_str = f"{token_age_hours:.0f}h ({token_age_hours/24:.0f}d)" if token_age_hours > 0 else "Unknown"
                 logger.info(
-                    f"⛔ Skipped {symbol}: Insufficient activity! 🚨\n"
-                    f"   Age: {token_age_hours:.0f}h ({token_age_hours/24:.0f}d)\n"
-                    f"   Volume 1h: ${volume_1h:,.0f} (need ${MIN_VOLUME_1H:,.0f}+)\n"
-                    f"   Txns 1h: {txns_1h} (need {MIN_TXNS_1H}+)\n"
-                    f"   Buy ratio: {buy_ratio:.0%} (need {MIN_BUY_RATIO:.0%}+)\n"
-                    f"   Liquidity: ${liquidity_usd:,.0f} (need ${MIN_LIQUIDITY:,.0f}+)\n"
-                    f"   NO AGE LIMIT - but need ACTIVITY to trade!"
+                    f"✅ {symbol}: ACTIVE token - ready to trade! ⚡\n"
+                    f"   Age: {age_str} (NO age limit!)\n"
+                    f"   Volume 1h: ${volume_1h:,.0f}\n"
+                    f"   Txns 1h: {txns_1h}\n"
+                    f"   Buy ratio: {buy_ratio:.0%}\n"
+                    f"   Liquidity: ${liquidity_usd:,.0f}\n"
+                    f"   Meets ALL activity thresholds - age irrelevant!"
                 )
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"low_activity_vol${volume_1h:.0f}_txns{txns_1h}_buy{buy_ratio:.0%}",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='activity_filter'
-                )
-                return
-
-            # ✅ ACTIVE TOKEN - AGE DOESN'T MATTER!
-            age_str = f"{token_age_hours:.0f}h ({token_age_hours/24:.0f}d)" if token_age_hours > 0 else "Unknown"
-            logger.info(
-                f"✅ {symbol}: ACTIVE token - ready to trade! ⚡\n"
-                f"   Age: {age_str} (NO age limit!)\n"
-                f"   Volume 1h: ${volume_1h:,.0f}\n"
-                f"   Txns 1h: {txns_1h}\n"
-                f"   Buy ratio: {buy_ratio:.0%}\n"
-                f"   Liquidity: ${liquidity_usd:,.0f}\n"
-                f"   Meets ALL activity thresholds - age irrelevant!"
-            )
+            else:
+                # Moonshot - skip activity filter!
+                logger.info(f"🚀 {symbol}: Moonshot - skipping activity filter! Going straight to security checks!")
 
             # ⚡ Fetch holder analysis from Solscan (if available)
             if self.solscan_client:
