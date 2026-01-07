@@ -4,6 +4,7 @@ Allows users to check status, modify settings, and control the bot via Telegram.
 """
 
 import asyncio
+import io
 import os
 from datetime import datetime
 from typing import Optional, Callable
@@ -493,11 +494,14 @@ class TelegramCommandHandler:
                 parse_mode='Markdown'
             )
 
-            # Send CSV file (read into memory first to avoid file handle issues with async)
+            # Send CSV file (use BytesIO for proper Telegram file handling)
             with open(filepath, 'rb') as f:
-                file_data = f.read()
+                file_data = io.BytesIO(f.read())
 
+            # Set filename on BytesIO object
             filename = f"trades_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            file_data.name = filename
+
             await update.message.reply_document(
                 document=file_data,
                 filename=filename,
@@ -559,11 +563,14 @@ class TelegramCommandHandler:
                 parse_mode='Markdown'
             )
 
-            # Send CSV file (read into memory first to avoid file handle issues with async)
+            # Send CSV file (use BytesIO for proper Telegram file handling)
             with open(filepath, 'rb') as f:
-                file_data = f.read()
+                file_data = io.BytesIO(f.read())
 
+            # Set filename on BytesIO object
             filename = f"rejected_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            file_data.name = filename
+
             await update.message.reply_document(
                 document=file_data,
                 filename=filename,
