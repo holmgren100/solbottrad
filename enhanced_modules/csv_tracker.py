@@ -246,6 +246,18 @@ class CSVTracker:
         milestones_hit_set = getattr(position, 'milestones_hit', set())
         initial_quantity = getattr(position, 'initial_quantity', position.quantity)
 
+        # 🚨 BUG FIX: Validate partial profits make sense!
+        # If exit_reason is stop_loss/rug, there should be NO partial profits!
+        if exit_reason in ['stop_loss', 'fast_rug_exit_2min', 'zombie_exit_45min'] or exit_reason.startswith('rug_'):
+            if partial_profit_usd > 0:
+                logger.warning(
+                    f"⚠️ DATA BUG DETECTED: {getattr(position, 'symbol', 'Unknown')} has "
+                    f"partial profits ${partial_profit_usd:.2f} but exited at {exit_reason}! "
+                    f"This is impossible (price must have been losing). Resetting to $0."
+                )
+                partial_profit_usd = 0.0
+                milestones_hit_set = set()
+
         # Calculate total realized P&L (partial profits + final exit)
         total_realized_pnl_usd = partial_profit_usd + final_exit_pnl_usd
 
@@ -256,6 +268,18 @@ class CSVTracker:
         token_price_change_percent = ((exit_price - position.entry_price) / position.entry_price) * 100 if position.entry_price > 0 else 0
         position_pnl_percent = (total_realized_pnl_usd / initial_investment_usd) * 100 if initial_investment_usd > 0 else 0
         pnl_percent = token_price_change_percent  # Keep for backward compatibility
+
+        # 🚨 SANITY CHECK: Detect extreme PnL vs price change mismatch (CoinMaxing bug!)
+        # If token price changed <10% but position PnL is >1000%, data is corrupted!
+        if abs(token_price_change_percent) < 10 and abs(position_pnl_percent) > 1000:
+            logger.error(
+                f"🚨 DATA CORRUPTION DETECTED: {getattr(position, 'symbol', 'Unknown')} "
+                f"price changed {token_price_change_percent:.1f}% but position PnL is {position_pnl_percent:.1f}%! "
+                f"Using token price change as PnL (more reliable)."
+            )
+            # Use token price change since it's based on actual prices (more reliable)
+            position_pnl_percent = token_price_change_percent
+            total_realized_pnl_usd = final_exit_pnl_usd  # Ignore partial profits (corrupted!)
 
         # Calculate remaining quantity percentage
         remaining_quantity_percent = (position.quantity / initial_quantity * 100) if initial_quantity > 0 else 100.0
