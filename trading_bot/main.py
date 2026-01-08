@@ -718,9 +718,10 @@ class MLBot2Foundation:
             # Data: -20% SL saves 73 shake-outs, +52% PnL improvement!
             position_duration_min = (datetime.now() - position.entry_time).total_seconds() / 60
 
-            # PHASE 1: NO-SL WINDOW (First 5 min for initial volatility)
-            # 4th AI Strategy: 5min window then HARD -10% SL kicks in!
-            no_sl_active = position_duration_min < 5.0  # 5min NO-SL window
+            # PHASE 1: NO-SL WINDOW (DISABLED - User Request: Simple hard SL!)
+            # User: "skippa den" - Too much complexity, filters are death!
+            # SIMPLE HARD -12% SL FROM t=0! No delays, no windows!
+            no_sl_active = False  # DISABLED - Simple hard SL always active! ✅
 
             # PHASE 2: BREAK-EVEN TRIGGER (+10% → Move SL to +1%)
             # Makes trade risk-free once profit threshold hit!
@@ -868,15 +869,11 @@ class MLBot2Foundation:
 
             # === PATH 2: LOSERS - MINIMIZE LOSS ===
             else:
-                # ⚡ NO-SL WINDOW: Skip stop loss check during first 3 min!
-                # Prevents shake-outs during initial volatility
-                if no_sl_active:
-                    logger.debug(
-                        f"⏳ {position.symbol}: NO-SL window active "
-                        f"({position_duration_min:.1f}min < 3min). Skipping SL check."
-                    )
-                    # Skip stop loss check, let position develop!
-                    continue
+                # ⚡ NO-SL WINDOW: DISABLED! (User: Keep it simple!)
+                # NO DELAYS - Simple hard -12% SL from t=0!
+                # if no_sl_active:  # DISABLED - Always check SL now!
+                #     logger.debug(f"⏳ {position.symbol}: NO-SL window active")
+                #     continue
 
                 # For losers, check stop loss FIRST (cut losses fast!)
                 if self.position_manager.check_stop_loss(position.token_address):
@@ -1235,10 +1232,10 @@ class MLBot2Foundation:
                 # Instead: Check if token has REAL activity (not dead/bluechip)
                 # Active token = high volume + transactions + buy pressure + liquidity
 
-                # Define activity thresholds (4th AI optimized!)
+                # Define activity thresholds (Jan 3 Golden Era Config!)
                 MIN_VOLUME_1H = 30000  # $30k+ volume in 1h (real trading)
                 MIN_TXNS_1H = 75       # 75+ transactions (lowered from 500 to test!)
-                MIN_BUY_RATIO = 0.45   # 45%+ buy ratio (lowered from 60% to test!)
+                MIN_BUY_RATIO = 0.39   # 39%+ buy ratio (Jan 3 golden era - more permissive!)
                 MIN_LIQUIDITY = 15000  # $15k+ liquidity (avoid slippage, can adjust later!)
 
                 # Check if token meets activity requirements
@@ -1374,45 +1371,25 @@ class MLBot2Foundation:
                 )
                 return
 
-            # CHECK 3: LP LOCK CHECK (4th AI - SOFT CHECK!)
-            # LP should be ≥80% locked/burnt - prevents rug pulls
-            # SOFT: Only block if data EXISTS and is BAD (allow if data missing!)
-            lp_locked_percent = token_data.get('lp_locked_percent', None)
-            lp_burnt_percent = token_data.get('lp_burnt_percent', None)
+            # CHECK 3: LP LOCK CHECK (DISABLED - User: Keep it simple!)
+            # User: "filter är döden" - Blocks too many moonshots!
+            # DEX data often missing/wrong for new tokens!
+            # Keeping only freeze/mint checks (basics!)
+            # lp_locked_percent = token_data.get('lp_locked_percent', None)
+            # lp_burnt_percent = token_data.get('lp_burnt_percent', None)
+            # DISABLED - Let price action and volume do the filtering!
+            logger.debug(f"✅ {symbol}: LP lock check DISABLED (simplicity!)")
 
-            # Calculate total LP protection (locked + burnt)
-            if lp_locked_percent is not None or lp_burnt_percent is not None:
-                total_lp_protection = (lp_locked_percent or 0) + (lp_burnt_percent or 0)
-
-                if total_lp_protection < 80:
-                    logger.info(
-                        f"⚠️ BLOCKED {symbol}: LP not secured! 🚨\n"
-                        f"   LP locked: {lp_locked_percent or 0:.1f}%\n"
-                        f"   LP burnt: {lp_burnt_percent or 0:.1f}%\n"
-                        f"   Total protection: {total_lp_protection:.1f}% (need ≥80%)\n"
-                        f"   Unsecured LP = RUG PULL RISK!"
-                    )
-                    self.rejected_tracker.record_rejection(
-                        token_address=token_address,
-                        rejection_reason=f"lp_unsecured_{total_lp_protection:.1f}%",
-                        token_data=token_data,
-                        symbol=symbol,
-                        rejection_stage='rug_detection_lp'
-                    )
-                    return
-            else:
-                # Data missing - ALLOW (DEX not updated for new tokens)
-                logger.debug(f"💡 {symbol}: LP lock data missing (new token?) - allowing trade")
-
-            # CHECK 4: MINIMUM HOLDERS (NON-NEGOTIABLE!)
-            # Must have 20+ holders - low holders = honeypot/instant rug risk
+            # CHECK 4: MINIMUM HOLDERS (SOFTENED - User: Keep it simple!)
+            # Lowered from 20 to 10 - catch early moonshots!
+            # User: DEX data often wrong for new tokens!
             holder_count = token_data.get('holder_count', 0)
-            if holder_count > 0 and holder_count < 20:
+            if holder_count > 0 and holder_count < 10:  # Lowered from 20 to 10!
                 logger.info(
                     f"⛔ BLOCKED {symbol}: Too few holders! 🚨\n"
-                    f"   Holders: {holder_count} (need 20+ minimum)\n"
+                    f"   Holders: {holder_count} (need 10+ minimum)\n"
                     f"   Low holders = HONEYPOT/INSTANT RUG RISK!\n"
-                    f"   NON-NEGOTIABLE: Must have 20+ holders!"
+                    f"   Softened to 10+ (was 20+) to catch early moonshots!"
                 )
                 self.rejected_tracker.record_rejection(
                     token_address=token_address,
@@ -1423,47 +1400,18 @@ class MLBot2Foundation:
                 )
                 return
 
-            # CHECK 4: TOP 10 HOLDER CONCENTRATION (NON-NEGOTIABLE!)
-            # Top 10 must own <20% total - high concentration = whale dump risk
+            # CHECK 5: TOP HOLDER CONCENTRATION (DISABLED - User: Keep it simple!)
+            # User: "filter är döden" - DEX data often wrong for new tokens!
+            # These checks block early moonshots!
+            # Keeping only freeze/mint + min holders (basics!)
             top10_concentration = token_data.get('top10_concentration', 0)
-            if top10_concentration > 20:
-                logger.info(
-                    f"⛔ BLOCKED {symbol}: Top 10 holders own too much! 🚨\n"
-                    f"   Top 10 concentration: {top10_concentration:.1f}% (max 20%)\n"
-                    f"   High concentration = WHALE DUMP RISK!\n"
-                    f"   NON-NEGOTIABLE: Top 10 must own <20%!"
-                )
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"top10_concentration_{top10_concentration:.1f}%",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='rug_detection_concentration'
-                )
-                return
-
-            # CHECK 5: TOP 1 HOLDER CONCENTRATION (4th AI - SOFT CHECK!)
-            # Top holder should own <10% (excluding burn/LP) - prevents whale dumps
-            # SOFT: Only block if data EXISTS and is BAD (allow if data missing!)
             top1_concentration = token_data.get('top1_concentration', None)
-            if top1_concentration is not None and top1_concentration > 10:
-                logger.info(
-                    f"⛔ BLOCKED {symbol}: Top holder owns too much! 🚨\n"
-                    f"   Top 1 concentration: {top1_concentration:.1f}% (max 10%)\n"
-                    f"   High concentration = WHALE DUMP RISK!\n"
-                    f"   (Note: Excluding burn/LP wallets)"
-                )
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"top1_holder_{top1_concentration:.1f}%",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='rug_detection_top1'
-                )
-                return
-            elif top1_concentration is None:
-                # Data missing - ALLOW (DEX not updated for new tokens)
-                logger.debug(f"💡 {symbol}: Top holder data missing (new token?) - allowing trade")
+            # DISABLED - Let the market and volume filters do the work!
+            # if top10_concentration > 20:
+            #     BLOCKED
+            # if top1_concentration > 10:
+            #     BLOCKED
+            logger.debug(f"✅ {symbol}: Top holder checks DISABLED (simplicity!)")
 
             # ✅ ALL RUG DETECTION CHECKS PASSED!
             holder_str = f"{holder_count}" if holder_count > 0 else "N/A"

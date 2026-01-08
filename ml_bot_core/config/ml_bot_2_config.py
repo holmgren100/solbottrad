@@ -109,7 +109,7 @@ class MLBot2Config:
     # Fast monitoring = fast rug detection
 
     scan_interval: int = 120                       # Scan for new tokens every 2 minutes
-    monitor_interval: int = 60                     # Check positions every 1 minute
+    monitor_interval: int = 15                     # Check positions every 15 seconds (User: Faster detection!)
 
     # ===== PRICE VALIDATION =====
     # Dual-source validation prevents bad data losses
