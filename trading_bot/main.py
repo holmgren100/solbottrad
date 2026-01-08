@@ -148,6 +148,7 @@ class MLBot2Foundation:
 
         # Initialize PriceValidator with API clients
         from trading_bot.api_clients import DexScreenerClient, JupiterClient, SolscanClient
+        from trading_bot.rugcheck_client import RugCheckClient
         dexscreener_client = DexScreenerClient(api_key=config.dexscreener_api_key)
         jupiter_client = JupiterClient()
 
@@ -164,6 +165,14 @@ class MLBot2Foundation:
         else:
             self.solscan_client = None
             logger.warning("  ⚠️  SolscanClient disabled - no API key (holder data unavailable)")
+
+        # Initialize RugCheckClient for security analysis
+        rugcheck_key = getattr(config, 'rugcheck_api_key', None)
+        self.rugcheck_client = RugCheckClient(api_key=rugcheck_key)
+        if rugcheck_key:
+            logger.info("  ✅ RugCheckClient initialized (rug detection enabled - paid tier)")
+        else:
+            logger.info("  ✅ RugCheckClient initialized (rug detection enabled - FREE tier)")
 
         # Initialize RPC client for security checks (mint/freeze authority)
         self.rpc_url = config.solana_rpc_url
@@ -456,11 +465,11 @@ class MLBot2Foundation:
         # Data shows: -20% SL gives +52% PnL improvement! Saves 73 shake-outs!
         # Solution: Age-adapted SL + break-even trigger + no-SL window
 
-        # 🔥 HARD -12% STOP LOSS (5th AI OPTIMAL!)
+        # 🔥 HARD -10% STOP LOSS (4th AI OPTIMAL!)
         # 4th AI: -10% SL = +640% PnL vs +214% (3X better)
-        # 5th AI: -12% optimal (if <-12% in 6min, almost always ends -50%!)
-        # Why: Winners don't dip <-5%, if >-12% then <5% chance recover
-        base_stop_percent = 12.0  # HARD -12% (5th AI consensus!)
+        # User: Test -10% for tighter stops, higher quality
+        # Why: Winners don't dip <-5%, tighter SL = less rug damage
+        base_stop_percent = 10.0  # HARD -10% (4th AI + User approved!)
 
         stop_loss = self.risk_assessor.calculate_stop_loss(
             entry_price,
@@ -468,8 +477,8 @@ class MLBot2Foundation:
         )
 
         logger.info(
-            f"🔥 HARD -12% SL for {symbol} @ ${stop_loss:.8f} "
-            f"(First 5min NO-SL, then HARD -12%!)"
+            f"🔥 HARD -10% SL for {symbol} @ ${stop_loss:.8f} "
+            f"(4th AI optimal: tighter stops, less rug damage!)"
         )
 
         take_profit = self.risk_assessor.calculate_take_profit(
@@ -1232,10 +1241,10 @@ class MLBot2Foundation:
                 # Instead: Check if token has REAL activity (not dead/bluechip)
                 # Active token = high volume + transactions + buy pressure + liquidity
 
-                # Define activity thresholds (Jan 3 Golden Era Config!)
+                # Define activity thresholds (Testing 45% buy ratio for quality!)
                 MIN_VOLUME_1H = 30000  # $30k+ volume in 1h (real trading)
                 MIN_TXNS_1H = 75       # 75+ transactions (lowered from 500 to test!)
-                MIN_BUY_RATIO = 0.39   # 39%+ buy ratio (Jan 3 golden era - more permissive!)
+                MIN_BUY_RATIO = 0.45   # 45%+ buy ratio (testing higher quality filter!)
                 MIN_LIQUIDITY = 15000  # $15k+ liquidity (avoid slippage, can adjust later!)
 
                 # Check if token meets activity requirements

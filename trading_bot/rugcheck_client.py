@@ -1,0 +1,311 @@
+"""
+RugCheck API client for Solana token security analysis.
+Official API docs: https://rugcheck.xyz/
+"""
+
+import asyncio
+import aiohttp
+import logging
+from typing import Dict, Optional
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+class RugCheckClient:
+    """Client for RugCheck API to assess token security risks."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        """
+        Initialize RugCheck client.
+
+        Args:
+            api_key: RugCheck API key (optional - for authenticated endpoints)
+        """
+        self.api_key = api_key
+        self.base_url = "https://api.rugcheck.xyz/v1"  # Correct base URL with /v1
+        self.session: Optional[aiohttp.ClientSession] = None
+        # Enable client even without key (some endpoints may be public)
+        self._enabled = True
+
+    async def _ensure_session(self):
+        """Ensure aiohttp session exists."""
+        if self.session is None or self.session.closed:
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            # Only add API key if provided (some endpoints may be public)
+            if self._enabled and self.api_key:
+                headers['X-API-KEY'] = self.api_key
+            self.session = aiohttp.ClientSession(headers=headers)
+
+    async def close(self):
+        """Close the client session."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+
+    async def get_token_report(self, token_address: str) -> Optional[Dict]:
+        """
+        Get detailed security report for a token.
+        Official endpoint: GET /v1/tokens/{id}/report
+
+        Args:
+            token_address: Token mint address
+
+        Returns:
+            Token report dictionary or None if failed
+        """
+        await self._ensure_session()
+
+        try:
+            # Official Swagger endpoint: /v1/tokens/{id}/report
+            url = f"{self.base_url}/tokens/{token_address}/report"
+
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    logger.debug(f"Retrieved RugCheck report for {token_address[:8]}...")
+                    return data
+                elif response.status == 404:
+                    logger.debug(f"Token {token_address[:8]}... not found in RugCheck")
+                    return None
+                elif response.status == 429:
+                    logger.warning("RugCheck API rate limit reached")
+                    return None
+                else:
+                    logger.error(f"RugCheck API error: {response.status}")
+                    return None
+
+        except asyncio.TimeoutError:
+            logger.warning(f"RugCheck API timeout for {token_address[:8]}...")
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching RugCheck report: {e}")
+            return None
+
+    async def get_token_summary(self, token_address: str) -> Optional[Dict]:
+        """
+        Get summary security report for a token.
+        Note: The scan endpoint returns complete data, so this is an alias.
+
+        Args:
+            token_address: Token mint address
+
+        Returns:
+            Token summary dictionary or None if failed
+        """
+        # The /tokens/scan endpoint returns all data, no separate summary endpoint
+        # Just use the main scan endpoint
+        return await self.get_token_report(token_address)
+
+    def analyze_risk(self, report: Dict) -> Dict:
+        """
+        Analyze risk level from RugCheck report.
+
+        Args:
+            report: RugCheck report data
+
+        Returns:
+            Risk analysis dictionary
+        """
+        if not report:
+            return {
+                'risk_level': 'unknown',
+                'risk_score': 0.0,
+                'is_safe': False,
+                'risks': [],
+                'warnings': []
+            }
+
+        # Extract risk data from report
+        risks = report.get('risks', [])
+        score = report.get('score', 0)
+
+        # Additional risk indicators
+        token_meta = report.get('tokenMeta', {})
+        markets = report.get('markets', [])
+        top_holders = report.get('topHolders', [])
+
+        warnings = []
+        risk_factors = []
+
+        # Analyze RugCheck score (0-100, higher is safer)
+        if score < 30:
+            risk_level = 'critical'
+            risk_factors.append('Very low RugCheck score')
+        elif score < 50:
+            risk_level = 'high'
+            risk_factors.append('Low RugCheck score')
+        elif score < 70:
+            risk_level = 'medium'
+        else:
+            risk_level = 'low'
+
+        # Check for specific risk flags
+        for risk in risks:
+            risk_name = risk.get('name', '')
+            risk_level_flag = risk.get('level', '')
+            risk_description = risk.get('description', '')
+
+            if risk_level_flag in ['danger', 'critical']:
+                risk_factors.append(f"CRITICAL: {risk_name}")
+            elif risk_level_flag == 'warning':
+                warnings.append(f"WARNING: {risk_name}")
+
+        # Check token metadata
+        if token_meta:
+            if not token_meta.get('updateAuthority'):
+                warnings.append("No update authority (immutable metadata)")
+
+            if token_meta.get('freezeAuthority'):
+                risk_factors.append("Freeze authority exists (can freeze tokens)")
+
+        # Check liquidity and holder concentration
+        if markets:
+            total_liquidity = sum(m.get('liquidity', {}).get('usd', 0) for m in markets)
+            if total_liquidity < 10000:
+                warnings.append(f"Low liquidity (${total_liquidity:,.0f})")
+
+        if top_holders:
+            # Check if top holder owns > 50% (excluding known exchanges)
+            top_holder = top_holders[0] if top_holders else {}
+            top_holder_pct = top_holder.get('pct', 0) * 100
+            if top_holder_pct > 50:
+                risk_factors.append(f"Top holder owns {top_holder_pct:.1f}% of supply")
+
+        # Determine if safe to trade
+        is_safe = (
+            risk_level in ['low', 'medium'] and
+            len(risk_factors) == 0 and
+            score >= 50
+        )
+
+        return {
+            'risk_level': risk_level,
+            'risk_score': score,
+            'is_safe': is_safe,
+            'risks': risk_factors,
+            'warnings': warnings,
+            'raw_report': report
+        }
+
+    async def quick_check(self, token_address: str) -> Dict:
+        """
+        Quick risk check for a token (optimized for speed).
+
+        Args:
+            token_address: Token mint address
+
+        Returns:
+            Quick risk assessment
+        """
+        # Use summary endpoint for speed
+        summary = await self.get_token_summary(token_address)
+
+        if not summary:
+            # If RugCheck not available, return neutral result
+            return {
+                'token_address': token_address,
+                'risk_level': 'unknown',
+                'risk_score': 50.0,  # Neutral score
+                'is_safe': True,  # Don't block if service unavailable
+                'risks': [],
+                'warnings': ['RugCheck data unavailable'],
+                'checked_at': datetime.now().isoformat()
+            }
+
+        risk_analysis = self.analyze_risk(summary)
+
+        return {
+            'token_address': token_address,
+            'risk_level': risk_analysis['risk_level'],
+            'risk_score': risk_analysis['risk_score'],
+            'is_safe': risk_analysis['is_safe'],
+            'risks': risk_analysis['risks'],
+            'warnings': risk_analysis['warnings'],
+            'checked_at': datetime.now().isoformat()
+        }
+
+    async def get_trending_tokens(self) -> list:
+        """
+        Get trending tokens from RugCheck.
+        Official endpoint: GET /v1/stats/trending (assumed)
+
+        Returns:
+            List of trending token data
+        """
+        if not self._enabled:
+            return []
+
+        await self._ensure_session()
+
+        try:
+            url = f"{self.base_url}/stats/trending"
+
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    tokens = data if isinstance(data, list) else data.get('tokens', [])
+                    logger.debug(f"Retrieved {len(tokens)} trending tokens from RugCheck")
+                    return tokens
+                else:
+                    logger.debug(f"RugCheck trending API error: {response.status}")
+                    return []
+
+        except Exception as e:
+            logger.debug(f"Error fetching trending tokens: {e}")
+            return []
+
+    async def get_new_tokens(self) -> list:
+        """
+        Get newly detected tokens from RugCheck.
+        Official endpoint: GET /v1/stats/new_tokens
+
+        Returns:
+            List of new token data
+        """
+        if not self._enabled:
+            return []
+
+        await self._ensure_session()
+
+        try:
+            # Official Swagger endpoint: /v1/stats/new_tokens
+            url = f"{self.base_url}/stats/new_tokens"
+
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    tokens = data if isinstance(data, list) else data.get('tokens', [])
+                    logger.debug(f"Retrieved {len(tokens)} new tokens from RugCheck")
+                    return tokens
+                else:
+                    logger.debug(f"RugCheck new tokens API error: {response.status}")
+                    return []
+
+        except Exception as e:
+            logger.debug(f"Error fetching new tokens: {e}")
+            return []
+
+    async def health_check(self) -> bool:
+        """
+        Check if RugCheck API is accessible.
+
+        Returns:
+            True if healthy, False otherwise
+        """
+        if not self._enabled:
+            return True
+
+        await self._ensure_session()
+
+        try:
+            # Try to get new tokens as health check
+            url = f"{self.base_url}/stats/new_tokens"
+
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                return response.status in [200, 429]  # 429 means rate limited but API is working
+
+        except Exception as e:
+            logger.error(f"RugCheck health check failed: {e}")
+            return False
