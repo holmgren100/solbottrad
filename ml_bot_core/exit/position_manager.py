@@ -28,7 +28,7 @@ class Position:
     unrealized_pnl_percent: float = 0.0
     # Trailing stop loss fields
     use_trailing_stop: bool = False  # Start disabled, activate at 15% gain (ML Bot style!)
-    trailing_stop_percent: float = 15.0  # Trail by 15% from peak
+    trailing_stop_percent: float = 8.0   # Trail by 8% from peak (4th AI optimized!)
     highest_price: float = 0.0  # Track highest price reached
     trailing_stop_price: float = 0.0  # Dynamic trailing stop price
     symbol: str = ''  # Token symbol for display
@@ -364,7 +364,7 @@ class PositionManager:
         stop_loss: float,
         take_profit: float,
         use_trailing_stop: bool = False,  # Start disabled, activate at 15% gain!
-        trailing_stop_percent: float = 15.0,
+        trailing_stop_percent: float = 8.0,  # 4th AI optimized!
         entry_liquidity: float = 0.0,
         # ⚡ CRITICAL ANALYSIS FIELDS
         volume_24h: float = 0.0,
@@ -987,7 +987,7 @@ class PositionManager:
                     stop_loss=pos_dict['stop_loss'],
                     take_profit=pos_dict['take_profit'],
                     use_trailing_stop=pos_dict.get('use_trailing_stop', True),
-                    trailing_stop_percent=pos_dict.get('trailing_stop_percent', 15.0),
+                    trailing_stop_percent=pos_dict.get('trailing_stop_percent', 8.0),
                     highest_price=pos_dict.get('highest_price', pos_dict['entry_price']),
                     trailing_stop_price=pos_dict.get('trailing_stop_price', 0.0),
                     symbol=pos_dict.get('symbol', ''),

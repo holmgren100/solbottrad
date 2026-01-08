@@ -75,7 +75,7 @@ class MLBot2Config:
     # This lets winners run to 100%+ instead of capping at 20%
 
     use_trailing_stop: bool = True
-    trailing_stop_percent: float = 15.0            # 15% below peak price
+    trailing_stop_percent: float = 8.0             # 8% below peak (4th AI optimized!)
 
     # ===== PARTIAL PROFIT TAKING =====
     # ML Bot 2 DISABLES THIS - uses trailing stops instead!
