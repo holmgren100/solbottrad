@@ -456,10 +456,11 @@ class MLBot2Foundation:
         # Data shows: -20% SL gives +52% PnL improvement! Saves 73 shake-outs!
         # Solution: Age-adapted SL + break-even trigger + no-SL window
 
-        # 🔥 HARD -10% STOP LOSS (4th AI PROVEN: +640% PnL vs +214%!)
-        # Simulation shows -10% SL = 3X BETTER than wider stops!
-        # Why: Winners don't dip <-5%, if >-10% then <5% chance recover to +100%
-        base_stop_percent = 10.0  # HARD -10% (NO exceptions!)
+        # 🔥 HARD -12% STOP LOSS (5th AI OPTIMAL!)
+        # 4th AI: -10% SL = +640% PnL vs +214% (3X better)
+        # 5th AI: -12% optimal (if <-12% in 6min, almost always ends -50%!)
+        # Why: Winners don't dip <-5%, if >-12% then <5% chance recover
+        base_stop_percent = 12.0  # HARD -12% (5th AI consensus!)
 
         stop_loss = self.risk_assessor.calculate_stop_loss(
             entry_price,
@@ -467,8 +468,8 @@ class MLBot2Foundation:
         )
 
         logger.info(
-            f"🔥 HARD -10% SL for {symbol} @ ${stop_loss:.8f} "
-            f"(First 5min NO-SL, then HARD -10%!)"
+            f"🔥 HARD -12% SL for {symbol} @ ${stop_loss:.8f} "
+            f"(First 5min NO-SL, then HARD -12%!)"
         )
 
         take_profit = self.risk_assessor.calculate_take_profit(
@@ -732,9 +733,9 @@ class MLBot2Foundation:
                 )
 
             # === FAST RUG EXIT: INSTANT DUMP DETECTION (HIGHEST PRIORITY!) ===
-            # 4th AI: Exit rugs FAST before they go -50-77%!
-            # If <2min AND <-10%, likely RUG/HONEYPOT → Exit NOW!
-            if position_duration_min < 2.0 and position.unrealized_pnl_percent < -10.0:
+            # 5th AI: Exit rugs FAST before they go -50-77%!
+            # If <2min AND <-12%, likely RUG/HONEYPOT → Exit NOW!
+            if position_duration_min < 2.0 and position.unrealized_pnl_percent < -12.0:
                 logger.warning(
                     f"🚨 FAST RUG EXIT: {position.symbol} down {position.unrealized_pnl_percent:.1f}% in <2min! "
                     f"Likely RUG/HONEYPOT → INSTANT SELL!"
@@ -1033,26 +1034,13 @@ class MLBot2Foundation:
             txns_h1_sells = token_data.get('txns_h1_sells', 0)
             total_txns = txns_h1_buys + txns_h1_sells
 
-            # === ENTRY MOMENTUM FILTER (4th AI STRATEGY - RELAXED!) ===
-            # Only block CLEAR dips (>-5%), allow flat/rising prices
-            # Note: 0.0% often = API lag, not actual dip!
-            price_change_1m = token_data.get('price_change_1m', 0)
-
-            if price_change_1m < -5.0:  # Only block if CLEARLY falling >-5%
-                logger.info(
-                    f"⛔ Skipped {symbol}: Price falling 1min ({price_change_1m:.1f}%). "
-                    f"BUY STRENGTH not big dips! 🚀"
-                )
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"momentum_dip_1m_{price_change_1m:.1f}%",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='momentum'
-                )
-                return False
-
-            logger.debug(f"✅ {symbol}: 1min price OK ({price_change_1m:+.1f}%) - allowing! 🔥")
+            # === 5th AI INSIGHT: REMOVED no_momentum_1m filter! ===
+            # Why removed: Tokens can REST 60s then EXPLODE 1000%+!
+            # Missed: OILDUMP 6,328%, Bluefin 1,586%, BLUFSH 4,377%
+            # Solana moves in BURSTS, not continuous!
+            # 0.0% = Normal rest before explosion, NOT red flag!
+            #
+            # Keeping only 5min momentum check below (enough!)
 
             # Check 1: Price falling in last 5 min? (RELAXED - testing low thresholds!)
             if price_change_5m < -20:  # Down >20% = extreme dump! (lowered from -10%)
