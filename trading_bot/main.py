@@ -1033,25 +1033,26 @@ class MLBot2Foundation:
             txns_h1_sells = token_data.get('txns_h1_sells', 0)
             total_txns = txns_h1_buys + txns_h1_sells
 
-            # === ENTRY MOMENTUM FILTER (4th AI STRATEGY!) ===
-            # Only buy STRENGTH, not dips! Dip-buys often continue down.
+            # === ENTRY MOMENTUM FILTER (4th AI STRATEGY - RELAXED!) ===
+            # Only block CLEAR dips (>-5%), allow flat/rising prices
+            # Note: 0.0% often = API lag, not actual dip!
             price_change_1m = token_data.get('price_change_1m', 0)
 
-            if price_change_1m <= 0:
+            if price_change_1m < -5.0:  # Only block if CLEARLY falling >-5%
                 logger.info(
-                    f"⛔ Skipped {symbol}: Price dipping 1min ({price_change_1m:.1f}%). "
-                    f"BUY STRENGTH not DIP! 🚀"
+                    f"⛔ Skipped {symbol}: Price falling 1min ({price_change_1m:.1f}%). "
+                    f"BUY STRENGTH not big dips! 🚀"
                 )
                 self.rejected_tracker.record_rejection(
                     token_address=token_address,
-                    rejection_reason=f"no_momentum_1m_{price_change_1m:.1f}%",
+                    rejection_reason=f"momentum_dip_1m_{price_change_1m:.1f}%",
                     token_data=token_data,
                     symbol=symbol,
                     rejection_stage='momentum'
                 )
                 return False
 
-            logger.debug(f"✅ {symbol}: Price rising 1min (+{price_change_1m:.1f}%) - MOMENTUM! 🔥")
+            logger.debug(f"✅ {symbol}: 1min price OK ({price_change_1m:+.1f}%) - allowing! 🔥")
 
             # Check 1: Price falling in last 5 min? (RELAXED - testing low thresholds!)
             if price_change_5m < -20:  # Down >20% = extreme dump! (lowered from -10%)
