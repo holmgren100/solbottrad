@@ -1220,12 +1220,53 @@ class MLBot2Foundation:
                 token_data['token_age_hours'] = 0.0
 
             # ═══════════════════════════════════════════════════════════════════
-            # 🔥 ACTIVITY-BASED FILTER - PHASE 1 (NO AGE LIMITS!)
+            # 🚨 EARLY BLUECHIP FILTERS - Save API calls!
             # ═══════════════════════════════════════════════════════════════════
-            # Data shows: Age filter missed JASPER 25,698% (385 days old but VERY active!)
-            # Old approach: Block tokens >90 days (missed second leg pumps)
-            # New approach: IGNORE age, filter ONLY on activity/liquidity
-            # Expected impact: +$800-1,500 (catch active old tokens!)
+            # Skip established tokens BEFORE expensive security checks
+            # ═══════════════════════════════════════════════════════════════════
+
+            if not is_moonshot:
+                token_age_hours = token_data.get('token_age_hours', 0.0)
+                liquidity_usd = token_data.get('liquidity_usd', 0)
+
+                # Filter #1: MAX AGE (Skip bluechips like POPCAT 759 days old!)
+                MAX_TOKEN_AGE_DAYS = 240  # 240 days = 8 months max
+                if token_age_hours > 0 and token_age_hours > (MAX_TOKEN_AGE_DAYS * 24):
+                    token_age_days = token_age_hours / 24
+                    logger.info(
+                        f"⛔ Skipped {symbol}: Too old {token_age_days:.0f} days (max {MAX_TOKEN_AGE_DAYS}d). "
+                        f"Bluechip/established token - not a new opportunity!"
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"bluechip_age_{token_age_days:.0f}d",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='bluechip_age_filter'
+                    )
+                    return
+
+                # Filter #2: MAX LIQUIDITY (Skip established tokens like Fartcoin $13M liq!)
+                MAX_LIQUIDITY = 2_000_000  # $2M max liquidity
+                if liquidity_usd > MAX_LIQUIDITY:
+                    logger.info(
+                        f"⛔ Skipped {symbol}: Too high liquidity ${liquidity_usd:,.0f} (max ${MAX_LIQUIDITY:,.0f}). "
+                        f"Established token - not a new opportunity!"
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"bluechip_liq_${liquidity_usd:.0f}",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='bluechip_liquidity_filter'
+                    )
+                    return
+
+            # ═══════════════════════════════════════════════════════════════════
+            # 🔥 ACTIVITY-BASED FILTER - PHASE 1
+            # ═══════════════════════════════════════════════════════════════════
+            # After bluechip filters, check if token has REAL activity
+            # Active token = high volume + transactions + buy pressure + liquidity
             # SKIP if moonshot detected!
             # ═══════════════════════════════════════════════════════════════════
 
@@ -1481,7 +1522,7 @@ class MLBot2Foundation:
             # Filter #3: Liquidity Range (Sweet Spot)
             liquidity_usd = token_data.get('liquidity_usd', 0)
             MIN_LIQUIDITY = 15_000  # 4th AI optimized: avoid slippage death!
-            MAX_LIQUIDITY = 3_000_000  # Maximum $3M (still agile, can pump fast)
+            # MAX_LIQUIDITY check moved to early bluechip filter (line ~1245)
 
             if liquidity_usd < MIN_LIQUIDITY:
                 # ⚡ EXCEPTION: New launches with $0 liquidity BUT strong activity
@@ -1547,20 +1588,8 @@ class MLBot2Foundation:
                     )
                     return
 
-            if liquidity_usd > MAX_LIQUIDITY:
-                logger.info(
-                    f"⛔ Skipped {symbol}: Too high liquidity ${liquidity_usd:,.0f} (max ${MAX_LIQUIDITY:,.0f}). "
-                    f"This is an established token, not a new opportunity."
-                )
-                # Track rejection for analysis
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"high_liquidity_${liquidity_usd:,.0f}",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='screening'
-                )
-                return
+            # MAX_LIQUIDITY check removed - now handled by early bluechip filter (line ~1245)
+            # This saves API calls by skipping established tokens BEFORE expensive checks
 
             # Filter #4: MAX Volume (DISABLED - Data shows high volume = runners!)
             # Analysis: 59 rejected high volume trades had +4,038% avg gain! 🔥
