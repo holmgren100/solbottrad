@@ -1351,7 +1351,7 @@ class MLBot2Foundation:
 
                     # Re-fetch token data
                     try:
-                        token_data_retry = await self.dex_client.get_token_details(token_address)
+                        token_data_retry = await self.scanner.dexscreener.get_token_details(token_address)
                         liquidity_usd_retry = token_data_retry.get('liquidity', {}).get('usd', 0)
 
                         if liquidity_usd_retry > 0:

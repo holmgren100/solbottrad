@@ -406,7 +406,11 @@ class PositionManager:
         token_age_hours: float = 0.0,
         price_change_5m: float = 0.0,      # For timing analysis
         price_change_1h: float = 0.0,      # For timing analysis
-        symbol: str = ''
+        symbol: str = '',
+        # 🔥 Entry filter tracking (Gemini optimizations)
+        entry_filter_reason: str = '',
+        liquidity_was_zero: bool = False,
+        liquidity_retry_succeeded: bool = False
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -478,6 +482,10 @@ class PositionManager:
             entry_price_change_5m=price_change_5m,  # Entry momentum tracking
             entry_price_change_1h=price_change_1h,  # Entry momentum tracking
             peak_price=entry_price,  # Initialize peak with entry
+            # 🔥 Entry filter tracking (Gemini optimizations)
+            entry_filter_reason=entry_filter_reason,
+            liquidity_was_zero=liquidity_was_zero,
+            liquidity_retry_succeeded=liquidity_retry_succeeded,
         )
 
         self.open_positions[token_address] = position
