@@ -549,6 +549,12 @@ class CSVTracker:
             'Jupiter Organic Score',
             'Data Provider', 'Discovery Source',
             'Price Frozen', 'Failed Updates Count',
+            # RugCheck Security Analysis
+            'RugCheck Checked', 'RugCheck Risk Score', 'RugCheck Risk Level',
+            'RugCheck Is Safe', 'RugCheck Risks Count',
+            # Jito/Jupiter Execution Analysis
+            'Jito Bundle Used', 'Jito Tip (lamports)', 'Jito Bundle ID',
+            'Swap Slippage (%)', 'Swap Route', 'Swap Price Impact (%)',
         ]
 
         # Write CSV
