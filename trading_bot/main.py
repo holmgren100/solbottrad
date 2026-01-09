@@ -1049,6 +1049,19 @@ class MLBot2Foundation:
             #
             # Keeping only 5min momentum check below (enough!)
 
+            # 🔥 AGE VOLATILITY BUFFER (Gemini: Maruśka +801% fix!)
+            # Mature tokens (>2h old) can dip without being rugs - it's natural volatility
+            # Gemini: "Token >2h old doesn't rug via 20% dip"
+            token_age_hours = token_data.get('token_age_hours', 0)
+            is_mature_token = token_age_hours >= 2.0
+
+            if is_mature_token and price_change_5m < -15:
+                logger.info(
+                    f"✅ {symbol}: -{abs(price_change_5m):.1f}% dip but token is {token_age_hours:.1f}h old "
+                    f"(mature) → Natural volatility, not a rug! Allowing entry."
+                )
+                return True  # Skip falling_knife checks for mature tokens
+
             # Check 1: Price falling in last 5 min? (RELAXED - testing low thresholds!)
             if price_change_5m < -20:  # Down >20% = extreme dump! (lowered from -10%)
                 logger.info(
@@ -1112,18 +1125,31 @@ class MLBot2Foundation:
                 # Gemini insight: Tokens dump to clear weak hands, then 10X!
                 price_change_5m = token_data.get('price_change_5m', 0)
                 volume_1h = token_data.get('volume_1h', 0)
+                buy_ratio = token_data.get('buy_ratio_1h', 0) or token_data.get('buy_ratio_24h', 0)
 
-                is_recovering = (
+                # Two recovery signals (user feedback: buy_ratio = extra indicator!)
+                is_recovering_bounce = (
                     price_change_5m > 15 and  # >15% bounce in 5min (stronger recovery!)
                     volume_1h > 50000         # >$50k volume (proves real interest!)
                 )
 
-                if is_recovering:
+                is_recovering_accumulation = (
+                    buy_ratio > 0.65 and      # >65% buy ratio (strong accumulation!)
+                    volume_1h > 30000         # >$30k volume (proves interest!)
+                )
+
+                if is_recovering_bounce:
                     logger.info(
-                        f"✅ {symbol}: V-RECOVERY (CONSERVATIVE)! Extended dump {price_change_1h:.1f}% 1h BUT "
+                        f"✅ {symbol}: V-RECOVERY (BOUNCE)! Extended dump {price_change_1h:.1f}% 1h BUT "
                         f"strong bounce {price_change_5m:.1f}% 5m with ${volume_1h:,.0f} volume → DIP BUY! 🚀"
                     )
                     return True  # Allow entry - this is a high-confidence bounce!
+                elif is_recovering_accumulation:
+                    logger.info(
+                        f"✅ {symbol}: V-RECOVERY (ACCUMULATION)! Extended dump {price_change_1h:.1f}% 1h BUT "
+                        f"{buy_ratio:.0%} buy ratio with ${volume_1h:,.0f} volume → Buyers stepping in! 🚀"
+                    )
+                    return True  # Allow entry - strong buying pressure!
                 else:
                     logger.info(
                         f"⛔ Skipped {symbol}: Extended dump! Price down {price_change_1h:.1f}% in 1h. "
@@ -1283,7 +1309,7 @@ class MLBot2Foundation:
                 # Define activity thresholds (Optimized for quality + volume balance!)
                 MIN_VOLUME_1H = 30000  # $30k+ volume in 1h (real trading)
                 MIN_TXNS_1H = 60       # 60+ transactions (balanced for activity!)
-                MIN_BUY_RATIO = 0.42   # 42%+ buy ratio (quality filter!)
+                MIN_BUY_RATIO = 0.37   # 37%+ buy ratio (Gemini: more permissive!)
                 MIN_LIQUIDITY = 10000  # $10k+ liquidity (more permissive!)
 
                 # Check if token meets activity requirements
@@ -1293,11 +1319,37 @@ class MLBot2Foundation:
                 has_buy_pressure = buy_ratio >= MIN_BUY_RATIO
                 has_liquidity = liquidity_usd >= MIN_LIQUIDITY
 
-                # 🔧 FIX $0 LIQUIDITY BUG: Volume proves liquidity exists! (API lag)
-                # All top missed opportunities had "$0 liq" but $200k+ volume
-                if liquidity_usd == 0 and volume_1h >= MIN_VOLUME_1H:
-                    logger.info(f"💡 {symbol}: $0 liq but ${volume_1h:,.0f} vol → Override liquidity check!")
-                    has_liquidity = True
+                # 🔧 FIX $0 LIQUIDITY BUG: Solana RPC lag (PPEMRS +3,167% fix!)
+                # Gemini: "Retry in 2s instead of instant reject"
+                if liquidity_usd == 0 and volume_1h >= 10000:
+                    logger.info(
+                        f"⏳ {symbol}: $0 liq but ${volume_1h:,.0f} vol → "
+                        f"Retry in 2s (Solana RPC lag)..."
+                    )
+
+                    await asyncio.sleep(2)  # Wait for RPC to update
+
+                    # Re-fetch token data
+                    try:
+                        token_data_retry = await self.dex_client.get_token_details(token_address)
+                        liquidity_usd_retry = token_data_retry.get('liquidity', {}).get('usd', 0)
+
+                        if liquidity_usd_retry > 0:
+                            logger.info(f"✅ {symbol}: Liq updated to ${liquidity_usd_retry:,.0f} after retry!")
+                            liquidity_usd = liquidity_usd_retry
+                            token_data['liquidity_usd'] = liquidity_usd_retry
+                            has_liquidity = True
+                        else:
+                            # Still $0 after retry - but high vol proves it exists
+                            logger.warning(
+                                f"⚠️ {symbol}: Still $0 liq after retry, "
+                                f"but ${volume_1h:,.0f} vol proves it exists → Override!"
+                            )
+                            has_liquidity = True
+                    except Exception as e:
+                        logger.error(f"Error retrying liq for {symbol}: {e}")
+                        # Fallback to volume override
+                        has_liquidity = True if volume_1h >= MIN_VOLUME_1H else False
 
                 # 💎 HIGH-LIQUIDITY EXCEPTION: BOB fix (Popcat-style established tokens)
                 # BOB had: $15k vol, $5.6M liq → rejected for "low activity"
@@ -1323,6 +1375,20 @@ class MLBot2Foundation:
                     # Always require buy pressure (quality filter)
                     activity_score = sum([has_volume, has_txns, has_liquidity])
                     is_active = activity_score >= 2 and has_buy_pressure
+
+                # 🔥 VOL/LIQ RATIO OVERRIDE (Gemini Golden Zone!)
+                # GOOD +1,505%: Ratio 1.90 → missad för "low activity"
+                # UNKNOWN +2,691%: Ratio hög → missad för "low activity"
+                # Gemini: "Sweet spot 0.5-3.0, over 3.0 = pump & dump"
+                if not is_active and liquidity_usd > 0:
+                    vol_liq_ratio = volume_1h / liquidity_usd
+
+                    if 0.5 <= vol_liq_ratio <= 3.0 and liquidity_usd >= 10000:
+                        logger.info(
+                            f"🔥 {symbol}: Vol/Liq RATIO {vol_liq_ratio:.2f} in GOLDEN ZONE [0.5-3.0]! "
+                            f"Vol ${volume_1h:,.0f} / Liq ${liquidity_usd:,.0f} → Override activity filter!"
+                        )
+                        is_active = True  # Override low_activity rejection
 
                 if not is_active:
                     # Token lacks activity - could be dead/bluechip/slow mover
