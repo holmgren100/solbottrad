@@ -46,13 +46,14 @@ class TelegramNotifier:
         self.chat_id = chat_id
         self._enabled = True
 
-    async def send_message(self, message: str, parse_mode: Optional[str] = 'Markdown') -> bool:
+    async def send_message(self, message: str, parse_mode: Optional[str] = None) -> bool:
         """
         Send a message via Telegram.
 
         Args:
             message: Message text to send
-            parse_mode: Parse mode for formatting (Markdown or HTML)
+            parse_mode: Parse mode for formatting (None, Markdown, or HTML)
+                       Default None to avoid markdown parsing errors
 
         Returns:
             True if successful, False otherwise
@@ -100,10 +101,8 @@ class TelegramNotifier:
         }
 
         emoji = emoji_map.get(level.upper(), '🟢')
-        # Escape special markdown characters in title and message to prevent parsing errors
-        safe_title = escape_markdown(title)
-        safe_message = escape_markdown(message)
-        formatted_message = f"{emoji} *{safe_title}*\n\n{safe_message}"
+        # No escaping needed with parse_mode=None
+        formatted_message = f"{emoji} {title}\n\n{message}"
 
         return await self.send_message(formatted_message)
 
@@ -157,18 +156,18 @@ class TelegramNotifier:
         """
         emoji = '✅' if status == 'SUCCESS' else '❌'
         message = f"""
-{emoji} *Trade {action}: {status}*
+{emoji} Trade {action}: {status}
 
-*Token:* `{token_address[:8]}...{token_address[-8:]}`
-*Amount:* ${amount:.2f}
-*Price:* ${price:.8f}
+Token: {token_address[:8]}...{token_address[-8:]}
+Amount: ${amount:.2f}
+Price: ${price:.8f}
 """
         return await self.send_message(message.strip())
 
     async def send_startup_message(self) -> bool:
         """Send a startup notification."""
         message = """
-🤖 *Trading Bot Started*
+🤖 Trading Bot Started
 
 The Solana trading bot is now running and monitoring markets.
 """
@@ -177,7 +176,7 @@ The Solana trading bot is now running and monitoring markets.
     async def send_shutdown_message(self) -> bool:
         """Send a shutdown notification."""
         message = """
-🛑 *Trading Bot Stopped*
+🛑 Trading Bot Stopped
 
 The Solana trading bot has been shut down.
 """
@@ -247,15 +246,13 @@ The Solana trading bot has been shut down.
         # Use provided source if available, otherwise fall back to token_data
         display_source = (source or token_data.get('primary_source', 'UNKNOWN')).upper()
 
-        # Escape symbol for Markdown safety
-        safe_symbol = escape_markdown(symbol)
-
+        # No need to escape since we're using parse_mode=None (plain text)
         message = (
-            f"{confidence_emoji} *ENTERED: {safe_symbol}* {token_emoji}\n"
+            f"{confidence_emoji} ENTERED: {symbol} {token_emoji}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"💰 Position: ${position_size:.2f}\n"
             f"💲 Entry: ${entry_price:.8f}\n"
-            f"📊 Score: {score}/100 ({score:.1f})\n"
+            f"📊 Score: {score}/100\n"
             f"\n"
             f"📍 Source: {display_source}\n"
             f"💧 Liquidity: ${token_data.get('liquidity_usd', 0):,.0f}\n"
@@ -266,14 +263,14 @@ The Solana trading bot has been shut down.
 
         # Add score breakdown if available
         if score_breakdown:
-            message += f"\n✅ *Score Breakdown:*\n"
+            message += f"\n✅ Score Breakdown:\n"
             for factor, points in score_breakdown.items():
                 message += f"  • {factor}: {points} pts\n"
 
         # Add RugCheck if available
         if rugcheck_data:
             message += (
-                f"\n🛡️ *RugCheck:*\n"
+                f"\n🛡️ RugCheck:\n"
                 f"  • Safety: {rugcheck_data.get('risk_score', 0)}/100\n"
                 f"  • Risk: {rugcheck_data.get('risk_level', 'unknown')}\n"
             )
@@ -282,17 +279,17 @@ The Solana trading bot has been shut down.
         if market_data:
             sol_health = market_data.get('sol_health', {})
             message += (
-                f"\n📈 *Market: {market_data.get('market_state', 'unknown').upper()}*\n"
+                f"\n📈 Market: {market_data.get('market_state', 'unknown').upper()}\n"
                 f"  • SOL: ${sol_health.get('price', 0):.2f} ({sol_health.get('change_1h', 0):+.1f}%)\n"
             )
 
         # Add warnings if any
         if warnings:
-            message += f"\n⚠️ *Warnings:*\n"
+            message += f"\n⚠️ Warnings:\n"
             for warning in warnings[:3]:  # Max 3
                 message += f"  • {warning}\n"
 
-        message += f"\n🔗 `{token_address[:8]}...{token_address[-4:]}`"
+        message += f"\n🔗 {token_address[:8]}...{token_address[-4:]}"
 
         return await self.send_message(message)
 
@@ -355,14 +352,12 @@ The Solana trading bot has been shut down.
         }
         reason_emoji = reason_emojis.get(exit_reason.lower(), '📊')
 
-        # Escape symbol for Markdown safety
-        safe_symbol = escape_markdown(symbol)
-
+        # No need to escape since we're using parse_mode=None (plain text)
         message = (
-            f"{outcome_emoji} *EXITED: {safe_symbol}* {reason_emoji}\n"
+            f"{outcome_emoji} EXITED: {symbol} {reason_emoji}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"💰 Total P&L: ${pnl:+.2f} ({pnl_percent:+.2f}%)\n"
-            f"📊 Outcome: *{outcome_text}*\n"
+            f"📊 Outcome: {outcome_text}\n"
             f"\n"
         )
 
@@ -391,13 +386,13 @@ The Solana trading bot has been shut down.
             change_pct = liquidity_change.get('change_percent', 0)
 
             message += (
-                f"\n💧 *Liquidity:*\n"
+                f"\n💧 Liquidity:\n"
                 f"  • Entry: ${entry_liq:,.0f}\n"
                 f"  • Exit: ${exit_liq:,.0f}\n"
                 f"  • Change: {change_pct:+.1f}%\n"
             )
 
-        message += f"\n🔗 `{token_address[:8]}...{token_address[-4:]}`"
+        message += f"\n🔗 {token_address[:8]}...{token_address[-4:]}"
 
         return await self.send_message(message)
 
@@ -499,14 +494,14 @@ The Solana trading bot has been shut down.
             True if successful
         """
         message = (
-            f"🚨 *FORCE EXIT: {symbol}*\n\n"
+            f"🚨 FORCE EXIT: {symbol}\n\n"
             f"Position force closed due to:\n"
-            f"*{reason}*\n\n"
+            f"{reason}\n\n"
             f"💧 Liquidity:\n"
             f"  • Entry: ${entry_liquidity:,.0f}\n"
             f"  • Current: ${current_liquidity:,.0f}\n"
             f"  • Drop: {drop_percent:.0f}%\n\n"
-            f"🔗 `{token_address[:8]}...{token_address[-4:]}`"
+            f"🔗 {token_address[:8]}...{token_address[-4:]}"
         )
 
         return await self.send_alert('Force Exit', message, level='CRITICAL')
