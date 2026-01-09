@@ -743,11 +743,12 @@ class MLBot2Foundation:
                 )
 
             # === FAST RUG EXIT: INSTANT DUMP DETECTION (HIGHEST PRIORITY!) ===
-            # 5th AI: Exit rugs FAST before they go -50-77%!
-            # If <2min AND <-12%, likely RUG/HONEYPOT → Exit NOW!
-            if position_duration_min < 2.0 and position.unrealized_pnl_percent < -12.0:
+            # Data: Unslop -74% (6min), 67coincle -46% (12min), ANUS -44% (6min)
+            # Extended from <2min to <5min to catch more early rugs!
+            # If <5min AND <-10%, likely RUG/HONEYPOT → Exit NOW!
+            if position_duration_min < 5.0 and position.unrealized_pnl_percent < -10.0:
                 logger.warning(
-                    f"🚨 FAST RUG EXIT: {position.symbol} down {position.unrealized_pnl_percent:.1f}% in <2min! "
+                    f"🚨 FAST RUG EXIT: {position.symbol} down {position.unrealized_pnl_percent:.1f}% in <5min! "
                     f"Likely RUG/HONEYPOT → INSTANT SELL!"
                 )
                 # Add to cooldown BEFORE closing (smart duration based on depth)
@@ -757,7 +758,7 @@ class MLBot2Foundation:
                 await self.close_position(
                     position.token_address,
                     position.current_price,
-                    'fast_rug_exit_2min'
+                    'fast_rug_exit_5min'
                 )
                 continue
 
@@ -1105,31 +1106,28 @@ class MLBot2Foundation:
                     return False
 
             # Check 3: Falling for extended period? Check V-recovery pattern!
-            if price_change_1h < -15:  # Down >15% in 1h - BUT check recovery!
-                # 🔥 V-RECOVERY LOGIC: Catch MADUROIL -17% → 460%!
-                # If recovering from extended dump, this is a BUYING opportunity!
+            if price_change_1h < -20:  # Down >20% in 1h - BUT check recovery!
+                # 🔥 V-RECOVERY LOGIC (CONSERVATIVE): More strict to reduce false signals
+                # Stronger dump + stronger recovery + volume proof = safer entry
+                # Gemini insight: Tokens dump to clear weak hands, then 10X!
                 price_change_5m = token_data.get('price_change_5m', 0)
-                price_change_1m = token_data.get('price_change_1m', 0)
-                buy_ratio = token_data.get('buy_ratio', 0)
+                volume_1h = token_data.get('volume_1h', 0)
 
                 is_recovering = (
-                    price_change_5m > 10 and  # >10% bounce in 5min
-                    price_change_1m > 3 and   # >3% bounce in 1min
-                    buy_ratio > 0.55          # >55% buying pressure
+                    price_change_5m > 15 and  # >15% bounce in 5min (stronger recovery!)
+                    volume_1h > 50000         # >$50k volume (proves real interest!)
                 )
 
                 if is_recovering:
                     logger.info(
-                        f"✅ {symbol}: V-RECOVERY! Extended dump {price_change_1h:.1f}% 1h BUT "
-                        f"bouncing {price_change_5m:.1f}% 5m / {price_change_1m:.1f}% 1m "
-                        f"with {buy_ratio:.0%} buy ratio → DIP BUY! 🚀"
+                        f"✅ {symbol}: V-RECOVERY (CONSERVATIVE)! Extended dump {price_change_1h:.1f}% 1h BUT "
+                        f"strong bounce {price_change_5m:.1f}% 5m with ${volume_1h:,.0f} volume → DIP BUY! 🚀"
                     )
-                    return True  # Allow entry - this is a bounce play!
+                    return True  # Allow entry - this is a high-confidence bounce!
                 else:
                     logger.info(
                         f"⛔ Skipped {symbol}: Extended dump! Price down {price_change_1h:.1f}% in 1h. "
-                        f"No recovery signal yet (5m: {price_change_5m:.1f}%, 1m: {price_change_1m:.1f}%, "
-                        f"buy: {buy_ratio:.0%})."
+                        f"No strong recovery signal yet (5m: {price_change_5m:.1f}%, vol: ${volume_1h:,.0f})."
                     )
                     self.rejected_tracker.record_rejection(
                         token_address=token_address,
@@ -1300,6 +1298,17 @@ class MLBot2Foundation:
                 if liquidity_usd == 0 and volume_1h >= MIN_VOLUME_1H:
                     logger.info(f"💡 {symbol}: $0 liq but ${volume_1h:,.0f} vol → Override liquidity check!")
                     has_liquidity = True
+
+                # 💎 HIGH-LIQUIDITY EXCEPTION: BOB fix (Popcat-style established tokens)
+                # BOB had: $15k vol, $5.6M liq → rejected for "low activity"
+                # But high liq = low rug risk! Can accept lower Vol/Liq ratio
+                # If liq >$1M, relax volume requirement (stable tokens don't need crazy vol)
+                if liquidity_usd > 1_000_000 and volume_1h >= 10000:
+                    logger.info(
+                        f"💎 {symbol}: HIGH-LIQ EXCEPTION! Liq ${liquidity_usd:,.0f} >$1M with "
+                        f"${volume_1h:,.0f} vol → Low rug risk, relaxed vol filter!"
+                    )
+                    has_volume = True  # Override volume check for established tokens
 
                 # 🚀 HIGH VOLUME OVERRIDE: Catch BITCOIN 7,225% ($45k vol, 139 txns)
                 # If volume OR txns is EXCEPTIONALLY high, relax other requirements
