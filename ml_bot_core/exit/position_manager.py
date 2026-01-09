@@ -107,6 +107,11 @@ class Position:
     swap_route: str = ''                  # DEX route used (Raydium, Orca, etc)
     swap_price_impact: float = 0.0        # Price impact % of our swap
 
+    # Entry filter tracking (which filter accepted token? - critical for analysis!)
+    entry_filter_reason: str = ''         # Which filter: 'vol_liq_ratio', 'age_buffer', 'v_recovery_bounce', etc
+    liquidity_was_zero: bool = False      # Was liquidity $0 at first check? (PPEMRS +3,167% analysis)
+    liquidity_retry_succeeded: bool = False  # Did 2s retry successfully update liq? (Solana RPC lag)
+
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
         # Track if price ACTUALLY changed (not just API responding with same price)

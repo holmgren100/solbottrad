@@ -197,6 +197,11 @@ class EnhancedTradeData:
     swap_route: str = ''                   # DEX route used (Raydium, Orca, etc)
     swap_price_impact: float = 0.0         # Price impact % of our swap
 
+    # 🔥 Entry filter tracking (Gemini optimizations - which filter accepted token?)
+    entry_filter_reason: str = ''          # Which filter: 'vol_liq_ratio', 'age_buffer', 'v_recovery_bounce', etc
+    liquidity_was_zero: bool = False       # Was liquidity $0 at first check? (PPEMRS +3,167% analysis)
+    liquidity_retry_succeeded: bool = False  # Did 2s retry successfully update liq? (Solana RPC lag)
+
 
 class CSVTracker:
     """
@@ -469,6 +474,11 @@ class CSVTracker:
             volume_spike_ratio=getattr(position, 'volume_spike_ratio', 0.0),
             buy_pressure_recent=getattr(position, 'buy_pressure_recent', 0.0),
             momentum_accelerating=getattr(position, 'momentum_accelerating', False),
+
+            # 🔥 Entry filter tracking (Gemini optimizations)
+            entry_filter_reason=getattr(position, 'entry_filter_reason', ''),
+            liquidity_was_zero=getattr(position, 'liquidity_was_zero', False),
+            liquidity_retry_succeeded=getattr(position, 'liquidity_retry_succeeded', False),
         )
 
         self.trades.append(trade_data)
@@ -555,6 +565,8 @@ class CSVTracker:
             # Jito/Jupiter Execution Analysis
             'Jito Bundle Used', 'Jito Tip (lamports)', 'Jito Bundle ID',
             'Swap Slippage (%)', 'Swap Route', 'Swap Price Impact (%)',
+            # 🔥 Entry Filter Tracking (Gemini Optimizations)
+            'Entry Filter Reason', 'Liquidity Was $0', 'Liq Retry Succeeded',
         ]
 
         # Write CSV
@@ -684,6 +696,10 @@ class CSVTracker:
                     'Swap Slippage (%)': f"{trade.swap_slippage_actual:.3f}%",
                     'Swap Route': trade.swap_route if trade.swap_route else 'N/A',
                     'Swap Price Impact (%)': f"{trade.swap_price_impact:.3f}%",
+                    # 🔥 Entry Filter Tracking (Gemini Optimizations)
+                    'Entry Filter Reason': trade.entry_filter_reason if trade.entry_filter_reason else 'N/A',
+                    'Liquidity Was $0': 'Yes' if trade.liquidity_was_zero else 'No',
+                    'Liq Retry Succeeded': 'Yes' if trade.liquidity_retry_succeeded else 'No',
                 })
 
         logger.info(f"Exported {len(self.trades)} trades to {filepath}")

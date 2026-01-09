@@ -1060,6 +1060,8 @@ class MLBot2Foundation:
                     f"✅ {symbol}: -{abs(price_change_5m):.1f}% dip but token is {token_age_hours:.1f}h old "
                     f"(mature) → Natural volatility, not a rug! Allowing entry."
                 )
+                # Track that age buffer allowed this entry (will be used in analyze_and_trade_token)
+                token_data['_age_buffer_triggered'] = True
                 return True  # Skip falling_knife checks for mature tokens
 
             # Check 1: Price falling in last 5 min? (RELAXED - testing low thresholds!)
@@ -1143,12 +1145,16 @@ class MLBot2Foundation:
                         f"✅ {symbol}: V-RECOVERY (BOUNCE)! Extended dump {price_change_1h:.1f}% 1h BUT "
                         f"strong bounce {price_change_5m:.1f}% 5m with ${volume_1h:,.0f} volume → DIP BUY! 🚀"
                     )
+                    # Track that V-recovery bounce allowed this entry
+                    token_data['_v_recovery_bounce_triggered'] = True
                     return True  # Allow entry - this is a high-confidence bounce!
                 elif is_recovering_accumulation:
                     logger.info(
                         f"✅ {symbol}: V-RECOVERY (ACCUMULATION)! Extended dump {price_change_1h:.1f}% 1h BUT "
                         f"{buy_ratio:.0%} buy ratio with ${volume_1h:,.0f} volume → Buyers stepping in! 🚀"
                     )
+                    # Track that V-recovery accumulation allowed this entry
+                    token_data['_v_recovery_accumulation_triggered'] = True
                     return True  # Allow entry - strong buying pressure!
                 else:
                     logger.info(
@@ -1183,6 +1189,11 @@ class MLBot2Foundation:
             symbol = token_data.get('symbol', '')
 
             logger.info(f"Analyzing: {symbol} ({token_address[:8]}...)")
+
+            # 🔥 Entry filter tracking (Gemini optimization analysis)
+            entry_filter_reason = ''  # Track which filter accepted this token
+            liquidity_was_zero = False  # Track $0 liq at first check
+            liquidity_retry_succeeded = False  # Track if retry fixed $0 liq
 
             # === STOP LOSS COOLDOWN CHECK ===
             # Block re-entry on tokens that recently stopped out (UNLESS high volume!)
@@ -1232,6 +1243,14 @@ class MLBot2Foundation:
                 # Data shows: 134 stops <5min (54%!) = entering dumps! 🚨
                 if not await self.check_momentum(token_address, symbol, token_data):
                     return  # Momentum check already logged rejection
+
+                # Check if momentum filter triggered any special entry reasons
+                if token_data.get('_age_buffer_triggered'):
+                    entry_filter_reason = 'age_volatility_buffer'
+                elif token_data.get('_v_recovery_bounce_triggered'):
+                    entry_filter_reason = 'v_recovery_bounce'
+                elif token_data.get('_v_recovery_accumulation_triggered'):
+                    entry_filter_reason = 'v_recovery_accumulation'
 
             # ⚡ Calculate token age from pair creation timestamp
             pair_created_at = token_data.get('pair_created_at', 0)
@@ -1322,6 +1341,7 @@ class MLBot2Foundation:
                 # 🔧 FIX $0 LIQUIDITY BUG: Solana RPC lag (PPEMRS +3,167% fix!)
                 # Gemini: "Retry in 2s instead of instant reject"
                 if liquidity_usd == 0 and volume_1h >= 10000:
+                    liquidity_was_zero = True  # Track that liq was $0 initially
                     logger.info(
                         f"⏳ {symbol}: $0 liq but ${volume_1h:,.0f} vol → "
                         f"Retry in 2s (Solana RPC lag)..."
@@ -1339,6 +1359,7 @@ class MLBot2Foundation:
                             liquidity_usd = liquidity_usd_retry
                             token_data['liquidity_usd'] = liquidity_usd_retry
                             has_liquidity = True
+                            liquidity_retry_succeeded = True  # Track that retry worked!
                         else:
                             # Still $0 after retry - but high vol proves it exists
                             logger.warning(
@@ -1361,6 +1382,8 @@ class MLBot2Foundation:
                         f"${volume_1h:,.0f} vol → Low rug risk, relaxed vol filter!"
                     )
                     has_volume = True  # Override volume check for established tokens
+                    if not entry_filter_reason:  # Only set if not already set
+                        entry_filter_reason = 'high_liquidity_exception'
 
                 # 🚀 HIGH VOLUME OVERRIDE: Catch BITCOIN 7,225% ($45k vol, 139 txns)
                 # If volume OR txns is EXCEPTIONALLY high, relax other requirements
@@ -1368,6 +1391,8 @@ class MLBot2Foundation:
                 if is_high_volume:
                     logger.info(f"🔥 {symbol}: HIGH ACTIVITY! Vol=${volume_1h:,.0f}, Txns={txns_1h} → Relaxed filter!")
                     is_active = True  # Skip all other checks!
+                    if not entry_filter_reason:  # Only set if not already set
+                        entry_filter_reason = 'high_volume_override'
                 else:
                     # 💎 2-OF-3 RULE: Need at least 2 of (volume, txns, liquidity)
                     # User insight: "så länge volume finns txns så är ju likviditet orelevant"
@@ -1389,6 +1414,8 @@ class MLBot2Foundation:
                             f"Vol ${volume_1h:,.0f} / Liq ${liquidity_usd:,.0f} → Override activity filter!"
                         )
                         is_active = True  # Override low_activity rejection
+                        if not entry_filter_reason:  # Only set if not already set
+                            entry_filter_reason = 'vol_liq_ratio_golden_zone'
 
                 if not is_active:
                     # Token lacks activity - could be dead/bluechip/slow mover
@@ -1831,6 +1858,13 @@ class MLBot2Foundation:
                 logger.error(f"Failed to execute buy for {symbol}")
                 return
 
+            # 🔥 Set default entry filter reason if none was set (normal activity filter)
+            if not entry_filter_reason:
+                if is_moonshot:
+                    entry_filter_reason = 'moonshot_detected'
+                else:
+                    entry_filter_reason = 'normal_activity'
+
             # === 🔒 OPEN POSITION IN PROTECTED CORE ===
             position = await self.open_position(
                 token_address=token_address,
@@ -1859,6 +1893,10 @@ class MLBot2Foundation:
                 # ⚡ TIMING ANALYSIS FIELDS
                 price_change_5m=token_data.get('price_change_5m', 0.0),
                 price_change_1h=token_data.get('price_change_1h', 0.0),
+                # 🔥 ENTRY FILTER TRACKING (Gemini optimizations)
+                entry_filter_reason=entry_filter_reason,
+                liquidity_was_zero=liquidity_was_zero,
+                liquidity_retry_succeeded=liquidity_retry_succeeded,
             )
 
             if position:
