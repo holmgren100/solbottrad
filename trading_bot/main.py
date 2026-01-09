@@ -1351,8 +1351,10 @@ class MLBot2Foundation:
 
                     # Re-fetch token data
                     try:
-                        token_data_retry = await self.scanner.dexscreener.get_token_details(token_address)
-                        liquidity_usd_retry = token_data_retry.get('liquidity', {}).get('usd', 0)
+                        token_data_retry = await self.scanner.dexscreener.get_token_profile(token_address)
+                        if not token_data_retry:
+                            raise Exception("No data returned from retry")
+                        liquidity_usd_retry = token_data_retry.get('liquidity_usd', 0)
 
                         if liquidity_usd_retry > 0:
                             logger.info(f"✅ {symbol}: Liq updated to ${liquidity_usd_retry:,.0f} after retry!")
