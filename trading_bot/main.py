@@ -750,16 +750,16 @@ class MLBot2Foundation:
                     f"🚨 FAST RUG EXIT: {position.symbol} down {position.unrealized_pnl_percent:.1f}% in <2min! "
                     f"Likely RUG/HONEYPOT → INSTANT SELL!"
                 )
-                try:
-                    await self.execution_client.execute_sell(
-                        position=position,
-                        reason="fast_rug_exit_2min",
-                        current_price=position.current_price
-                    )
+                # Add to cooldown BEFORE closing (smart duration based on depth)
+                if position.symbol:
                     self.stop_cooldown.add_stop(position.symbol, position.unrealized_pnl_percent)
-                    continue
-                except Exception as e:
-                    logger.error(f"Failed fast rug exit for {position.symbol}: {e}")
+
+                await self.close_position(
+                    position.token_address,
+                    position.current_price,
+                    'fast_rug_exit_2min'
+                )
+                continue
 
             # === ZOMBIE EXIT: CUT STALE POSITIONS ===
             # Data: >60min positions show 21% win, only +$41 profit
@@ -769,16 +769,16 @@ class MLBot2Foundation:
                     f"⏰ {position.symbol}: ZOMBIE EXIT! Duration {position_duration_min:.0f}min "
                     f"with only {position.unrealized_pnl_percent:.1f}% profit. Position is stale, exiting!"
                 )
-                try:
-                    await self.execution_client.execute_sell(
-                        position=position,
-                        reason="zombie_exit_45min",
-                        current_price=position.current_price
-                    )
+                # Add to cooldown BEFORE closing
+                if position.symbol:
                     self.stop_cooldown.add_stop(position.symbol, position.unrealized_pnl_percent)
-                    continue
-                except Exception as e:
-                    logger.error(f"Failed zombie exit for {position.symbol}: {e}")
+
+                await self.close_position(
+                    position.token_address,
+                    position.current_price,
+                    'zombie_exit_45min'
+                )
+                continue
 
             # === OPTIMIZED 2-PATH EXIT LOGIC ===
             # Priority: Emergency rugs > Winners maximize profit > Losers minimize loss
@@ -1241,11 +1241,11 @@ class MLBot2Foundation:
                 # Instead: Check if token has REAL activity (not dead/bluechip)
                 # Active token = high volume + transactions + buy pressure + liquidity
 
-                # Define activity thresholds (Testing 45% buy ratio for quality!)
+                # Define activity thresholds (Optimized for quality + volume balance!)
                 MIN_VOLUME_1H = 30000  # $30k+ volume in 1h (real trading)
-                MIN_TXNS_1H = 75       # 75+ transactions (lowered from 500 to test!)
-                MIN_BUY_RATIO = 0.45   # 45%+ buy ratio (testing higher quality filter!)
-                MIN_LIQUIDITY = 15000  # $15k+ liquidity (avoid slippage, can adjust later!)
+                MIN_TXNS_1H = 60       # 60+ transactions (balanced for activity!)
+                MIN_BUY_RATIO = 0.42   # 42%+ buy ratio (quality filter!)
+                MIN_LIQUIDITY = 10000  # $10k+ liquidity (more permissive!)
 
                 # Check if token meets activity requirements
                 # FLEXIBLE LOGIC: Reject ONLY if lacking BOTH volume AND txns
@@ -1260,20 +1260,19 @@ class MLBot2Foundation:
                     logger.info(f"💡 {symbol}: $0 liq but ${volume_1h:,.0f} vol → Override liquidity check!")
                     has_liquidity = True
 
-                # 🚀 HIGH VOLUME OVERRIDE: Catch TRUMPS 2,536% (893 txns, $32k vol)
+                # 🚀 HIGH VOLUME OVERRIDE: Catch BITCOIN 7,225% ($45k vol, 139 txns)
                 # If volume OR txns is EXCEPTIONALLY high, relax other requirements
-                is_high_volume = volume_1h >= 50000 or txns_1h >= 800
+                is_high_volume = volume_1h >= 40000 or txns_1h >= 600
                 if is_high_volume:
                     logger.info(f"🔥 {symbol}: HIGH ACTIVITY! Vol=${volume_1h:,.0f}, Txns={txns_1h} → Relaxed filter!")
                     is_active = True  # Skip all other checks!
                 else:
-                    # Active if has good volume OR good txns (not both required!)
-                    # AND reasonable buy ratio AND minimum liquidity
-                    is_active = (
-                        (has_volume or has_txns) and  # Volume OR txns (flexible!)
-                        has_buy_pressure and
-                        has_liquidity
-                    )
+                    # 💎 2-OF-3 RULE: Need at least 2 of (volume, txns, liquidity)
+                    # User insight: "så länge volume finns txns så är ju likviditet orelevant"
+                    # If volume + txns good → liquidity doesn't matter!
+                    # Always require buy pressure (quality filter)
+                    activity_score = sum([has_volume, has_txns, has_liquidity])
+                    is_active = activity_score >= 2 and has_buy_pressure
 
                 if not is_active:
                     # Token lacks activity - could be dead/bluechip/slow mover
