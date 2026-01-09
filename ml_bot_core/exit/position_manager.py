@@ -92,6 +92,21 @@ class Position:
     max_drawdown_percent: float = 0.0 # Maximum drawdown from peak
     current_drawdown_percent: float = 0.0  # Current drawdown from peak
 
+    # RugCheck security data (for rug analysis)
+    rugcheck_risk_score: int = 0          # RugCheck risk score (0-10000+)
+    rugcheck_is_safe: bool = True         # RugCheck safety determination
+    rugcheck_risk_level: str = 'unknown'  # low, medium, high, critical
+    rugcheck_risks_count: int = 0         # Number of risks detected
+    rugcheck_checked: bool = False        # Was RugCheck actually called?
+
+    # Jito/Jupiter execution data (for MEV/slippage analysis)
+    jito_bundle_used: bool = False        # Was Jito bundle used for MEV protection?
+    jito_tip_lamports: int = 0            # Jito tip amount (for cost analysis)
+    jito_bundle_id: str = ''              # Jito bundle ID (if available)
+    swap_slippage_actual: float = 0.0     # Actual slippage % on swap
+    swap_route: str = ''                  # DEX route used (Raydium, Orca, etc)
+    swap_price_impact: float = 0.0        # Price impact % of our swap
+
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
         # Track if price ACTUALLY changed (not just API responding with same price)

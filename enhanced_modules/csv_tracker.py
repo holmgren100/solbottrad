@@ -182,6 +182,21 @@ class EnhancedTradeData:
     price_frozen: bool = False             # Price hasn't moved >0.1% in 15+ min
     consecutive_failed_updates: int = 0    # Failed price updates count
 
+    # RugCheck security data (for rug analysis)
+    rugcheck_checked: bool = False         # Was RugCheck API called?
+    rugcheck_risk_score: int = 0           # RugCheck risk score (0-10000+)
+    rugcheck_risk_level: str = 'unknown'   # low, medium, high, critical
+    rugcheck_is_safe: bool = True          # RugCheck safety determination
+    rugcheck_risks_count: int = 0          # Number of risks detected
+
+    # Jito/Jupiter execution data (for MEV/slippage analysis)
+    jito_bundle_used: bool = False         # Was Jito bundle used for MEV protection?
+    jito_tip_lamports: int = 0             # Jito tip amount (for cost analysis)
+    jito_bundle_id: str = ''               # Jito bundle ID (if available)
+    swap_slippage_actual: float = 0.0      # Actual slippage % on swap
+    swap_route: str = ''                   # DEX route used (Raydium, Orca, etc)
+    swap_price_impact: float = 0.0         # Price impact % of our swap
+
 
 class CSVTracker:
     """
@@ -650,6 +665,19 @@ class CSVTracker:
                     'Discovery Source': trade.discovery_source,
                     'Price Frozen': 'Yes' if trade.price_frozen else 'No',
                     'Failed Updates Count': trade.consecutive_failed_updates,
+                    # RugCheck Security Analysis
+                    'RugCheck Checked': 'Yes' if trade.rugcheck_checked else 'No',
+                    'RugCheck Risk Score': trade.rugcheck_risk_score,
+                    'RugCheck Risk Level': trade.rugcheck_risk_level,
+                    'RugCheck Is Safe': 'Yes' if trade.rugcheck_is_safe else 'No',
+                    'RugCheck Risks Count': trade.rugcheck_risks_count,
+                    # Jito/Jupiter Execution Analysis
+                    'Jito Bundle Used': 'Yes' if trade.jito_bundle_used else 'No',
+                    'Jito Tip (lamports)': trade.jito_tip_lamports,
+                    'Jito Bundle ID': trade.jito_bundle_id if trade.jito_bundle_id else 'N/A',
+                    'Swap Slippage (%)': f"{trade.swap_slippage_actual:.3f}%",
+                    'Swap Route': trade.swap_route if trade.swap_route else 'N/A',
+                    'Swap Price Impact (%)': f"{trade.swap_price_impact:.3f}%",
                 })
 
         logger.info(f"Exported {len(self.trades)} trades to {filepath}")
