@@ -1509,6 +1509,7 @@ class MLBot2Foundation:
                                 f"but ${volume_1h:,.0f} vol proves it exists → Override!"
                             )
                             has_liquidity = True
+                            liquidity_retry_succeeded = True  # Track sniper delay override!
                     except Exception as e:
                         logger.error(f"Error in SNIPER DELAY for {symbol}: {e}")
                         # Fallback to volume override
@@ -1844,6 +1845,16 @@ class MLBot2Foundation:
                     logger.info(
                         f"✅ {symbol}: Low liq ${liquidity_usd:,.0f} BUT HIGH volume ${volume_1h:,.0f}/1h compensates! "
                         f"TIER 3 exception (Ralph example: $15k liq, 272% pump!)."
+                    )
+                    # Continue to other checks!
+
+                # 🎯 TIER SNIPER: Sniper delay succeeded = pool exists, just not visible yet!
+                # If liquidity_retry_succeeded = True (from sniper delay), skip MIN_LIQUIDITY check
+                # Rationale: Volume + txns already proved pool exists, this is just API lag
+                elif liquidity_retry_succeeded:
+                    logger.info(
+                        f"✅ {symbol}: SNIPER DELAY EXCEPTION! Liq ${liquidity_usd:,.0f} BUT sniper delay succeeded. "
+                        f"Pool exists (${volume_1h:,.0f} vol, {txns_1h} txns), just not visible yet → ACCEPT!"
                     )
                     # Continue to other checks!
 
