@@ -112,6 +112,11 @@ class Position:
     liquidity_was_zero: bool = False      # Was liquidity $0 at first check? (PPEMRS +3,167% analysis)
     liquidity_retry_succeeded: bool = False  # Did 2s retry successfully update liq? (Solana RPC lag)
 
+    # 🎯 Sniper momentum check tracking (avoid pump tops!)
+    sniper_momentum_checked: bool = False  # Was sniper momentum check performed?
+    sniper_momentum_value: float = 0.0     # Momentum % at sniper check (1m or 5m)
+    sniper_momentum_passed: bool = False   # Did token pass momentum check? (3-45% range)
+
     def update_price(self, new_price: float, liquidity: float = 0.0):
         """Update current price and PnL."""
         # Track if price ACTUALLY changed (not just API responding with same price)
@@ -430,7 +435,11 @@ class PositionManager:
         # 🔥 Entry filter tracking (Gemini optimizations)
         entry_filter_reason: str = '',
         liquidity_was_zero: bool = False,
-        liquidity_retry_succeeded: bool = False
+        liquidity_retry_succeeded: bool = False,
+        # 🎯 Sniper momentum check tracking
+        sniper_momentum_checked: bool = False,
+        sniper_momentum_value: float = 0.0,
+        sniper_momentum_passed: bool = False
     ) -> Optional[Position]:
         """
         Open a new position.
@@ -506,6 +515,10 @@ class PositionManager:
             entry_filter_reason=entry_filter_reason,
             liquidity_was_zero=liquidity_was_zero,
             liquidity_retry_succeeded=liquidity_retry_succeeded,
+            # 🎯 Sniper momentum check tracking
+            sniper_momentum_checked=sniper_momentum_checked,
+            sniper_momentum_value=sniper_momentum_value,
+            sniper_momentum_passed=sniper_momentum_passed,
         )
 
         self.open_positions[token_address] = position
@@ -1043,7 +1056,11 @@ class PositionManager:
                     entry_liquidity=pos_dict.get('entry_liquidity', 0.0),
                     initial_quantity=pos_dict.get('initial_quantity', pos_dict['quantity']),
                     milestones_hit=set(pos_dict.get('milestones_hit', [])),
-                    total_partial_profit_usd=pos_dict.get('total_partial_profit_usd', 0.0)  # Restore partial profits
+                    total_partial_profit_usd=pos_dict.get('total_partial_profit_usd', 0.0),  # Restore partial profits
+                    # 🎯 Sniper momentum check tracking
+                    sniper_momentum_checked=pos_dict.get('sniper_momentum_checked', False),
+                    sniper_momentum_value=pos_dict.get('sniper_momentum_value', 0.0),
+                    sniper_momentum_passed=pos_dict.get('sniper_momentum_passed', False)
                 )
                 self.open_positions[address] = position
                 logger.info(f"📂 Restored position: {position.symbol or address[:8]}... @ ${position.entry_price:.8f}")
