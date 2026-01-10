@@ -141,11 +141,14 @@ class Position:
             if gain_percent >= 15.0:  # Activate trail at 15% gain
                 self.use_trailing_stop = True
                 self.highest_price = new_price  # Set current as peak
-                self.trailing_stop_price = self.highest_price * (1 - self.trailing_stop_percent / 100)
+
+                # 🚀 STEP-UP TRAILING: Use dynamic % based on profit at activation
+                trailing_pct = 7.0 if gain_percent < 20 else 15.0  # Will be <20% at activation
+                self.trailing_stop_price = self.highest_price * (1 - trailing_pct / 100)
                 logger.info(
                     f"🎯 TRAIL ACTIVATED @ +{gain_percent:.1f}%: {self.symbol or self.token_address[:8]}... "
                     f"Peak: ${self.highest_price:.8f}, Stop: ${self.trailing_stop_price:.8f} "
-                    f"(trail {self.trailing_stop_percent}%)"
+                    f"(trail {trailing_pct}%)"
                 )
 
         # Update trailing stop if enabled
@@ -155,11 +158,28 @@ class Position:
                 self.highest_price = new_price
                 self.peak_price = new_price  # Track for analysis
                 self.peak_time = datetime.now()  # Track when peak was reached
-                # Calculate new trailing stop (X% below highest price)
-                self.trailing_stop_price = self.highest_price * (1 - self.trailing_stop_percent / 100)
+
+                # 🚀 STEP-UP TRAILING (Gemini FAS 1B #3)! 💎💎💎
+                # Dynamic trailing distance based on profit level!
+                # Rationale: Small wins need protection, mega wins need room to run!
+                current_profit_pct = self.unrealized_pnl_percent
+
+                if current_profit_pct < 20:
+                    # Small wins: TIGHT trailing (secure it!)
+                    trailing_pct = 7.0
+                elif current_profit_pct < 50:
+                    # Medium wins: STANDARD trailing (give some room)
+                    trailing_pct = 15.0  # User confirmed 15% works best!
+                else:
+                    # BIG wins >50%: WIDE trailing (let it RUN to 200-500%!)
+                    trailing_pct = 25.0
+
+                # Calculate new trailing stop (dynamic % below highest price)
+                self.trailing_stop_price = self.highest_price * (1 - trailing_pct / 100)
                 logger.debug(
                     f"Trailing stop updated for {self.token_address[:8]}...: "
-                    f"Peak ${self.highest_price:.8f} → Stop ${self.trailing_stop_price:.8f}"
+                    f"Peak ${self.highest_price:.8f} → Stop ${self.trailing_stop_price:.8f} "
+                    f"(profit {current_profit_pct:.1f}% → {trailing_pct}% trail)"
                 )
 
         # === DRAWDOWN TRACKING (ML Bot primary signal!) ===

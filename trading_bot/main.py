@@ -1188,16 +1188,44 @@ class MLBot2Foundation:
             elif price_change_5m < -15:  # Down 15-20% = check if recovering! (lowered from -5%)
                 price_change_1m = token_data.get('price_change_1m', 0)
 
+                # 🎯 SMART FALLING KNIFE (Gemini FAS 1A #2)! 💎💎💎
+                # Check 1: Price recovering (existing logic)
+                # Check 2: Whale accumulation on dip (NEW!)
+
+                # Get finest timeframe buy_ratio available (prefer 1m if exists)
+                buy_ratio_1m = token_data.get('buy_ratio_1m', None)
+                buy_ratio_5m = token_data.get('buy_ratio_5m', None)
+                buy_ratio_1h = token_data.get('buy_ratio_1h', 0)
+
+                # Use finest available timeframe
+                buy_ratio_recent = buy_ratio_1m or buy_ratio_5m or buy_ratio_1h
+                timeframe_label = "1m" if buy_ratio_1m else ("5m" if buy_ratio_5m else "1h")
+
+                # Check if whales buying dip (WHITEDOGE +165% pattern!)
+                is_whale_dip_buy = buy_ratio_recent > 0.70  # >70% buys = accumulation!
+
                 if price_change_1m > 0:  # Price rising last 1min = recovery!
                     logger.info(
                         f"✅ {symbol}: Was falling ({price_change_5m:.1f}% in 5m) BUT recovering "
                         f"({price_change_1m:+.1f}% in 1m). Allowing recovery entry (dip-buy)!"
                     )
                     # Continue - recovery allowed! ✅
+
+                elif is_whale_dip_buy:  # 🔥 NEW: Whales buying the blood!
+                    logger.info(
+                        f"✅ {symbol}: WHALE DIP BUY! Falling {price_change_5m:.1f}% in 5m BUT "
+                        f"{buy_ratio_recent:.1%} buy ratio ({timeframe_label})! "
+                        f"Smart money accumulating → Buying WITH whales! 💎"
+                    )
+                    # Track that smart falling knife allowed this entry
+                    token_data['_smart_falling_knife_triggered'] = True
+                    # Continue - whale accumulation allowed! ✅
+
                 else:
                     logger.info(
-                        f"⛔ Skipped {symbol}: Falling knife! Price down {price_change_5m:.1f}% in 5min "
-                        f"and still falling ({price_change_1m:+.1f}% in 1m). Not recovering yet."
+                        f"⛔ Skipped {symbol}: Falling knife! Price down {price_change_5m:.1f}% in 5min, "
+                        f"still falling (1m: {price_change_1m:+.1f}%), "
+                        f"no whale buying (buy_ratio {timeframe_label}: {buy_ratio_recent:.1%}). Not recovering yet."
                     )
                     self.rejected_tracker.record_rejection(
                         token_address=token_address,
@@ -1426,6 +1454,60 @@ class MLBot2Foundation:
                 txns_1h = token_data.get('txns_1h', 0)
                 liquidity_usd = token_data.get('liquidity_usd', 0)
                 buy_ratio = token_data.get('buy_ratio_1h', 0) or token_data.get('buy_ratio_24h', 0)
+
+                # 🚀 MOMENTUM ENTRY FILTER (Gemini FAS 1A #1)! 🚨🚨🚨
+                # THE ZOMBIE KILLER: Reject tokens with NO current momentum!
+                # Problem: 70 zombies (22.8%) sit for 30min then exit → meaningless!
+                # Solution: Only buy tokens that are MOVING RIGHT NOW!
+                price_change_1m = token_data.get('price_change_1m', 0)
+                price_change_5m = token_data.get('price_change_5m', 0)
+
+                # EXCEPTION: Skip momentum filter if V-recovery triggered!
+                # V-recovery tokens are buying dips, negative momentum expected!
+                is_v_recovery = (
+                    token_data.get('_v_recovery_bounce_triggered', False) or
+                    token_data.get('_v_recovery_accumulation_triggered', False)
+                )
+
+                # Require BOTH 1m AND 5m momentum (multi-timeframe confirmation!)
+                has_momentum = price_change_1m > 2.0 and price_change_5m > 5.0
+
+                if not has_momentum and not is_v_recovery:
+                    logger.info(
+                        f"⛔ {symbol}: NO MOMENTUM! Price 1m: {price_change_1m:+.1f}% (need >+2%), "
+                        f"5m: {price_change_5m:+.1f}% (need >+5%). "
+                        f"Token not moving → Would become ZOMBIE! Rejecting."
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"no_momentum_1m{price_change_1m:+.1f}%_5m{price_change_5m:+.1f}%",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='momentum_filter'
+                    )
+                    return
+
+                # 🤖 MIN AVG TRANSACTION FILTER (Gemini FAS 2 #4)! 💎
+                # Block bot-driven spam tokens with dust transactions!
+                # Real buyers: >$10 avg transaction
+                # Bot spam: <$10 avg (many tiny txns to fake volume)
+                if txns_1h > 0:  # Only check if we have txn data
+                    avg_txn_size = volume_1h / txns_1h
+
+                    if avg_txn_size < 10.0:  # <$10 avg = bot spam!
+                        logger.info(
+                            f"⛔ {symbol}: BOT SPAM DETECTED! Avg txn ${avg_txn_size:.2f} <$10 "
+                            f"(Vol ${volume_1h:,.0f} / {txns_1h} txns). "
+                            f"Likely bot-driven fake volume → Rejecting!"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"spam_bot_avg_txn_${avg_txn_size:.2f}",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='spam_filter'
+                        )
+                        return
 
                 # 🚨 PUMP & DUMP FILTER: Vol/Liq ratio >3.0 = danger zone!
                 # Gemini analysis: SAVE (ratio 167) dumped -79%, ASMONGOLD (ratio 118) dumped -56%
