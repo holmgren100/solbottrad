@@ -1459,7 +1459,6 @@ class MLBot2Foundation:
                 # THE ZOMBIE KILLER: Reject tokens with NO current momentum!
                 # Problem: 70 zombies (22.8%) sit for 30min then exit → meaningless!
                 # Solution: Only buy tokens that are MOVING RIGHT NOW!
-                price_change_1m = token_data.get('price_change_1m', 0)
                 price_change_5m = token_data.get('price_change_5m', 0)
 
                 # EXCEPTION: Skip momentum filter if V-recovery triggered!
@@ -1469,25 +1468,19 @@ class MLBot2Foundation:
                     token_data.get('_v_recovery_accumulation_triggered', False)
                 )
 
-                # 🔧 SMART MOMENTUM CHECK: Fallback if 1m data missing!
-                # Problem: DexScreener often lacks 1m data (returns 0)
-                # Solution: If 1m=0, use only 5m momentum (TrumpWhale +60% fix!)
-                if price_change_1m == 0:
-                    # 1m data missing → use only 5m momentum
-                    has_momentum = price_change_5m > 5.0
-                else:
-                    # 1m data exists → require BOTH 1m AND 5m (multi-timeframe!)
-                    has_momentum = price_change_1m > 2.0 and price_change_5m > 5.0
+                # 🔧 USE ONLY 5M MOMENTUM: 1m data unreliable, don't miss runners!
+                # 1m data often missing/unreliable from DexScreener API
+                # 5m momentum is reliable indicator - if >5%, token is MOVING!
+                has_momentum = price_change_5m > 5.0
 
                 if not has_momentum and not is_v_recovery:
                     logger.info(
-                        f"⛔ {symbol}: NO MOMENTUM! Price 1m: {price_change_1m:+.1f}% (need >+2%), "
-                        f"5m: {price_change_5m:+.1f}% (need >+5%). "
+                        f"⛔ {symbol}: NO MOMENTUM! Price 5m: {price_change_5m:+.1f}% (need >+5%). "
                         f"Token not moving → Would become ZOMBIE! Rejecting."
                     )
                     self.rejected_tracker.record_rejection(
                         token_address=token_address,
-                        rejection_reason=f"no_momentum_1m{price_change_1m:+.1f}%_5m{price_change_5m:+.1f}%",
+                        rejection_reason=f"no_momentum_5m{price_change_5m:+.1f}%",
                         token_data=token_data,
                         symbol=symbol,
                         rejection_stage='momentum_filter'
