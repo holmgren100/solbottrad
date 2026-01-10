@@ -1569,9 +1569,41 @@ class MLBot2Foundation:
                         liquidity_usd_retry = token_data_retry.get('liquidity_usd', 0)
 
                         if liquidity_usd_retry >= 20000:  # Require $20k min (was >0)
+                            # 🎯 MOMENTUM CHECK: Don't buy if token dumping after initial pump!
+                            price_change_5m = token_data_retry.get('price_change_5m', 0)
+                            price_change_1m = token_data_retry.get('price_change_1m', 0)
+                            current_momentum = price_change_1m if price_change_1m != 0 else price_change_5m
+
+                            if current_momentum < 0:
+                                logger.info(
+                                    f"⛔ {symbol}: SNIPER REJECTED! Liq found (${liquidity_usd_retry:,.0f}) but "
+                                    f"token dumping ({current_momentum:+.1f}%). Avoiding falling knife!"
+                                )
+                                self.rejected_tracker.record_rejection(
+                                    token_address=token_address,
+                                    rejection_reason=f"sniper_dumping_{current_momentum:+.1f}%",
+                                    token_data=token_data,
+                                    symbol=symbol,
+                                    rejection_stage='sniper_momentum_check'
+                                )
+                                return
+                            elif current_momentum < 3.0:
+                                logger.info(
+                                    f"⛔ {symbol}: SNIPER REJECTED! Liq found but weak momentum ({current_momentum:+.1f}% <+3%). "
+                                    f"Post-pump consolidation - skip!"
+                                )
+                                self.rejected_tracker.record_rejection(
+                                    token_address=token_address,
+                                    rejection_reason=f"sniper_weak_momentum_{current_momentum:+.1f}%",
+                                    token_data=token_data,
+                                    symbol=symbol,
+                                    rejection_stage='sniper_momentum_check'
+                                )
+                                return
+
                             logger.info(
                                 f"✅ {symbol}: Liq updated to ${liquidity_usd_retry:,.0f} after SNIPER DELAY! "
-                                f"Pool indexed, safe to enter!"
+                                f"Pool indexed + MOMENTUM {current_momentum:+.1f}% → Safe to enter! 🚀"
                             )
                             liquidity_usd = liquidity_usd_retry
                             token_data['liquidity_usd'] = liquidity_usd_retry
@@ -1590,6 +1622,47 @@ class MLBot2Foundation:
                                 f"⚠️ {symbol}: Still $0 liq after SNIPER DELAY, "
                                 f"but ${volume_1h:,.0f} vol proves it exists → Override!"
                             )
+
+                            # 🎯 MOMENTUM CHECK: Don't buy falling knives or post-pump dumps!
+                            # Check if token still has upward momentum (not dumping after initial pump)
+                            price_change_5m = token_data_retry.get('price_change_5m', 0)
+                            price_change_1m = token_data_retry.get('price_change_1m', 0)
+
+                            # Use 1m if available (more recent), else 5m
+                            current_momentum = price_change_1m if price_change_1m != 0 else price_change_5m
+
+                            if current_momentum < 0:
+                                logger.info(
+                                    f"⛔ {symbol}: SNIPER REJECTED! Token dumping now ({current_momentum:+.1f}%). "
+                                    f"Avoiding post-pump dump or falling knife. Wait for reversal!"
+                                )
+                                self.rejected_tracker.record_rejection(
+                                    token_address=token_address,
+                                    rejection_reason=f"sniper_dumping_{current_momentum:+.1f}%",
+                                    token_data=token_data,
+                                    symbol=symbol,
+                                    rejection_stage='sniper_momentum_check'
+                                )
+                                return
+                            elif current_momentum < 3.0:
+                                logger.info(
+                                    f"⛔ {symbol}: SNIPER REJECTED! Weak momentum ({current_momentum:+.1f}% <+3%). "
+                                    f"Not pumping anymore - likely post-pump consolidation. Skip!"
+                                )
+                                self.rejected_tracker.record_rejection(
+                                    token_address=token_address,
+                                    rejection_reason=f"sniper_weak_momentum_{current_momentum:+.1f}%",
+                                    token_data=token_data,
+                                    symbol=symbol,
+                                    rejection_stage='sniper_momentum_check'
+                                )
+                                return
+                            else:
+                                logger.info(
+                                    f"✅ {symbol}: SNIPER MOMENTUM CHECK PASSED! Still pumping {current_momentum:+.1f}% "
+                                    f"→ Buying on the way UP, not the way DOWN! 🚀"
+                                )
+
                             has_liquidity = True
                             liquidity_retry_succeeded = True  # Track sniper delay override!
                     except Exception as e:
