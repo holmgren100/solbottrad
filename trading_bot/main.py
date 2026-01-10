@@ -1469,8 +1469,15 @@ class MLBot2Foundation:
                     token_data.get('_v_recovery_accumulation_triggered', False)
                 )
 
-                # Require BOTH 1m AND 5m momentum (multi-timeframe confirmation!)
-                has_momentum = price_change_1m > 2.0 and price_change_5m > 5.0
+                # 🔧 SMART MOMENTUM CHECK: Fallback if 1m data missing!
+                # Problem: DexScreener often lacks 1m data (returns 0)
+                # Solution: If 1m=0, use only 5m momentum (TrumpWhale +60% fix!)
+                if price_change_1m == 0:
+                    # 1m data missing → use only 5m momentum
+                    has_momentum = price_change_5m > 5.0
+                else:
+                    # 1m data exists → require BOTH 1m AND 5m (multi-timeframe!)
+                    has_momentum = price_change_1m > 2.0 and price_change_5m > 5.0
 
                 if not has_momentum and not is_v_recovery:
                     logger.info(
