@@ -764,8 +764,9 @@ class MLBot2Foundation:
 
             # === ZOMBIE EXIT: CUT STALE POSITIONS ===
             # Data: >60min positions show 21% win, only +$41 profit
-            # Exit if >45min AND profit <5% (not moving, cut losses!)
-            if position_duration_min > 45 and position.unrealized_pnl_percent < 5.0:
+            # Gemini optimization: 45min → 30min to free capital faster!
+            # Exit if >30min AND profit <5% (not moving, cut losses!)
+            if position_duration_min > 30 and position.unrealized_pnl_percent < 5.0:
                 logger.info(
                     f"⏰ {position.symbol}: ZOMBIE EXIT! Duration {position_duration_min:.0f}min "
                     f"with only {position.unrealized_pnl_percent:.1f}% profit. Position is stale, exiting!"
@@ -777,7 +778,7 @@ class MLBot2Foundation:
                 await self.close_position(
                     position.token_address,
                     position.current_price,
-                    'zombie_exit_45min'
+                    'zombie_exit_30min'
                 )
                 continue
 
@@ -1136,7 +1137,7 @@ class MLBot2Foundation:
                 )
 
                 is_recovering_accumulation = (
-                    buy_ratio > 0.65 and      # >65% buy ratio (strong accumulation!)
+                    buy_ratio > 0.70 and      # >70% buy ratio (Gemini: stronger signal!)
                     volume_1h > 30000         # >$30k volume (proves interest!)
                 )
 
@@ -1290,7 +1291,7 @@ class MLBot2Foundation:
                     return
 
                 # Filter #2: MAX LIQUIDITY (Skip established tokens like Fartcoin $13M liq!)
-                MAX_LIQUIDITY = 2_000_000  # $2M max liquidity
+                MAX_LIQUIDITY = 1_000_000  # $1M max liquidity (Gemini: lowered from $2M)
                 if liquidity_usd > MAX_LIQUIDITY:
                     logger.info(
                         f"⛔ Skipped {symbol}: Too high liquidity ${liquidity_usd:,.0f} (max ${MAX_LIQUIDITY:,.0f}). "
@@ -1321,6 +1322,26 @@ class MLBot2Foundation:
                 liquidity_usd = token_data.get('liquidity_usd', 0)
                 buy_ratio = token_data.get('buy_ratio_1h', 0) or token_data.get('buy_ratio_24h', 0)
 
+                # 🚨 PUMP & DUMP FILTER: Vol/Liq ratio >3.0 = danger zone!
+                # Gemini analysis: SAVE (ratio 167) dumped -79%, ASMONGOLD (ratio 118) dumped -56%
+                # High ratio = unsustainable volume spike, dump incoming!
+                if liquidity_usd > 0:  # Only check if we have liquidity data
+                    vol_liq_ratio = volume_1h / liquidity_usd
+                    if vol_liq_ratio > 3.0:
+                        logger.info(
+                            f"⛔ {symbol}: PUMP & DUMP DANGER! Vol/Liq ratio {vol_liq_ratio:.2f} >3.0 "
+                            f"(Vol ${volume_1h:,.0f} / Liq ${liquidity_usd:,.0f}). "
+                            f"Historical data: ratio >3.0 tokens dump hard. REJECTING!"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"pump_dump_ratio_{vol_liq_ratio:.2f}",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='ratio_filter'
+                        )
+                        return
+
                 # NO AGE LIMIT! ⚡
                 # Instead: Check if token has REAL activity (not dead/bluechip)
                 # Active token = high volume + transactions + buy pressure + liquidity
@@ -1329,7 +1350,7 @@ class MLBot2Foundation:
                 MIN_VOLUME_1H = 30000  # $30k+ volume in 1h (real trading)
                 MIN_TXNS_1H = 60       # 60+ transactions (balanced for activity!)
                 MIN_BUY_RATIO = 0.37   # 37%+ buy ratio (Gemini: more permissive!)
-                MIN_LIQUIDITY = 10000  # $10k+ liquidity (more permissive!)
+                MIN_LIQUIDITY = 25000  # $25k+ liquidity (Gemini: block smallest rugs!)
 
                 # Check if token meets activity requirements
                 # FLEXIBLE LOGIC: Reject ONLY if lacking BOTH volume AND txns
@@ -1338,16 +1359,16 @@ class MLBot2Foundation:
                 has_buy_pressure = buy_ratio >= MIN_BUY_RATIO
                 has_liquidity = liquidity_usd >= MIN_LIQUIDITY
 
-                # 🔧 FIX $0 LIQUIDITY BUG: Solana RPC lag (PPEMRS +3,167% fix!)
-                # Gemini: "Retry in 2s instead of instant reject"
-                if liquidity_usd == 0 and volume_1h >= 10000:
+                # 🎯 SNIPER DELAY: Solana RPC lag fix (TAKEOVER +769%, WHYFISH +7,190% fix!)
+                # Gemini: "2.5s = avg Raydium pool indexing time after first swaps"
+                if liquidity_usd == 0 and volume_1h >= 5000:  # Lower trigger: $5k (was $10k)
                     liquidity_was_zero = True  # Track that liq was $0 initially
                     logger.info(
                         f"⏳ {symbol}: $0 liq but ${volume_1h:,.0f} vol → "
-                        f"Retry in 2s (Solana RPC lag)..."
+                        f"SNIPER DELAY 2.5s (Raydium pool indexing lag)..."
                     )
 
-                    await asyncio.sleep(2)  # Wait for RPC to update
+                    await asyncio.sleep(2.5)  # Longer wait: 2.5s (was 2s)
 
                     # Re-fetch token data
                     try:
@@ -1356,21 +1377,31 @@ class MLBot2Foundation:
                             raise Exception("No data returned from retry")
                         liquidity_usd_retry = token_data_retry.get('liquidity_usd', 0)
 
-                        if liquidity_usd_retry > 0:
-                            logger.info(f"✅ {symbol}: Liq updated to ${liquidity_usd_retry:,.0f} after retry!")
+                        if liquidity_usd_retry >= 20000:  # Require $20k min (was >0)
+                            logger.info(
+                                f"✅ {symbol}: Liq updated to ${liquidity_usd_retry:,.0f} after SNIPER DELAY! "
+                                f"Pool indexed, safe to enter!"
+                            )
                             liquidity_usd = liquidity_usd_retry
                             token_data['liquidity_usd'] = liquidity_usd_retry
                             has_liquidity = True
                             liquidity_retry_succeeded = True  # Track that retry worked!
+                        elif liquidity_usd_retry > 0:
+                            # Pool exists but still low liq
+                            logger.warning(
+                                f"⚠️ {symbol}: Liq updated to ${liquidity_usd_retry:,.0f} but <$20k min. "
+                                f"Pool too small, rejecting for safety."
+                            )
+                            has_liquidity = False
                         else:
                             # Still $0 after retry - but high vol proves it exists
                             logger.warning(
-                                f"⚠️ {symbol}: Still $0 liq after retry, "
+                                f"⚠️ {symbol}: Still $0 liq after SNIPER DELAY, "
                                 f"but ${volume_1h:,.0f} vol proves it exists → Override!"
                             )
                             has_liquidity = True
                     except Exception as e:
-                        logger.error(f"Error retrying liq for {symbol}: {e}")
+                        logger.error(f"Error in SNIPER DELAY for {symbol}: {e}")
                         # Fallback to volume override
                         has_liquidity = True if volume_1h >= MIN_VOLUME_1H else False
 
@@ -1418,6 +1449,24 @@ class MLBot2Foundation:
                         is_active = True  # Override low_activity rejection
                         if not entry_filter_reason:  # Only set if not already set
                             entry_filter_reason = 'vol_liq_ratio_golden_zone'
+
+                # 🎯 ACCUMULATION PATTERN OVERRIDE (Gemini Strategy!)
+                # High volume + stable price = buying pressure building before breakout
+                # Pattern: Vol > Liq AND price stable (-15% to +15%) = Smart money accumulating
+                if not is_active and liquidity_usd > 0:
+                    price_change_1h = token_data.get('price_change_1h', 0)
+                    vol_liq_ratio = volume_1h / liquidity_usd
+
+                    # Accumulation signal: high interest (vol > liq) + price stability
+                    if vol_liq_ratio > 1.0 and -15 <= price_change_1h <= 15:
+                        logger.info(
+                            f"🎯 {symbol}: ACCUMULATION PATTERN! High vol ${volume_1h:,.0f} > "
+                            f"liq ${liquidity_usd:,.0f} (ratio {vol_liq_ratio:.2f}) with stable price "
+                            f"({price_change_1h:+.1f}% 1h). Smart money building position → Override!"
+                        )
+                        is_active = True  # Override low_activity rejection
+                        if not entry_filter_reason:  # Only set if not already set
+                            entry_filter_reason = 'accumulation_pattern'
 
                 if not is_active:
                     # Token lacks activity - could be dead/bluechip/slow mover
@@ -1625,7 +1674,7 @@ class MLBot2Foundation:
 
             # Filter #3: Liquidity Range (Sweet Spot)
             liquidity_usd = token_data.get('liquidity_usd', 0)
-            MIN_LIQUIDITY = 15_000  # 4th AI optimized: avoid slippage death!
+            MIN_LIQUIDITY = 25_000  # Gemini optimized: $25k min blocks smallest rugs!
             # MAX_LIQUIDITY check moved to early bluechip filter (line ~1245)
 
             if liquidity_usd < MIN_LIQUIDITY:
