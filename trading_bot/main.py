@@ -1470,12 +1470,12 @@ class MLBot2Foundation:
 
                 # 🔧 USE ONLY 5M MOMENTUM: 1m data unreliable, don't miss runners!
                 # 1m data often missing/unreliable from DexScreener API
-                # 5m momentum is reliable indicator - if >5%, token is MOVING!
-                has_momentum = price_change_5m > 5.0
+                # 5m momentum is reliable indicator - if >2.5%, token is MOVING!
+                has_momentum = price_change_5m > 2.5
 
                 if not has_momentum and not is_v_recovery:
                     logger.info(
-                        f"⛔ {symbol}: NO MOMENTUM! Price 5m: {price_change_5m:+.1f}% (need >+5%). "
+                        f"⛔ {symbol}: NO MOMENTUM! Price 5m: {price_change_5m:+.1f}% (need >+2.5%). "
                         f"Token not moving → Would become ZOMBIE! Rejecting."
                     )
                     self.rejected_tracker.record_rejection(
@@ -1489,14 +1489,14 @@ class MLBot2Foundation:
 
                 # 🤖 MIN AVG TRANSACTION FILTER (Gemini FAS 2 #4)! 💎
                 # Block bot-driven spam tokens with dust transactions!
-                # Real buyers: >$10 avg transaction
-                # Bot spam: <$10 avg (many tiny txns to fake volume)
+                # Real buyers: >$5 avg transaction
+                # Bot spam: <$5 avg (many tiny txns to fake volume)
                 if txns_1h > 0:  # Only check if we have txn data
                     avg_txn_size = volume_1h / txns_1h
 
-                    if avg_txn_size < 10.0:  # <$10 avg = bot spam!
+                    if avg_txn_size < 5.0:  # <$5 avg = bot spam!
                         logger.info(
-                            f"⛔ {symbol}: BOT SPAM DETECTED! Avg txn ${avg_txn_size:.2f} <$10 "
+                            f"⛔ {symbol}: BOT SPAM DETECTED! Avg txn ${avg_txn_size:.2f} <$5 "
                             f"(Vol ${volume_1h:,.0f} / {txns_1h} txns). "
                             f"Likely bot-driven fake volume → Rejecting!"
                         )
@@ -1537,9 +1537,9 @@ class MLBot2Foundation:
                 # Instead: Check if token has REAL activity (not dead/bluechip)
                 # Active token = high volume + transactions + buy pressure + liquidity
 
-                # Define activity thresholds (Optimized for quality + volume balance!)
-                MIN_VOLUME_1H = 30000  # $30k+ volume in 1h (real trading)
-                MIN_TXNS_1H = 60       # 60+ transactions (balanced for activity!)
+                # Define activity thresholds (RELAXED to catch early movers!)
+                MIN_VOLUME_1H = 12500  # $12.5k+ volume in 1h (catch early movers!)
+                MIN_TXNS_1H = 40       # 40+ transactions (proportional to volume!)
                 MIN_BUY_RATIO = 0.37   # 37%+ buy ratio (Gemini: more permissive!)
                 MIN_LIQUIDITY = 25000  # $25k+ liquidity (Gemini: block smallest rugs!)
 
