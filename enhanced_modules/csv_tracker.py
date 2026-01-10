@@ -202,6 +202,11 @@ class EnhancedTradeData:
     liquidity_was_zero: bool = False       # Was liquidity $0 at first check? (PPEMRS +3,167% analysis)
     liquidity_retry_succeeded: bool = False  # Did 2s retry successfully update liq? (Solana RPC lag)
 
+    # 🎯 Sniper momentum check tracking (avoid pump tops!)
+    sniper_momentum_checked: bool = False  # Was sniper momentum check performed?
+    sniper_momentum_value: float = 0.0     # Momentum % at sniper check (1m or 5m)
+    sniper_momentum_passed: bool = False   # Did token pass momentum check? (3-45% range)
+
 
 class CSVTracker:
     """
@@ -479,6 +484,11 @@ class CSVTracker:
             entry_filter_reason=getattr(position, 'entry_filter_reason', ''),
             liquidity_was_zero=getattr(position, 'liquidity_was_zero', False),
             liquidity_retry_succeeded=getattr(position, 'liquidity_retry_succeeded', False),
+
+            # 🎯 Sniper momentum check tracking
+            sniper_momentum_checked=getattr(position, 'sniper_momentum_checked', False),
+            sniper_momentum_value=getattr(position, 'sniper_momentum_value', 0.0),
+            sniper_momentum_passed=getattr(position, 'sniper_momentum_passed', False),
         )
 
         self.trades.append(trade_data)
@@ -567,6 +577,8 @@ class CSVTracker:
             'Swap Slippage (%)', 'Swap Route', 'Swap Price Impact (%)',
             # 🔥 Entry Filter Tracking (Gemini Optimizations)
             'Entry Filter Reason', 'Liquidity Was $0', 'Liq Retry Succeeded',
+            # 🎯 Sniper Momentum Check Tracking
+            'Sniper Momentum Checked', 'Sniper Momentum (%)', 'Sniper Momentum Passed',
         ]
 
         # Write CSV
@@ -700,6 +712,10 @@ class CSVTracker:
                     'Entry Filter Reason': trade.entry_filter_reason if trade.entry_filter_reason else 'N/A',
                     'Liquidity Was $0': 'Yes' if trade.liquidity_was_zero else 'No',
                     'Liq Retry Succeeded': 'Yes' if trade.liquidity_retry_succeeded else 'No',
+                    # 🎯 Sniper Momentum Check Tracking
+                    'Sniper Momentum Checked': 'Yes' if trade.sniper_momentum_checked else 'No',
+                    'Sniper Momentum (%)': f"{trade.sniper_momentum_value:+.1f}%",
+                    'Sniper Momentum Passed': 'Yes' if trade.sniper_momentum_passed else 'No',
                 })
 
         logger.info(f"Exported {len(self.trades)} trades to {filepath}")

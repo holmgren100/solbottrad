@@ -1600,6 +1600,19 @@ class MLBot2Foundation:
                                     rejection_stage='sniper_momentum_check'
                                 )
                                 return
+                            elif current_momentum > 45.0:
+                                logger.info(
+                                    f"⛔ {symbol}: SNIPER REJECTED! Liq found but TOO LATE ({current_momentum:+.1f}% >+45%). "
+                                    f"Likely buying pump TOP - high rug risk! Skip!"
+                                )
+                                self.rejected_tracker.record_rejection(
+                                    token_address=token_address,
+                                    rejection_reason=f"sniper_pump_top_{current_momentum:+.1f}%",
+                                    token_data=token_data,
+                                    symbol=symbol,
+                                    rejection_stage='sniper_momentum_check'
+                                )
+                                return
 
                             logger.info(
                                 f"✅ {symbol}: Liq updated to ${liquidity_usd_retry:,.0f} after SNIPER DELAY! "
@@ -1609,6 +1622,11 @@ class MLBot2Foundation:
                             token_data['liquidity_usd'] = liquidity_usd_retry
                             has_liquidity = True
                             liquidity_retry_succeeded = True  # Track that retry worked!
+
+                            # Track sniper momentum check data for CSV export
+                            token_data['_sniper_momentum_checked'] = True
+                            token_data['_sniper_momentum_value'] = current_momentum
+                            token_data['_sniper_momentum_passed'] = True
                         elif liquidity_usd_retry > 0:
                             # Pool exists but still low liq
                             logger.warning(
@@ -1657,11 +1675,29 @@ class MLBot2Foundation:
                                     rejection_stage='sniper_momentum_check'
                                 )
                                 return
+                            elif current_momentum > 45.0:
+                                logger.info(
+                                    f"⛔ {symbol}: SNIPER REJECTED! TOO LATE ({current_momentum:+.1f}% >+45%). "
+                                    f"Likely buying pump TOP - high rug risk! Skip!"
+                                )
+                                self.rejected_tracker.record_rejection(
+                                    token_address=token_address,
+                                    rejection_reason=f"sniper_pump_top_{current_momentum:+.1f}%",
+                                    token_data=token_data,
+                                    symbol=symbol,
+                                    rejection_stage='sniper_momentum_check'
+                                )
+                                return
                             else:
                                 logger.info(
                                     f"✅ {symbol}: SNIPER MOMENTUM CHECK PASSED! Still pumping {current_momentum:+.1f}% "
                                     f"→ Buying on the way UP, not the way DOWN! 🚀"
                                 )
+
+                                # Track sniper momentum check data for CSV export
+                                token_data['_sniper_momentum_checked'] = True
+                                token_data['_sniper_momentum_value'] = current_momentum
+                                token_data['_sniper_momentum_passed'] = True
 
                             has_liquidity = True
                             liquidity_retry_succeeded = True  # Track sniper delay override!
@@ -2241,6 +2277,10 @@ class MLBot2Foundation:
                 entry_filter_reason=entry_filter_reason,
                 liquidity_was_zero=liquidity_was_zero,
                 liquidity_retry_succeeded=liquidity_retry_succeeded,
+                # 🎯 SNIPER MOMENTUM CHECK TRACKING
+                sniper_momentum_checked=token_data.get('_sniper_momentum_checked', False),
+                sniper_momentum_value=token_data.get('_sniper_momentum_value', 0.0),
+                sniper_momentum_passed=token_data.get('_sniper_momentum_passed', False),
             )
 
             if position:
