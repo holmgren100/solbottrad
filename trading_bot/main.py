@@ -109,6 +109,107 @@ class StopLossCooldown:
         }
 
 
+class RatioVelocityTracker:
+    """
+    Track Vol/Liq ratio velocity (acceleration) per token.
+
+    Gemini Strategy: "Ratio velocity = acceleration of momentum"
+    - Rising velocity = momentum building → early entry signal
+    - Falling velocity = momentum dying → avoid entry
+
+    Simple implementation for demo phase (no persistent data):
+    - Store last 3 ratio measurements per token (in-memory)
+    - Calculate velocity: (current - old) / time_delta
+    - Threshold: velocity >0.15 per minute = strong acceleration
+
+    Future ML phase: Full historical data, ML predictions!
+    """
+
+    def __init__(self):
+        # token_address -> [(timestamp, ratio), ...]
+        self.ratio_history: Dict[str, list] = {}
+        self.max_samples = 3  # Keep last 3 measurements
+
+    def record_ratio(self, token_address: str, ratio: float):
+        """Record a vol/liq ratio measurement with timestamp."""
+        timestamp = datetime.now()
+
+        if token_address not in self.ratio_history:
+            self.ratio_history[token_address] = []
+
+        # Add new measurement
+        self.ratio_history[token_address].append((timestamp, ratio))
+
+        # Keep only last N samples
+        if len(self.ratio_history[token_address]) > self.max_samples:
+            self.ratio_history[token_address] = self.ratio_history[token_address][-self.max_samples:]
+
+    def get_velocity(self, token_address: str) -> Optional[float]:
+        """
+        Calculate ratio velocity (change per minute).
+
+        Returns:
+            Velocity in ratio units per minute, or None if insufficient data
+
+        Example:
+            Ratio goes 0.5 → 1.5 in 2min → velocity = +0.5/min (strong!)
+            Ratio goes 2.0 → 1.5 in 2min → velocity = -0.25/min (dying)
+        """
+        if token_address not in self.ratio_history:
+            return None
+
+        history = self.ratio_history[token_address]
+
+        if len(history) < 2:
+            return None  # Need at least 2 measurements
+
+        # Calculate velocity from oldest to newest
+        oldest_time, oldest_ratio = history[0]
+        newest_time, newest_ratio = history[-1]
+
+        time_delta_minutes = (newest_time - oldest_time).total_seconds() / 60
+
+        if time_delta_minutes < 0.1:  # Avoid division by near-zero
+            return None
+
+        velocity = (newest_ratio - oldest_ratio) / time_delta_minutes
+        return velocity
+
+    def has_strong_acceleration(self, token_address: str, threshold: float = 0.15) -> bool:
+        """
+        Check if token has strong positive velocity.
+
+        Args:
+            token_address: Token to check
+            threshold: Minimum velocity (ratio units per minute)
+
+        Returns:
+            True if velocity > threshold (momentum building!)
+        """
+        velocity = self.get_velocity(token_address)
+
+        if velocity is None:
+            return False
+
+        return velocity > threshold
+
+    def clear_old(self, hours: int = 2):
+        """Clear measurements older than specified hours (keep memory clean)."""
+        from datetime import timedelta
+        cutoff = datetime.now() - timedelta(hours=hours)
+
+        for token_address in list(self.ratio_history.keys()):
+            # Filter out old measurements
+            self.ratio_history[token_address] = [
+                (ts, ratio) for ts, ratio in self.ratio_history[token_address]
+                if ts > cutoff
+            ]
+
+            # Remove token if no data left
+            if not self.ratio_history[token_address]:
+                del self.ratio_history[token_address]
+
+
 class MLBot2Foundation:
     """
     ML Bot 2 Foundation - Protected Core + Optional Enhancements
@@ -132,6 +233,10 @@ class MLBot2Foundation:
         # === STOP LOSS COOLDOWN ===
         self.stop_cooldown = StopLossCooldown()
         logger.info("  ✅ StopLossCooldown initialized (smart duration based on stop depth)")
+
+        # === RATIO VELOCITY TRACKER ===
+        self.ratio_velocity = RatioVelocityTracker()
+        logger.info("  ✅ RatioVelocityTracker initialized (Gemini: track momentum acceleration)")
 
         # === 🔒 PROTECTED CORE (Never Modified!) ===
         logger.info("Initializing protected core...")
@@ -1327,6 +1432,10 @@ class MLBot2Foundation:
                 # High ratio = unsustainable volume spike, dump incoming!
                 if liquidity_usd > 0:  # Only check if we have liquidity data
                     vol_liq_ratio = volume_1h / liquidity_usd
+
+                    # 📊 Track ratio for velocity calculation (Gemini ML future!)
+                    self.ratio_velocity.record_ratio(token_address, vol_liq_ratio)
+
                     if vol_liq_ratio > 3.0:
                         logger.info(
                             f"⛔ {symbol}: PUMP & DUMP DANGER! Vol/Liq ratio {vol_liq_ratio:.2f} >3.0 "
@@ -1467,6 +1576,24 @@ class MLBot2Foundation:
                         is_active = True  # Override low_activity rejection
                         if not entry_filter_reason:  # Only set if not already set
                             entry_filter_reason = 'accumulation_pattern'
+
+                # 🚀 RATIO VELOCITY OVERRIDE (Gemini Strategy - RIKTIGT INTRESSANT!)
+                # Momentum acceleration = ratio increasing rapidly over time
+                # Example: Ratio 0.5 → 1.5 in 2min = +0.5/min velocity (strong!)
+                # Catches tokens BEFORE they explode (early momentum detection)
+                if not is_active:
+                    velocity = self.ratio_velocity.get_velocity(token_address)
+
+                    if velocity is not None and velocity > 0.15:  # >0.15 ratio units/min
+                        current_ratio = volume_1h / liquidity_usd if liquidity_usd > 0 else 0
+                        logger.info(
+                            f"🚀 {symbol}: RATIO VELOCITY ACCELERATION! Velocity {velocity:+.3f}/min "
+                            f"(current ratio {current_ratio:.2f}). Momentum building FAST → "
+                            f"Early entry signal! Override!"
+                        )
+                        is_active = True  # Override low_activity rejection
+                        if not entry_filter_reason:  # Only set if not already set
+                            entry_filter_reason = 'ratio_velocity_acceleration'
 
                 if not is_active:
                     # Token lacks activity - could be dead/bluechip/slow mover
