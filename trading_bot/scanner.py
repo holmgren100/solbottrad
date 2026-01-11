@@ -56,7 +56,7 @@ class TokenScanner:
 
         # Track scanned tokens with timestamps (allow re-entry after cooldown)
         self.scanned_tokens: Dict[str, datetime] = {}  # address -> last_scan_time
-        self.scan_cooldown_minutes = 30  # Allow re-entry after 30 min
+        self.scan_cooldown_minutes = 5  # Allow re-entry after 5 min (memecoin momentum changes fast!)
         self.last_scan_time: Optional[datetime] = None
 
     async def __aenter__(self):
