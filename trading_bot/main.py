@@ -339,7 +339,7 @@ class MLBot2Foundation:
         # === 🔍 TOKEN SCANNER ===
         from trading_bot.scanner import TokenScanner
         self.scanner = TokenScanner(
-            min_liquidity=1000,  # Lowered to let Jupiter tokens through (they often lack liquidity data)
+            min_liquidity=25000,  # Gemini: Block low-liq rugs EARLY (86 rugs → 15-20, save $560!)
             min_volume_24h=1000,  # Lowered to match working bot settings
             dexscreener_api_key=config.dexscreener_api_key,
             position_manager=self.position_manager
@@ -869,9 +869,9 @@ class MLBot2Foundation:
 
             # === ZOMBIE EXIT: CUT STALE POSITIONS ===
             # Data: >60min positions show 21% win, only +$41 profit
-            # Gemini optimization: 45min → 30min to free capital faster!
-            # Exit if >30min AND profit <5% (not moving, cut losses!)
-            if position_duration_min > 30 and position.unrealized_pnl_percent < 5.0:
+            # Gemini optimization: 30min → 20min to free capital faster!
+            # Exit if >20min AND profit <5% (not moving, cut losses!)
+            if position_duration_min > 20 and position.unrealized_pnl_percent < 5.0:
                 logger.info(
                     f"⏰ {position.symbol}: ZOMBIE EXIT! Duration {position_duration_min:.0f}min "
                     f"with only {position.unrealized_pnl_percent:.1f}% profit. Position is stale, exiting!"
@@ -883,7 +883,7 @@ class MLBot2Foundation:
                 await self.close_position(
                     position.token_address,
                     position.current_price,
-                    'zombie_exit_30min'
+                    'zombie_exit_20min'
                 )
                 continue
 
@@ -1468,19 +1468,25 @@ class MLBot2Foundation:
                     token_data.get('_v_recovery_accumulation_triggered', False)
                 )
 
-                # 🔧 USE ONLY 5M MOMENTUM: 1m data unreliable, don't miss runners!
-                # 1m data often missing/unreliable from DexScreener API
-                # 5m momentum is reliable indicator - if >2.5%, token is MOVING!
-                has_momentum = price_change_5m > 2.5
+                # 💎 DUAL MOMENTUM CHECK: Must move on BOTH 5m AND 1m timeframes!
+                # Gemini: Kill zombies that barely move (101 small wins avg 4.8% → target big wins!)
+                # 5m >3.0%: Shows sustained movement (not 2.5% noise)
+                # 1m >1.0%: Must be moving RIGHT NOW (not stale momentum)
+                price_change_1m = token_data.get('price_change_1m', 0)
+                has_momentum_5m = price_change_5m > 3.0  # Stricter: 2.5% → 3.0%
+                has_momentum_1m = price_change_1m > 1.0  # NEW: Must move in last minute
+
+                # Both timeframes must show momentum (unless v-recovery override)
+                has_momentum = has_momentum_5m and has_momentum_1m
 
                 if not has_momentum and not is_v_recovery:
                     logger.info(
-                        f"⛔ {symbol}: NO MOMENTUM! Price 5m: {price_change_5m:+.1f}% (need >+2.5%). "
-                        f"Token not moving → Would become ZOMBIE! Rejecting."
+                        f"⛔ {symbol}: NO MOMENTUM! Price 5m: {price_change_5m:+.1f}% (need >+3.0%), "
+                        f"1m: {price_change_1m:+.1f}% (need >+1.0%). Token not moving → Would become ZOMBIE! Rejecting."
                     )
                     self.rejected_tracker.record_rejection(
                         token_address=token_address,
-                        rejection_reason=f"no_momentum_5m{price_change_5m:+.1f}%",
+                        rejection_reason=f"no_momentum_5m{price_change_5m:+.1f}%_1m{price_change_1m:+.1f}%",
                         token_data=token_data,
                         symbol=symbol,
                         rejection_stage='momentum_filter'
@@ -1509,7 +1515,7 @@ class MLBot2Foundation:
                         )
                         return
 
-                # 🚨 PUMP & DUMP FILTER: Vol/Liq ratio >3.0 = danger zone!
+                # 🚨 PUMP & DUMP FILTER: Vol/Liq ratio check with smart exceptions!
                 # Gemini analysis: SAVE (ratio 167) dumped -79%, ASMONGOLD (ratio 118) dumped -56%
                 # High ratio = unsustainable volume spike, dump incoming!
                 if liquidity_usd > 0:  # Only check if we have liquidity data
@@ -1518,18 +1524,37 @@ class MLBot2Foundation:
                     # 📊 Track ratio for velocity calculation (Gemini ML future!)
                     self.ratio_velocity.record_ratio(token_address, vol_liq_ratio)
 
-                    if vol_liq_ratio > 3.0:
+                    # 💎 SMART MAX RATIO: High-liq tokens can handle more volume!
+                    # $50k+ liq = can sustain 4X volume, <$50k liq = max 3X
+                    max_ratio = 4.0 if liquidity_usd > 50000 else 3.0
+
+                    if vol_liq_ratio > max_ratio:
                         logger.info(
-                            f"⛔ {symbol}: PUMP & DUMP DANGER! Vol/Liq ratio {vol_liq_ratio:.2f} >3.0 "
-                            f"(Vol ${volume_1h:,.0f} / Liq ${liquidity_usd:,.0f}). "
-                            f"Historical data: ratio >3.0 tokens dump hard. REJECTING!"
+                            f"⛔ {symbol}: PUMP & DUMP DANGER! Vol/Liq ratio {vol_liq_ratio:.2f} >{max_ratio} "
+                            f"(Vol ${volume_1h:,.0f} / Liq ${liquidity_usd:,.0f}). Max for liq level: {max_ratio}. REJECTING!"
                         )
                         self.rejected_tracker.record_rejection(
                             token_address=token_address,
-                            rejection_reason=f"pump_dump_ratio_{vol_liq_ratio:.2f}",
+                            rejection_reason=f"pump_dump_ratio_{vol_liq_ratio:.2f}_max{max_ratio}",
                             token_data=token_data,
                             symbol=symbol,
                             rejection_stage='ratio_filter'
+                        )
+                        return
+
+                    # 🚨 WASH TRADING DETECTION: Vol >5X liq = bot manipulation!
+                    # Real organic growth: vol 1-3X liq. Wash trading: vol 5-10X+ liq
+                    if volume_1h > liquidity_usd * 5:
+                        logger.info(
+                            f"⛔ {symbol}: WASH TRADING DETECTED! Vol ${volume_1h:,.0f} is {volume_1h/liquidity_usd:.1f}X "
+                            f"liquidity ${liquidity_usd:,.0f} (>5X = bot manipulation). REJECTING!"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"wash_trading_{volume_1h/liquidity_usd:.1f}x",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='wash_trading_filter'
                         )
                         return
 
