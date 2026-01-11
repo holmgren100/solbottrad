@@ -1426,9 +1426,10 @@ class MLBot2Foundation:
 
                 # Check if momentum filter triggered any special entry reasons
                 if token_data.get('_incubator_triggered'):
-                    # Gemini Priority #3: Incubator breakout trigger!
+                    # Gemini Priority #3: Incubator breakout trigger! (FAS 4.2: STRONG vs EARLY)
                     watch_duration = token_data.get('_incubator_watch_duration_minutes', 0)
-                    entry_filter_reason = f'incubator_breakout_{watch_duration:.0f}min_watch'
+                    trigger_type = token_data.get('_incubator_trigger_type', 'UNKNOWN')
+                    entry_filter_reason = f'incubator_{trigger_type.lower()}_{watch_duration:.0f}min_watch'
                 elif token_data.get('_age_buffer_triggered'):
                     entry_filter_reason = 'age_volatility_buffer'
                 elif token_data.get('_v_recovery_bounce_triggered'):
@@ -1676,6 +1677,9 @@ class MLBot2Foundation:
                                 f"LP burned {lp_burned_pct:.0f}%, Liq ${liquidity_usd:,.0f}. "
                                 f"High ratio = extreme demand, NOT rug risk! (WhaleGuru +1477% strategy)"
                             )
+                            # Mark for CSV tracking - this is a moonshot exception entry!
+                            if not entry_filter_reason:
+                                entry_filter_reason = f'moonshot_exception_ratio_{vol_liq_ratio:.2f}'
                             # Allow entry - don't reject!
                         else:
                             # Normal rejection - either no LP burn, low liq, or ratio too extreme
@@ -2683,7 +2687,11 @@ class MLBot2Foundation:
 
                             # Mark token as incubator-triggered for CSV tracking
                             current_data['_incubator_triggered'] = True
+                            current_data['_incubator_trigger_type'] = trigger_type  # Track STRONG vs EARLY
                             current_data['_incubator_watch_duration_minutes'] = age_seconds / 60
+                            current_data['_incubator_price_change_1m'] = price_change_1m
+                            current_data['_incubator_vol_spike_pct'] = volume_spike_pct
+                            current_data['_incubator_buy_ratio'] = buy_ratio
 
                             # BUY with current data!
                             # Use analyze_and_trade_token to go through full pipeline

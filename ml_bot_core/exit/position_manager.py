@@ -112,6 +112,9 @@ class Position:
     liquidity_was_zero: bool = False      # Was liquidity $0 at first check? (PPEMRS +3,167% analysis)
     liquidity_retry_succeeded: bool = False  # Did 2s retry successfully update liq? (Solana RPC lag)
 
+    # Exit tracking (FAS 3.1: Step-up trailing analysis)
+    step_tier: str = ''                   # Which step-up tier at exit: 'tight_7pct', 'standard_15pct', 'wide_25pct'
+
     # 🎯 Sniper momentum check tracking (avoid pump tops!)
     sniper_momentum_checked: bool = False  # Was sniper momentum check performed?
     sniper_momentum_value: float = 0.0     # Momentum % at sniper check (1m or 5m)
@@ -686,11 +689,25 @@ class PositionManager:
         # Trigger if current price drops below trailing stop price
         if position.current_price <= position.trailing_stop_price:
             gain_pct = ((position.highest_price - position.entry_price) / position.entry_price) * 100
+
+            # Calculate which step-up tier we're in (FAS 3.1: for CSV analysis)
+            if gain_pct < 20:
+                step_tier = "tight_7pct"
+            elif gain_pct < 100:
+                step_tier = "standard_15pct"
+            else:
+                step_tier = "wide_25pct"
+
             logger.info(
                 f"Trailing stop triggered for {token_address[:8]}...: "
                 f"Peak ${position.highest_price:.8f} (+{gain_pct:.1f}%), "
-                f"Exit ${position.current_price:.8f}"
+                f"Exit ${position.current_price:.8f}, "
+                f"Step-up tier: {step_tier}"
             )
+
+            # Store step tier in position for CSV export
+            position.step_tier = step_tier
+
             return True
 
         return False
