@@ -164,19 +164,21 @@ class Position:
                 self.peak_price = new_price  # Track for analysis
                 self.peak_time = datetime.now()  # Track when peak was reached
 
-                # 🚀 STEP-UP TRAILING (Gemini FAS 1B #3)! 💎💎💎
+                # 🚀 STEP-UP TRAILING (Gemini FAS 3.1 OPTIMIZED)! 💎💎💎
                 # Dynamic trailing distance based on profit level!
                 # Rationale: Small wins need protection, mega wins need room to run!
+                # FIX: Changed 50% → 100% threshold (WHITECAT +12% → +45% fix!)
                 current_profit_pct = self.unrealized_pnl_percent
 
                 if current_profit_pct < 20:
                     # Small wins: TIGHT trailing (secure it!)
                     trailing_pct = 7.0
-                elif current_profit_pct < 50:
-                    # Medium wins: STANDARD trailing (give some room)
+                elif current_profit_pct < 100:
+                    # Medium wins: STANDARD trailing (give room for natural retraces!)
+                    # Gemini: Don't get shaken out 50-100% range (BOW +126% → +180% fix!)
                     trailing_pct = 15.0  # User confirmed 15% works best!
                 else:
-                    # BIG wins >50%: WIDE trailing (let it RUN to 200-500%!)
+                    # MOONSHOT wins >100%: WIDE trailing (let it RUN to 200-500%!)
                     trailing_pct = 25.0
 
                 # Calculate new trailing stop (dynamic % below highest price)

@@ -855,16 +855,16 @@ class MLBot2Foundation:
                     f"→ SL moved to +1% (${position.stop_loss:.8f}). Trade now RISK-FREE! ✅"
                 )
 
-            # === 🚨 NUCLEAR STOP LOSS: -20% ABSOLUTE OVERRIDE (GEMINI PRIORITY #1) ===
+            # === 🚨 NUCLEAR STOP LOSS: -18% TRIGGER → -20% ACTUAL (GEMINI FAS 4.3) ===
             # Problem: TrumpWhale crashed to -79.6% (-$40!) while zombie exit waited 36min!
-            # Gemini: "Zombie can't be -80%! IMPOSSIBLE! Exit at -20% MAX!"
-            # Solution: HARD -20% stop that overrides ALL other exits (zombie, trailing, everything!)
-            # This prevents extreme crashes from turning positions into disasters!
-            if position.unrealized_pnl_percent <= -20.0:
+            # Slippage Issue: -20% trigger → -30.6% avg actual exit (10.6% slippage!)
+            # Solution: Trigger at -18% to account for slippage, target -20% actual exit
+            # HARD stop that overrides ALL other exits (zombie, trailing, everything!)
+            if position.unrealized_pnl_percent <= -18.0:
                 logger.critical(
                     f"🚨 NUCLEAR STOP LOSS! {position.symbol}: "
-                    f"{position.unrealized_pnl_percent:.1f}% ≤ -20%! IMMEDIATE EXIT! "
-                    f"(TrumpWhale -79% disaster fix - can NEVER let positions crash this deep!)"
+                    f"{position.unrealized_pnl_percent:.1f}% ≤ -18% (trigger)! IMMEDIATE EXIT! "
+                    f"(Target -20% actual after slippage - TrumpWhale -79% disaster fix)"
                 )
 
                 # Add to cooldown with extreme loss depth
@@ -875,7 +875,7 @@ class MLBot2Foundation:
                 await self.close_position(
                     position.token_address,
                     position.current_price,
-                    'nuclear_stop_loss_20pct'
+                    'nuclear_stop_loss_18pct_trigger'
                 )
                 continue  # Move to next position immediately
 
@@ -1665,18 +1665,33 @@ class MLBot2Foundation:
                     max_ratio = 4.0 if liquidity_usd > 50000 else 3.0
 
                     if vol_liq_ratio > max_ratio:
-                        logger.info(
-                            f"⛔ {symbol}: PUMP & DUMP DANGER! Vol/Liq ratio {vol_liq_ratio:.2f} >{max_ratio} "
-                            f"(Vol ${volume_1h:,.0f} / Liq ${liquidity_usd:,.0f}). Max for liq level: {max_ratio}. REJECTING!"
-                        )
-                        self.rejected_tracker.record_rejection(
-                            token_address=token_address,
-                            rejection_reason=f"pump_dump_ratio_{vol_liq_ratio:.2f}_max{max_ratio}",
-                            token_data=token_data,
-                            symbol=symbol,
-                            rejection_stage='ratio_filter'
-                        )
-                        return
+                        # 🚀 MOONSHOT EXCEPTION (Gemini FAS 3.2)! 💎
+                        # High ratio with burned LP = extreme demand, NOT rug risk!
+                        # Examples: WhaleGuru +1477% (5.73), BIERISH +1316% (5.26), ChillWhale +929% (4.55)
+                        lp_burned_pct = token_data.get('lp_burned_percent', 0.0)
+
+                        if lp_burned_pct >= 100.0 and liquidity_usd >= 30000 and vol_liq_ratio <= 6.0:
+                            logger.info(
+                                f"🚀 {symbol}: HIGH RATIO {vol_liq_ratio:.2f} but MOONSHOT EXCEPTION! "
+                                f"LP burned {lp_burned_pct:.0f}%, Liq ${liquidity_usd:,.0f}. "
+                                f"High ratio = extreme demand, NOT rug risk! (WhaleGuru +1477% strategy)"
+                            )
+                            # Allow entry - don't reject!
+                        else:
+                            # Normal rejection - either no LP burn, low liq, or ratio too extreme
+                            logger.info(
+                                f"⛔ {symbol}: PUMP & DUMP DANGER! Vol/Liq ratio {vol_liq_ratio:.2f} >{max_ratio} "
+                                f"(Vol ${volume_1h:,.0f} / Liq ${liquidity_usd:,.0f}). "
+                                f"No moonshot exception (LP {lp_burned_pct:.0f}%, need 100%). REJECTING!"
+                            )
+                            self.rejected_tracker.record_rejection(
+                                token_address=token_address,
+                                rejection_reason=f"pump_dump_ratio_{vol_liq_ratio:.2f}_max{max_ratio}",
+                                token_data=token_data,
+                                symbol=symbol,
+                                rejection_stage='ratio_filter'
+                            )
+                            return
 
                     # 🚨 WASH TRADING DETECTION: Vol >5X liq = bot manipulation!
                     # Real organic growth: vol 1-3X liq. Wash trading: vol 5-10X+ liq
@@ -2487,14 +2502,14 @@ class MLBot2Foundation:
         """
         Check if rejected token qualifies for incubator watchlist.
 
-        Gemini Criteria: Quality fundamentals, just needs momentum spark!
+        Gemini Criteria (FAS 4.1 OPTIMIZED): Quality fundamentals, just needs momentum spark!
         - 100% LP burned (safety)
-        - Age >15 min (survived rug period)
-        - Liquidity $20k-$150k (moonshot range)
-        - Volume >$50k (active trading)
-        - Vol/Liq <1.0 (NOT overheated - accumulation phase!)
+        - Age >10 min (survived initial rug period) - LOWERED from 15min
+        - Liquidity $15k-$150k (moonshot range) - LOWERED from $20k
+        - Volume >$30k (active trading) - LOWERED from $50k
+        - Vol/Liq <1.5 (NOT overheated - accumulation phase!) - RAISED from 1.0
 
-        Examples: H1B +6,070%, BLACKGOLD +4,108% were rejected for no_momentum!
+        Examples: H1B +6,070%, BLACKGOLD +4,108%, MCGA +3847%, squirt +691%
         """
         try:
             lp_burned_pct = token_data.get('lp_burned_percent', 0.0)
@@ -2508,13 +2523,13 @@ class MLBot2Foundation:
             if liquidity_usd > 0:
                 vol_liq_ratio = volume_1h / liquidity_usd
 
-            # Check all criteria
+            # Check all criteria (FAS 4.1: More permissive to catch sleeping giants!)
             checks = {
                 'lp_burned': lp_burned_pct >= 100.0,
-                'age_mature': age_minutes >= 15.0,  # Survived rug period!
-                'liq_range': 20000 <= liquidity_usd <= 150000,  # Moonshot sweet spot
-                'volume': volume_1h >= 50000,  # Active trading
-                'not_overheated': vol_liq_ratio < 1.0  # Accumulation phase!
+                'age_mature': age_minutes >= 10.0,  # LOWERED: 15 → 10 min
+                'liq_range': 15000 <= liquidity_usd <= 150000,  # LOWERED: $20k → $15k
+                'volume': volume_1h >= 30000,  # LOWERED: $50k → $30k
+                'not_overheated': vol_liq_ratio < 1.5  # RAISED: 1.0 → 1.5 (allow more activity)
             }
 
             all_passed = all(checks.values())
@@ -2635,19 +2650,32 @@ class MLBot2Foundation:
                         if initial_volume > 0:
                             volume_spike_pct = ((volume_1h - initial_volume) / initial_volume) * 100
 
-                        # === BREAKOUT TRIGGER CONDITIONS ===
+                        # === BREAKOUT TRIGGER CONDITIONS (FAS 4.2 OPTIMIZED) ===
                         # Gemini: Buy when accumulation phase ends!
-                        trigger_price = price_change_1m > 3.5  # Price breaking out!
-                        trigger_volume = volume_spike_pct > 50  # Volume spiking!
-                        trigger_buyers = buy_ratio > 0.60  # Buyers dominating!
+                        # Two-tier trigger system: Catch both strong breakouts AND early acceleration
 
-                        if trigger_price and trigger_volume and trigger_buyers:
+                        # PRIMARY: Strong breakout (conservative)
+                        trigger_strong = (
+                            price_change_1m > 4.0 and  # RAISED: 3.5 → 4.0% (Gemini's suggestion)
+                            volume_spike_pct > 50 and
+                            buy_ratio > 0.60
+                        )
+
+                        # SECONDARY: Early acceleration (aggressive - catch MCGA +3847% earlier!)
+                        trigger_early = (
+                            price_change_1m > 2.5 and  # Lower price threshold
+                            volume_spike_pct > 100 and  # But need HUGE volume spike
+                            buy_ratio > 0.70  # And strong buyer dominance
+                        )
+
+                        if trigger_strong or trigger_early:
+                            trigger_type = "STRONG" if trigger_strong else "EARLY"
                             logger.info(
-                                f"🚀🚀🚀 INCUBATOR TRIGGER! {symbol}: "
+                                f"🚀🚀🚀 INCUBATOR {trigger_type} TRIGGER! {symbol}: "
                                 f"Price 1m +{price_change_1m:.1f}%, "
                                 f"Vol spike +{volume_spike_pct:.0f}%, "
                                 f"Buy ratio {buy_ratio:.0%}. "
-                                f"BREAKOUT CONFIRMED - BUYING! (H1B/BLACKGOLD strategy)"
+                                f"BREAKOUT CONFIRMED - BUYING! (MCGA/H1B/BLACKGOLD strategy)"
                             )
 
                             # Remove from incubator (buying now!)

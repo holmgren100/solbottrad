@@ -60,7 +60,8 @@ class JupiterSwapExecutor:
         input_mint: str,
         output_mint: str,
         amount: int,
-        slippage_bps: int = 500  # 5% slippage = 500 basis points
+        slippage_bps: int = 500,  # 5% slippage = 500 basis points
+        priority_fee_lamports: int = 12000  # Gemini FAS 4.3: 0.012 SOL = 12,000 lamports
     ) -> Optional[Dict]:
         """
         Get a swap quote from Jupiter.
@@ -70,6 +71,7 @@ class JupiterSwapExecutor:
             output_mint: Output token mint address
             amount: Amount in smallest unit (lamports for SOL)
             slippage_bps: Slippage tolerance in basis points
+            priority_fee_lamports: Priority fee for faster execution (default 12,000 = 0.012 SOL)
 
         Returns:
             Quote data or None if failed
@@ -81,7 +83,9 @@ class JupiterSwapExecutor:
                 'amount': str(amount),
                 'slippageBps': slippage_bps,
                 'onlyDirectRoutes': 'false',
-                'asLegacyTransaction': 'false'
+                'asLegacyTransaction': 'false',
+                # Gemini FAS 4.3: Higher priority fee for nuclear stops to reduce slippage
+                'prioritizationFeeLamports': str(priority_fee_lamports)
             }
 
             async with aiohttp.ClientSession() as session:
