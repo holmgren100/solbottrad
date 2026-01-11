@@ -238,6 +238,14 @@ class MLBot2Foundation:
         self.ratio_velocity = RatioVelocityTracker()
         logger.info("  ✅ RatioVelocityTracker initialized (Gemini: track momentum acceleration)")
 
+        # === 💎 INCUBATOR SYSTEM (GEMINI PRIORITY #3) ===
+        # Three-tier system: A (Sniper) / B (Incubator) / C (Blacklist)
+        # Catches sleeping giants like H1B +6,070%, BLACKGOLD +4,108%!
+        self.incubator_tokens = {}  # Dict[token_address, entry_data]
+        self.incubator_max_age_hours = 2.0  # Auto-remove tokens after 2h
+        self.incubator_scan_interval = 25  # Scan every 25 seconds (fast!)
+        logger.info("  ✅ Incubator system initialized (catch accumulation phase moonshots)")
+
         # === 🔒 PROTECTED CORE (Never Modified!) ===
         logger.info("Initializing protected core...")
 
@@ -847,7 +855,31 @@ class MLBot2Foundation:
                     f"→ SL moved to +1% (${position.stop_loss:.8f}). Trade now RISK-FREE! ✅"
                 )
 
-            # === FAST RUG EXIT: INSTANT DUMP DETECTION (HIGHEST PRIORITY!) ===
+            # === 🚨 NUCLEAR STOP LOSS: -20% ABSOLUTE OVERRIDE (GEMINI PRIORITY #1) ===
+            # Problem: TrumpWhale crashed to -79.6% (-$40!) while zombie exit waited 36min!
+            # Gemini: "Zombie can't be -80%! IMPOSSIBLE! Exit at -20% MAX!"
+            # Solution: HARD -20% stop that overrides ALL other exits (zombie, trailing, everything!)
+            # This prevents extreme crashes from turning positions into disasters!
+            if position.unrealized_pnl_percent <= -20.0:
+                logger.critical(
+                    f"🚨 NUCLEAR STOP LOSS! {position.symbol}: "
+                    f"{position.unrealized_pnl_percent:.1f}% ≤ -20%! IMMEDIATE EXIT! "
+                    f"(TrumpWhale -79% disaster fix - can NEVER let positions crash this deep!)"
+                )
+
+                # Add to cooldown with extreme loss depth
+                if position.symbol:
+                    self.stop_cooldown.add_stop(position.symbol, position.unrealized_pnl_percent)
+
+                # IMMEDIATE EXIT - highest priority!
+                await self.close_position(
+                    position.token_address,
+                    position.current_price,
+                    'nuclear_stop_loss_20pct'
+                )
+                continue  # Move to next position immediately
+
+            # === FAST RUG EXIT: INSTANT DUMP DETECTION (HIGH PRIORITY!) ===
             # Data: Unslop -74% (6min), 67coincle -46% (12min), ANUS -44% (6min)
             # Extended from <2min to <5min to catch more early rugs!
             # If <5min AND <-10%, likely RUG/HONEYPOT → Exit NOW!
@@ -1060,7 +1092,13 @@ class MLBot2Foundation:
         # Initialize API clients
         await self.scanner.__aenter__()
 
+        # === START INCUBATOR MONITORING LOOP ===
+        # Runs in parallel with main loop, scans every 25 seconds
+        incubator_task = None
         try:
+            incubator_task = asyncio.create_task(self.monitor_incubator())
+            logger.info("  ✅ Incubator monitoring loop started (parallel)")
+
             # Main trading loop
             scan_interval = self.config.core_config.scan_interval
             monitor_interval = self.config.core_config.monitor_interval
@@ -1093,6 +1131,14 @@ class MLBot2Foundation:
                 monitor_counter -= 1
 
         finally:
+            # Stop incubator monitoring loop
+            if incubator_task and not incubator_task.done():
+                incubator_task.cancel()
+                try:
+                    await incubator_task
+                except asyncio.CancelledError:
+                    logger.info("  ✅ Incubator monitoring loop stopped")
+
             # Cleanup
             await self.scanner.__aexit__(None, None, None)
 
@@ -1379,7 +1425,11 @@ class MLBot2Foundation:
                     return  # Momentum check already logged rejection
 
                 # Check if momentum filter triggered any special entry reasons
-                if token_data.get('_age_buffer_triggered'):
+                if token_data.get('_incubator_triggered'):
+                    # Gemini Priority #3: Incubator breakout trigger!
+                    watch_duration = token_data.get('_incubator_watch_duration_minutes', 0)
+                    entry_filter_reason = f'incubator_breakout_{watch_duration:.0f}min_watch'
+                elif token_data.get('_age_buffer_triggered'):
                     entry_filter_reason = 'age_volatility_buffer'
                 elif token_data.get('_v_recovery_bounce_triggered'):
                     entry_filter_reason = 'v_recovery_bounce'
@@ -1395,6 +1445,83 @@ class MLBot2Foundation:
                 token_data['token_age_hours'] = token_age_hours
             else:
                 token_data['token_age_hours'] = 0.0
+
+            # ═══════════════════════════════════════════════════════════════════
+            # 🚨 AGE-BASED ENTRY QUALITY FILTERS (GEMINI PRIORITY #2)
+            # ═══════════════════════════════════════════════════════════════════
+            # Problem: WhiteDog -73.5% (6min), Gubby -58.2% (0min) - young tokens rugged!
+            # Solution: Strict requirements for YOUNG tokens, normal for MATURE ones
+            # Balance: Safety for babies + Freedom for moonshots!
+            # ═══════════════════════════════════════════════════════════════════
+
+            if not is_moonshot:  # Moonshots skip all normal filters
+                token_age_hours = token_data.get('token_age_hours', 0.0)
+                token_age_minutes = token_age_hours * 60
+                lp_burned_percent = token_data.get('lp_burned_percent', 0.0)
+                liquidity_usd = token_data.get('liquidity_usd', 0)
+
+                # TIER 1: VERY YOUNG (<5 min) = AUTO-REJECT! Too dangerous!
+                if token_age_minutes < 5.0:
+                    logger.info(
+                        f"⛔ {symbol}: TOO YOUNG! Age {token_age_minutes:.1f}min <5min. "
+                        f"Instant rug risk during initial pump phase! "
+                        f"Waiting for safety period... (Gubby -58% fix)"
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"too_young_{token_age_minutes:.1f}min",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='age_safety_filter'
+                    )
+                    return
+
+                # TIER 2: YOUNG (<10 min) = STRICT REQUIREMENTS!
+                # Require 100% LP burned + higher liquidity for babies
+                if token_age_minutes < 10.0:
+                    # Check #1: LP MUST be 100% burned for young tokens!
+                    if lp_burned_percent < 100.0:
+                        logger.info(
+                            f"⛔ {symbol}: YOUNG TOKEN WITHOUT LP BURN! "
+                            f"Age {token_age_minutes:.1f}min, LP burned {lp_burned_percent:.0f}%. "
+                            f"Need 100% LP burn for tokens <10min old! "
+                            f"(WhiteDog -73.5% fix - dev can rug anytime!)"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"young_no_lp_burn_{lp_burned_percent:.0f}%",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='young_token_safety'
+                        )
+                        return
+
+                    # Check #2: Higher liquidity requirement for young tokens!
+                    MIN_LIQ_YOUNG = 40000  # $40k for babies (vs $25k normal)
+                    if liquidity_usd < MIN_LIQ_YOUNG:
+                        logger.info(
+                            f"⛔ {symbol}: YOUNG TOKEN LOW LIQUIDITY! "
+                            f"Age {token_age_minutes:.1f}min, Liq ${liquidity_usd:,.0f}. "
+                            f"Need ${MIN_LIQ_YOUNG:,.0f}+ liquidity for tokens <10min old! "
+                            f"(Higher threshold for safety)"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"young_low_liq_${liquidity_usd:.0f}",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='young_token_safety'
+                        )
+                        return
+
+                    logger.info(
+                        f"✅ {symbol}: YOUNG BUT SAFE! Age {token_age_minutes:.1f}min, "
+                        f"LP {lp_burned_percent:.0f}% burned, Liq ${liquidity_usd:,.0f}. "
+                        f"Passed strict baby token requirements!"
+                    )
+
+                # TIER 3: MATURE (>10 min) = Normal rules continue below!
+                # These tokens have survived initial rug period, use normal filters
 
             # ═══════════════════════════════════════════════════════════════════
             # 🚨 EARLY BLUECHIP FILTERS - Save API calls!
@@ -1475,6 +1602,20 @@ class MLBot2Foundation:
                 has_momentum = price_change_5m > 3.0  # Stricter: 2.5% → 3.0%
 
                 if not has_momentum and not is_v_recovery:
+                    # 💎 INCUBATOR CHECK: Does this qualify for watchlist?
+                    # Gemini Tier B: No momentum NOW, but quality fundamentals = sleeping giant!
+                    # Examples: H1B +6,070% (rejected for no_momentum +1.9%)
+                    #           BLACKGOLD +4,108% (rejected for no_momentum +2.5%)
+                    if self._should_add_to_incubator(token_data, symbol):
+                        logger.info(
+                            f"💎 {symbol}: INCUBATOR! No momentum now ({price_change_5m:+.1f}%) "
+                            f"but quality fundamentals (LP burned, mature, good liq). "
+                            f"Adding to watchlist for breakout trigger! (H1B/BLACKGOLD strategy)"
+                        )
+                        self._add_to_incubator(token_address, token_data)
+                        return  # Don't reject, but don't buy yet - WATCH it!
+
+                    # Normal rejection if doesn't qualify for incubator
                     logger.info(
                         f"⛔ {symbol}: NO MOMENTUM! Price 5m: {price_change_5m:+.1f}% (need >+3.0%). "
                         f"Token not moving → Would become ZOMBIE! Rejecting."
@@ -2337,6 +2478,208 @@ class MLBot2Foundation:
 
         except Exception as e:
             logger.error(f"Error analyzing/trading token: {e}", exc_info=True)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # 💎 INCUBATOR SYSTEM METHODS (GEMINI PRIORITY #3)
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _should_add_to_incubator(self, token_data: dict, symbol: str) -> bool:
+        """
+        Check if rejected token qualifies for incubator watchlist.
+
+        Gemini Criteria: Quality fundamentals, just needs momentum spark!
+        - 100% LP burned (safety)
+        - Age >15 min (survived rug period)
+        - Liquidity $20k-$150k (moonshot range)
+        - Volume >$50k (active trading)
+        - Vol/Liq <1.0 (NOT overheated - accumulation phase!)
+
+        Examples: H1B +6,070%, BLACKGOLD +4,108% were rejected for no_momentum!
+        """
+        try:
+            lp_burned_pct = token_data.get('lp_burned_percent', 0.0)
+            age_hours = token_data.get('token_age_hours', 0.0)
+            age_minutes = age_hours * 60
+            liquidity_usd = token_data.get('liquidity_usd', 0)
+            volume_1h = token_data.get('volume_1h', 0)
+
+            # Calculate vol/liq ratio
+            vol_liq_ratio = 999  # Default high value
+            if liquidity_usd > 0:
+                vol_liq_ratio = volume_1h / liquidity_usd
+
+            # Check all criteria
+            checks = {
+                'lp_burned': lp_burned_pct >= 100.0,
+                'age_mature': age_minutes >= 15.0,  # Survived rug period!
+                'liq_range': 20000 <= liquidity_usd <= 150000,  # Moonshot sweet spot
+                'volume': volume_1h >= 50000,  # Active trading
+                'not_overheated': vol_liq_ratio < 1.0  # Accumulation phase!
+            }
+
+            all_passed = all(checks.values())
+
+            if all_passed:
+                logger.info(
+                    f"💎 {symbol} QUALIFIES for incubator! "
+                    f"LP {lp_burned_pct:.0f}%, Age {age_minutes:.0f}min, "
+                    f"Liq ${liquidity_usd:,.0f}, Vol ${volume_1h:,.0f}, "
+                    f"Vol/Liq {vol_liq_ratio:.2f}"
+                )
+            else:
+                # Log why it didn't qualify (helpful for tuning)
+                failed = [k for k, v in checks.items() if not v]
+                logger.debug(
+                    f"{symbol} NOT incubator material. Failed: {', '.join(failed)}"
+                )
+
+            return all_passed
+
+        except Exception as e:
+            logger.error(f"Error checking incubator qualification for {symbol}: {e}")
+            return False
+
+    def _add_to_incubator(self, token_address: str, token_data: dict):
+        """
+        Add token to incubator watchlist.
+
+        Stores entry data for later monitoring. Separate loop will scan
+        these tokens every 25 seconds for breakout triggers.
+        """
+        try:
+            symbol = token_data.get('symbol', 'UNKNOWN')
+
+            # Check if already in incubator
+            if token_address in self.incubator_tokens:
+                logger.debug(f"{symbol} already in incubator, skipping duplicate")
+                return
+
+            # Add to incubator with metadata
+            self.incubator_tokens[token_address] = {
+                'added_at': datetime.now(),
+                'symbol': symbol,
+                'initial_price': token_data.get('price_usd', 0),
+                'initial_volume': token_data.get('volume_1h', 0),
+                'initial_liquidity': token_data.get('liquidity_usd', 0),
+                'initial_price_change_5m': token_data.get('price_change_5m', 0),
+                'lp_burned_percent': token_data.get('lp_burned_percent', 0),
+                'token_age_hours': token_data.get('token_age_hours', 0),
+                'initial_data': token_data  # Full snapshot
+            }
+
+            logger.info(
+                f"📋 INCUBATOR: Added {symbol} ({token_address[:8]}...). "
+                f"Total watching: {len(self.incubator_tokens)}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error adding token to incubator: {e}")
+
+    async def monitor_incubator(self):
+        """
+        Monitor incubator tokens for breakout signals.
+
+        Scans every 25 seconds (much faster than main 15min cycle).
+        Triggers buy when accumulation phase ends and breakout begins!
+
+        Gemini Triggers:
+        - Price 1m >+3.5% (breaking out!)
+        - Volume spike +50% vs initial (buyers rushing in!)
+        - Buy ratio >60% (buyers dominating!)
+        """
+        logger.info("🔥 Starting incubator monitoring loop...")
+        logger.info(f"  Scan interval: {self.incubator_scan_interval}s")
+        logger.info(f"  Max age: {self.incubator_max_age_hours}h")
+
+        while self.running:
+            try:
+                # Skip if no tokens to watch
+                if not self.incubator_tokens:
+                    await asyncio.sleep(self.incubator_scan_interval)
+                    continue
+
+                logger.debug(f"📊 Incubator: Scanning {len(self.incubator_tokens)} tokens...")
+
+                # Scan all incubator tokens
+                for token_address, entry_data in list(self.incubator_tokens.items()):
+                    try:
+                        symbol = entry_data['symbol']
+
+                        # Check age - remove if >2 hours (stale opportunity)
+                        age_seconds = (datetime.now() - entry_data['added_at']).total_seconds()
+                        age_hours = age_seconds / 3600
+
+                        if age_hours >= self.incubator_max_age_hours:
+                            logger.info(
+                                f"⏰ Incubator: Removing {symbol} "
+                                f"(age {age_hours:.1f}h > {self.incubator_max_age_hours}h limit). "
+                                f"Opportunity window closed."
+                            )
+                            del self.incubator_tokens[token_address]
+                            continue
+
+                        # Fetch current data
+                        current_data = await self.scanner.dexscreener.get_token_profile(token_address)
+                        if not current_data:
+                            logger.debug(f"No data for incubator token {symbol}, skipping")
+                            continue
+
+                        # Extract trigger metrics
+                        price_change_1m = current_data.get('price_change_1m', 0)
+                        volume_1h = current_data.get('volume_1h', 0)
+                        buy_ratio = current_data.get('buy_ratio_1h', 0) or current_data.get('buy_ratio_24h', 0)
+
+                        # Calculate volume spike vs initial
+                        initial_volume = entry_data['initial_volume']
+                        volume_spike_pct = 0
+                        if initial_volume > 0:
+                            volume_spike_pct = ((volume_1h - initial_volume) / initial_volume) * 100
+
+                        # === BREAKOUT TRIGGER CONDITIONS ===
+                        # Gemini: Buy when accumulation phase ends!
+                        trigger_price = price_change_1m > 3.5  # Price breaking out!
+                        trigger_volume = volume_spike_pct > 50  # Volume spiking!
+                        trigger_buyers = buy_ratio > 0.60  # Buyers dominating!
+
+                        if trigger_price and trigger_volume and trigger_buyers:
+                            logger.info(
+                                f"🚀🚀🚀 INCUBATOR TRIGGER! {symbol}: "
+                                f"Price 1m +{price_change_1m:.1f}%, "
+                                f"Vol spike +{volume_spike_pct:.0f}%, "
+                                f"Buy ratio {buy_ratio:.0%}. "
+                                f"BREAKOUT CONFIRMED - BUYING! (H1B/BLACKGOLD strategy)"
+                            )
+
+                            # Remove from incubator (buying now!)
+                            del self.incubator_tokens[token_address]
+
+                            # Mark token as incubator-triggered for CSV tracking
+                            current_data['_incubator_triggered'] = True
+                            current_data['_incubator_watch_duration_minutes'] = age_seconds / 60
+
+                            # BUY with current data!
+                            # Use analyze_and_trade_token to go through full pipeline
+                            await self.analyze_and_trade_token(current_data)
+
+                        else:
+                            # Log why it didn't trigger (helpful for tuning)
+                            logger.debug(
+                                f"📊 {symbol} watching: "
+                                f"Price 1m {price_change_1m:+.1f}% (need >3.5%), "
+                                f"Vol spike {volume_spike_pct:+.0f}% (need >50%), "
+                                f"Buy ratio {buy_ratio:.0%} (need >60%)"
+                            )
+
+                    except Exception as e:
+                        logger.error(f"Error scanning incubator token {token_address}: {e}")
+                        continue
+
+                # Sleep before next scan
+                await asyncio.sleep(self.incubator_scan_interval)
+
+            except Exception as e:
+                logger.error(f"Incubator monitoring loop error: {e}", exc_info=True)
+                await asyncio.sleep(self.incubator_scan_interval)
 
     async def stop(self):
         """Stop the trading bot."""
