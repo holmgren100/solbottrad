@@ -11,6 +11,9 @@ echo "✅ Dependencies installed"
 echo "📋 Verifying imports..."
 /usr/bin/python3 -c "import flask; import flask_httpauth; import pandas; import psutil; print('✅ All imports OK')"
 
+# Fix file permissions
+chmod 644 /home/user/solbottrad/bot_api.py
+
 # Create systemd service
 cat > /etc/systemd/system/bot-api.service << 'EOF'
 [Unit]
@@ -37,8 +40,9 @@ EOF
 # Set secure password
 echo ""
 echo "🔐 IMPORTANT: Edit bot_api.py and change the password!"
-echo "   File: /home/user/solbottrad/bot_api.py"
-echo "   Line: USERS = {'claude': 'your_secure_password_here'}"
+echo "   nano /home/user/solbottrad/bot_api.py"
+echo "   Find line 21: USERS = {'claude': 'your_secure_password_here'}"
+echo "   Change 'your_secure_password_here' to a strong password"
 echo ""
 read -p "Press ENTER after you've set a secure password..."
 
