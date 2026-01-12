@@ -347,7 +347,7 @@ class MLBot2Foundation:
         # === 🔍 TOKEN SCANNER ===
         from trading_bot.scanner import TokenScanner
         self.scanner = TokenScanner(
-            min_liquidity=25000,  # Gemini: Block low-liq rugs EARLY (86 rugs → 15-20, save $560!)
+            min_liquidity=30000,  # GEMINI NIGHT: $30k min (75 rugs → 10-15, save $400!) 🔥
             min_volume_24h=1000,  # Lowered to match working bot settings
             dexscreener_api_key=config.dexscreener_api_key,
             position_manager=self.position_manager
@@ -1218,18 +1218,42 @@ class MLBot2Foundation:
 
             # Check 1: Price falling in last 5 min? (RELAXED - testing low thresholds!)
             if price_change_5m < -20:  # Down >20% = extreme dump! (lowered from -10%)
-                logger.info(
-                    f"⛔ Skipped {symbol}: Heavy dump! Price down {price_change_5m:.1f}% in 5min. "
-                    f"Extreme dump - avoid instant rugs."
-                )
-                self.rejected_tracker.record_rejection(
-                    token_address=token_address,
-                    rejection_reason=f"heavy_dump_{price_change_5m:.1f}%_5m",
-                    token_data=token_data,
-                    symbol=symbol,
-                    rejection_stage='momentum'
-                )
-                return False
+                # 🔥 GEMINI NIGHT: DIP-BUYER SYSTEM! 💎💎💎
+                # NOSEE 6,699% - dump absorbed, massive reversal!
+                # DON'T reject heavy dumps - they can be REVERSALS!
+
+                # Check if token is quality (LP burned, decent liq)
+                lp_burned_pct = token_data.get('lp_burned_percent', 0.0)
+                liquidity_usd = token_data.get('liquidity_usd', 0)
+
+                if lp_burned_pct >= 100.0 and liquidity_usd >= 30000:
+                    logger.info(
+                        f"🎯 {symbol}: HEAVY DUMP {price_change_5m:.1f}% but QUALITY TOKEN! "
+                        f"LP {lp_burned_pct:.0f}% burned, Liq ${liquidity_usd:,.0f}. "
+                        f"Adding to DIP-BUYER incubator for reversal monitoring! "
+                        f"(NOSEE 6,699% strategy!)"
+                    )
+                    # Mark as dip-buyer candidate
+                    token_data['_dip_buyer_candidate'] = True
+                    token_data['_dip_buyer_dump_pct'] = price_change_5m
+                    # Add to incubator for reversal monitoring
+                    self._add_to_incubator(token_address, token_data)
+                    return False  # Don't buy YET - wait for recovery signal
+                else:
+                    # Not quality - normal rejection
+                    logger.info(
+                        f"⛔ Skipped {symbol}: Heavy dump! Price down {price_change_5m:.1f}% in 5min. "
+                        f"LP {lp_burned_pct:.0f}%, Liq ${liquidity_usd:,.0f} - not quality for reversal. "
+                        f"Extreme dump - avoiding rug!"
+                    )
+                    self.rejected_tracker.record_rejection(
+                        token_address=token_address,
+                        rejection_reason=f"heavy_dump_{price_change_5m:.1f}%_low_quality",
+                        token_data=token_data,
+                        symbol=symbol,
+                        rejection_stage='momentum'
+                    )
+                    return False
 
             elif price_change_5m < -15:  # Down 15-20% = check if recovering! (lowered from -5%)
                 price_change_1m = token_data.get('price_change_1m', 0)
@@ -1477,51 +1501,95 @@ class MLBot2Foundation:
                     )
                     return
 
-                # TIER 2: YOUNG (<10 min) = STRICT REQUIREMENTS!
-                # Require 100% LP burned + higher liquidity for babies
+                # TIER 2: VERY YOUNG (<10 min) = ULTRA STRICT! 🔥🔥🔥
+                # GEMINI NIGHT: Raise $40k → $70k (baby rug disasters!)
                 if token_age_minutes < 10.0:
-                    # Check #1: LP MUST be 100% burned for young tokens!
+                    # Check #1: LP MUST be 100% burned for very young tokens!
                     if lp_burned_percent < 100.0:
                         logger.info(
-                            f"⛔ {symbol}: YOUNG TOKEN WITHOUT LP BURN! "
+                            f"⛔ {symbol}: VERY YOUNG WITHOUT LP BURN! "
                             f"Age {token_age_minutes:.1f}min, LP burned {lp_burned_percent:.0f}%. "
                             f"Need 100% LP burn for tokens <10min old! "
-                            f"(WhiteDog -73.5% fix - dev can rug anytime!)"
+                            f"(WhiteDog -73.5%, baby -56.4% disasters!)"
                         )
                         self.rejected_tracker.record_rejection(
                             token_address=token_address,
-                            rejection_reason=f"young_no_lp_burn_{lp_burned_percent:.0f}%",
+                            rejection_reason=f"very_young_no_lp_{lp_burned_percent:.0f}%",
                             token_data=token_data,
                             symbol=symbol,
-                            rejection_stage='young_token_safety'
+                            rejection_stage='age_safety_tier2'
                         )
                         return
 
-                    # Check #2: Higher liquidity requirement for young tokens!
-                    MIN_LIQ_YOUNG = 40000  # $40k for babies (vs $25k normal)
+                    # Check #2: ULTRA high liquidity for very young!
+                    MIN_LIQ_VERY_YOUNG = 70000  # GEMINI NIGHT: $70k for babies! 🔥
+                    if liquidity_usd < MIN_LIQ_VERY_YOUNG:
+                        logger.info(
+                            f"⛔ {symbol}: VERY YOUNG LOW LIQUIDITY! "
+                            f"Age {token_age_minutes:.1f}min, Liq ${liquidity_usd:,.0f}. "
+                            f"Need ${MIN_LIQ_VERY_YOUNG:,.0f}+ for tokens <10min! "
+                            f"(GEMINI NIGHT: Nuclear slippage fix -56.4% → -20%)"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"very_young_low_liq_${liquidity_usd:.0f}",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='age_safety_tier2'
+                        )
+                        return
+
+                    logger.info(
+                        f"✅ {symbol}: VERY YOUNG BUT ULTRA SAFE! Age {token_age_minutes:.1f}min, "
+                        f"LP {lp_burned_percent:.0f}% burned, Liq ${liquidity_usd:,.0f}. "
+                        f"Passed ultra-strict requirements!"
+                    )
+
+                # TIER 3: YOUNG (<15 min) = STRICT! 🔥
+                # GEMINI NIGHT: New tier to catch 10-15min rugs (75 rugs → 10-15!)
+                elif token_age_minutes < 15.0:
+                    # Check #1: LP MUST be 100% burned!
+                    if lp_burned_percent < 100.0:
+                        logger.info(
+                            f"⛔ {symbol}: YOUNG WITHOUT LP BURN! "
+                            f"Age {token_age_minutes:.1f}min, LP burned {lp_burned_percent:.0f}%. "
+                            f"Need 100% LP burn for tokens <15min old! "
+                            f"(GEMINI NIGHT: Fast rug fix -$482 → -$80!)"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"young_no_lp_{lp_burned_percent:.0f}%",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='age_safety_tier3'
+                        )
+                        return
+
+                    # Check #2: High liquidity requirement!
+                    MIN_LIQ_YOUNG = 50000  # GEMINI NIGHT: $50k for young! 🔥
                     if liquidity_usd < MIN_LIQ_YOUNG:
                         logger.info(
-                            f"⛔ {symbol}: YOUNG TOKEN LOW LIQUIDITY! "
+                            f"⛔ {symbol}: YOUNG LOW LIQUIDITY! "
                             f"Age {token_age_minutes:.1f}min, Liq ${liquidity_usd:,.0f}. "
-                            f"Need ${MIN_LIQ_YOUNG:,.0f}+ liquidity for tokens <10min old! "
-                            f"(Higher threshold for safety)"
+                            f"Need ${MIN_LIQ_YOUNG:,.0f}+ for tokens <15min! "
+                            f"(GEMINI NIGHT: Blocks 75 rugs, saves $400/session!)"
                         )
                         self.rejected_tracker.record_rejection(
                             token_address=token_address,
                             rejection_reason=f"young_low_liq_${liquidity_usd:.0f}",
                             token_data=token_data,
                             symbol=symbol,
-                            rejection_stage='young_token_safety'
+                            rejection_stage='age_safety_tier3'
                         )
                         return
 
                     logger.info(
                         f"✅ {symbol}: YOUNG BUT SAFE! Age {token_age_minutes:.1f}min, "
                         f"LP {lp_burned_percent:.0f}% burned, Liq ${liquidity_usd:,.0f}. "
-                        f"Passed strict baby token requirements!"
+                        f"Passed strict young token requirements!"
                     )
 
-                # TIER 3: MATURE (>10 min) = Normal rules continue below!
+                # TIER 4: MATURE (>15 min) = Normal rules continue below!
                 # These tokens have survived initial rug period, use normal filters
 
             # ═══════════════════════════════════════════════════════════════════
@@ -1602,6 +1670,30 @@ class MLBot2Foundation:
                 # NOTE: 1m data unreliable/missing from DexScreener API - can't use for filtering
                 has_momentum = price_change_5m > 3.0  # Stricter: 2.5% → 3.0%
 
+                # 🔥 GEMINI NIGHT: MATURE BREAKOUT EXCEPTION! 💎💎💎
+                # PGAZ 7,118%, MOONOIL 4,014% - mature tokens that sit for HOURS then EXPLODE!
+                # These DON'T need momentum NOW - they need VOLUME SPIKE signal!
+                lp_burned_percent = token_data.get('lp_burned_percent', 0.0)
+                token_age_minutes = token_age_hours * 60
+
+                is_mature_safe = (
+                    token_age_minutes > 60 and  # >1 hour = survived rug period!
+                    lp_burned_percent >= 100 and  # LP burned = can't rug!
+                    liquidity_usd >= 30000  # Safe liq for entry/exit!
+                )
+
+                if is_mature_safe:
+                    # MATURE TOKEN: Skip momentum requirement, add to incubator for volume monitoring!
+                    logger.info(
+                        f"🔥 {symbol}: MATURE TOKEN EXCEPTION! Age {token_age_minutes:.0f}min, "
+                        f"LP {lp_burned_percent:.0f}% burned, Liq ${liquidity_usd:,.0f}. "
+                        f"No momentum needed - adding to incubator for volume spike monitoring! "
+                        f"(PGAZ 7,118%, MOONOIL 4,014% strategy!)"
+                    )
+                    token_data['_mature_breakout_candidate'] = True  # Track for CSV!
+                    self._add_to_incubator(token_address, token_data)
+                    return  # Don't buy yet - WATCH for volume spike!
+
                 if not has_momentum and not is_v_recovery:
                     # 💎 INCUBATOR CHECK: Does this qualify for watchlist?
                     # Gemini Tier B: No momentum NOW, but quality fundamentals = sleeping giant!
@@ -1661,48 +1753,58 @@ class MLBot2Foundation:
                     # 📊 Track ratio for velocity calculation (Gemini ML future!)
                     self.ratio_velocity.record_ratio(token_address, vol_liq_ratio)
 
-                    # 💎 SMART MAX RATIO: High-liq tokens can handle more volume!
-                    # $50k+ liq = can sustain 4X volume, <$50k liq = max 3X
-                    max_ratio = 4.0 if liquidity_usd > 50000 else 3.0
+                    # 🔥 GEMINI NIGHT: ADAPTIVE MAX RATIO! 💎💎💎
+                    # WhaleGuru +1,477% (ratio 5.73), BIERISH +1,316% (ratio 5.26)
+                    # High ratio on SAFE tokens = extreme demand, NOT rug risk!
+                    lp_burned_pct = token_data.get('lp_burned_percent', 0.0)
+
+                    # CONTEXT-DEPENDENT RATIO:
+                    if lp_burned_pct >= 100.0 and liquidity_usd > 50000:
+                        max_ratio = 10.0  # GEMINI NIGHT: Safe tokens can handle 10X! 🔥
+                        is_safe_token = True
+                    elif liquidity_usd > 50000:
+                        max_ratio = 4.0  # High liq, no burn = moderate risk
+                        is_safe_token = False
+                    else:
+                        max_ratio = 3.0  # Low liq = strict threshold
+                        is_safe_token = False
 
                     if vol_liq_ratio > max_ratio:
-                        # 🚀 MOONSHOT EXCEPTION (Gemini FAS 3.2)! 💎
-                        # High ratio with burned LP = extreme demand, NOT rug risk!
-                        # Examples: WhaleGuru +1477% (5.73), BIERISH +1316% (5.26), ChillWhale +929% (4.55)
-                        lp_burned_pct = token_data.get('lp_burned_percent', 0.0)
+                        logger.info(
+                            f"⛔ {symbol}: HIGH RATIO {vol_liq_ratio:.2f} >{max_ratio} "
+                            f"(Vol ${volume_1h:,.0f} / Liq ${liquidity_usd:,.0f}). "
+                            f"LP burned {lp_burned_pct:.0f}%, Safe token: {is_safe_token}. "
+                            f"REJECTING - ratio too extreme even for safe threshold!"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"pump_dump_ratio_{vol_liq_ratio:.2f}_max{max_ratio}",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='ratio_filter'
+                        )
+                        return
+                    elif vol_liq_ratio > 4.0 and is_safe_token:
+                        # High ratio but within safe threshold - mark as moonshot!
+                        logger.info(
+                            f"🚀 {symbol}: HIGH RATIO {vol_liq_ratio:.2f} but SAFE TOKEN! "
+                            f"LP burned {lp_burned_pct:.0f}%, Liq ${liquidity_usd:,.0f}. "
+                            f"High ratio = extreme demand, NOT rug risk! "
+                            f"(GEMINI NIGHT: WhaleGuru +1,477%, BIERISH +1,316% strategy!)"
+                        )
+                        # Mark for CSV tracking - this is a moonshot entry!
+                        if not entry_filter_reason:
+                            entry_filter_reason = f'moonshot_high_ratio_{vol_liq_ratio:.2f}'
 
-                        if lp_burned_pct >= 100.0 and liquidity_usd >= 30000 and vol_liq_ratio <= 6.0:
-                            logger.info(
-                                f"🚀 {symbol}: HIGH RATIO {vol_liq_ratio:.2f} but MOONSHOT EXCEPTION! "
-                                f"LP burned {lp_burned_pct:.0f}%, Liq ${liquidity_usd:,.0f}. "
-                                f"High ratio = extreme demand, NOT rug risk! (WhaleGuru +1477% strategy)"
-                            )
-                            # Mark for CSV tracking - this is a moonshot exception entry!
-                            if not entry_filter_reason:
-                                entry_filter_reason = f'moonshot_exception_ratio_{vol_liq_ratio:.2f}'
-                            # Allow entry - don't reject!
-                        else:
-                            # Normal rejection - either no LP burn, low liq, or ratio too extreme
-                            logger.info(
-                                f"⛔ {symbol}: PUMP & DUMP DANGER! Vol/Liq ratio {vol_liq_ratio:.2f} >{max_ratio} "
-                                f"(Vol ${volume_1h:,.0f} / Liq ${liquidity_usd:,.0f}). "
-                                f"No moonshot exception (LP {lp_burned_pct:.0f}%, need 100%). REJECTING!"
-                            )
-                            self.rejected_tracker.record_rejection(
-                                token_address=token_address,
-                                rejection_reason=f"pump_dump_ratio_{vol_liq_ratio:.2f}_max{max_ratio}",
-                                token_data=token_data,
-                                symbol=symbol,
-                                rejection_stage='ratio_filter'
-                            )
-                            return
-
-                    # 🚨 WASH TRADING DETECTION: Vol >5X liq = bot manipulation!
-                    # Real organic growth: vol 1-3X liq. Wash trading: vol 5-10X+ liq
-                    if volume_1h > liquidity_usd * 5:
+                    # 🚨 WASH TRADING DETECTION: Adaptive threshold based on safety!
+                    # GEMINI NIGHT: Safe tokens (LP burned + high liq) can have higher ratios!
+                    # Real organic growth: vol 1-3X liq. Wash trading: vol 5-15X+ liq
+                    wash_threshold = 15 if is_safe_token else 5  # Safe: 15X, Risky: 5X
+                    if volume_1h > liquidity_usd * wash_threshold:
                         logger.info(
                             f"⛔ {symbol}: WASH TRADING DETECTED! Vol ${volume_1h:,.0f} is {volume_1h/liquidity_usd:.1f}X "
-                            f"liquidity ${liquidity_usd:,.0f} (>5X = bot manipulation). REJECTING!"
+                            f"liquidity ${liquidity_usd:,.0f} (>{wash_threshold}X threshold, safe:{is_safe_token}). "
+                            f"Bot manipulation suspected! REJECTING!"
                         )
                         self.rejected_tracker.record_rejection(
                             token_address=token_address,
@@ -1721,7 +1823,7 @@ class MLBot2Foundation:
                 MIN_VOLUME_1H = 12500  # $12.5k+ volume in 1h (catch early movers!)
                 MIN_TXNS_1H = 40       # 40+ transactions (proportional to volume!)
                 MIN_BUY_RATIO = 0.37   # 37%+ buy ratio (Gemini: more permissive!)
-                MIN_LIQUIDITY = 25000  # $25k+ liquidity (Gemini: block smallest rugs!)
+                MIN_LIQUIDITY = 30000  # GEMINI NIGHT: $30k+ liq (nuclear slippage fix!) 🔥
 
                 # Check if token meets activity requirements
                 # FLEXIBLE LOGIC: Reject ONLY if lacking BOTH volume AND txns
@@ -2173,7 +2275,7 @@ class MLBot2Foundation:
 
             # Filter #3: Liquidity Range (Sweet Spot)
             liquidity_usd = token_data.get('liquidity_usd', 0)
-            MIN_LIQUIDITY = 25_000  # Gemini optimized: $25k min blocks smallest rugs!
+            MIN_LIQUIDITY = 30_000  # GEMINI NIGHT: $30k min (nuclear slippage + rug fix!) 🔥
             # MAX_LIQUIDITY check moved to early bluechip filter (line ~1245)
 
             if liquidity_usd < MIN_LIQUIDITY:
@@ -2527,20 +2629,27 @@ class MLBot2Foundation:
             if liquidity_usd > 0:
                 vol_liq_ratio = volume_1h / liquidity_usd
 
-            # Check all criteria (FAS 4.1: More permissive to catch sleeping giants!)
+            # 🔥 GEMINI NIGHT: MATURE TOKEN EXCEPTION! 💎
+            # PGAZ 7,118% (14.5h), MOONOIL 4,014% (7.5d) sat for HOURS with LOW volume!
+            # Mature tokens (>60min) get RELAXED criteria - they're SAFE!
+            is_mature = age_minutes > 60
+            MIN_VOL = 10000 if is_mature else 30000  # Mature: $10k, Young: $30k
+
+            # Check all criteria (FAS 4.1 + GEMINI NIGHT optimized!)
             checks = {
                 'lp_burned': lp_burned_pct >= 100.0,
                 'age_mature': age_minutes >= 10.0,  # LOWERED: 15 → 10 min
                 'liq_range': 15000 <= liquidity_usd <= 150000,  # LOWERED: $20k → $15k
-                'volume': volume_1h >= 30000,  # LOWERED: $50k → $30k
+                'volume': volume_1h >= MIN_VOL,  # GEMINI NIGHT: Mature $10k, Young $30k! 🔥
                 'not_overheated': vol_liq_ratio < 1.5  # RAISED: 1.0 → 1.5 (allow more activity)
             }
 
             all_passed = all(checks.values())
 
             if all_passed:
+                mature_tag = "MATURE" if is_mature else "YOUNG"
                 logger.info(
-                    f"💎 {symbol} QUALIFIES for incubator! "
+                    f"💎 {symbol} QUALIFIES for incubator ({mature_tag})! "
                     f"LP {lp_burned_pct:.0f}%, Age {age_minutes:.0f}min, "
                     f"Liq ${liquidity_usd:,.0f}, Vol ${volume_1h:,.0f}, "
                     f"Vol/Liq {vol_liq_ratio:.2f}"
@@ -2645,6 +2754,7 @@ class MLBot2Foundation:
 
                         # Extract trigger metrics
                         price_change_1m = current_data.get('price_change_1m', 0)
+                        price_change_5m = current_data.get('price_change_5m', 0)
                         volume_1h = current_data.get('volume_1h', 0)
                         buy_ratio = current_data.get('buy_ratio_1h', 0) or current_data.get('buy_ratio_24h', 0)
 
@@ -2654,9 +2764,46 @@ class MLBot2Foundation:
                         if initial_volume > 0:
                             volume_spike_pct = ((volume_1h - initial_volume) / initial_volume) * 100
 
-                        # === BREAKOUT TRIGGER CONDITIONS (FAS 4.2 OPTIMIZED) ===
-                        # Gemini: Buy when accumulation phase ends!
-                        # Two-tier trigger system: Catch both strong breakouts AND early acceleration
+                        # === BREAKOUT TRIGGER CONDITIONS (FAS 4.2 + GEMINI NIGHT) ===
+                        # Four-tier trigger system: Dip-buyer, Mature, Strong, Early!
+
+                        # 🎯 GEMINI NIGHT: DIP-BUYER REVERSAL TRIGGER! 💎💎💎
+                        # NOSEE 6,699% - dump absorbed, massive reversal!
+                        # Check if this is a dip-buyer candidate
+                        is_dip_buyer = entry_data.get('_dip_buyer_candidate', False)
+                        trigger_dip_buyer = False
+                        if is_dip_buyer:
+                            initial_dump_pct = entry_data.get('_dip_buyer_dump_pct', 0)
+                            # REVERSAL: Recovered 50%+ of dump within watch period!
+                            # Example: Dump was -30%, now at -15% = 50% recovery!
+                            recovery_pct = 0
+                            if initial_dump_pct < 0:  # Ensure dump was negative
+                                recovery_pct = ((initial_dump_pct - price_change_5m) / abs(initial_dump_pct)) * 100
+
+                            trigger_dip_buyer = (
+                                recovery_pct >= 50 and  # Recovered 50%+ of dump!
+                                buy_ratio > 0.70  # STRONG buyer dominance
+                            )
+
+                            if trigger_dip_buyer:
+                                logger.info(
+                                    f"🎯 DIP-BUYER REVERSAL! {symbol}: "
+                                    f"Dumped {initial_dump_pct:.1f}%, now {price_change_5m:.1f}% "
+                                    f"({recovery_pct:.0f}% recovery!), buy ratio {buy_ratio:.0%}. "
+                                    f"Dump ABSORBED - extreme buy strength! (NOSEE 6,699% strategy!)"
+                                )
+
+                        # 🔥 GEMINI NIGHT: MATURE TOKEN TRIGGER! 💎💎💎
+                        # PGAZ 7,118%, MOONOIL 4,014% - volume spike WITHOUT momentum!
+                        # Mature tokens (>60min) break out on VOLUME ALONE!
+                        is_mature_breakout = entry_data.get('_mature_breakout_candidate', False)
+                        trigger_mature = False
+                        if is_mature_breakout:
+                            # MATURE: Only volume spike needed (300% vs initial!)
+                            trigger_mature = (
+                                volume_spike_pct > 300 and  # HUGE volume spike = breakout!
+                                buy_ratio > 0.65  # Strong buyer dominance
+                            )
 
                         # PRIMARY: Strong breakout (conservative)
                         trigger_strong = (
@@ -2672,8 +2819,16 @@ class MLBot2Foundation:
                             buy_ratio > 0.70  # And strong buyer dominance
                         )
 
-                        if trigger_strong or trigger_early:
-                            trigger_type = "STRONG" if trigger_strong else "EARLY"
+                        if trigger_dip_buyer or trigger_mature or trigger_strong or trigger_early:
+                            if trigger_dip_buyer:
+                                trigger_type = "DIP_BUYER"  # GEMINI NIGHT: Reversal play! 🎯
+                            elif trigger_mature:
+                                trigger_type = "MATURE"  # GEMINI NIGHT: Volume-only breakout! 🔥
+                            elif trigger_strong:
+                                trigger_type = "STRONG"
+                            else:
+                                trigger_type = "EARLY"
+
                             logger.info(
                                 f"🚀🚀🚀 INCUBATOR {trigger_type} TRIGGER! {symbol}: "
                                 f"Price 1m +{price_change_1m:.1f}%, "
