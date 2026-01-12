@@ -2654,9 +2654,6 @@ class MLBot2Foundation:
                 # ⚡ TIMING ANALYSIS FIELDS
                 price_change_5m=token_data.get('price_change_5m', 0.0),
                 price_change_1h=token_data.get('price_change_1h', 0.0),
-                # 🔥 7-DAY GEMINI FILTER METRICS
-                vol_liq_ratio=token_data.get('vol_liq_ratio', 0.0),
-                volume_spike_ratio=token_data.get('volume_spike_ratio', 0.0),
                 # 🔥 ENTRY FILTER TRACKING (Gemini optimizations)
                 entry_filter_reason=entry_filter_reason,
                 liquidity_was_zero=liquidity_was_zero,
