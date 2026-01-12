@@ -1602,22 +1602,12 @@ class MLBot2Foundation:
                 token_age_hours = token_data.get('token_age_hours', 0.0)
                 liquidity_usd = token_data.get('liquidity_usd', 0)
 
-                # Filter #1: MAX AGE (Skip bluechips like POPCAT 759 days old!)
-                MAX_TOKEN_AGE_DAYS = 240  # 240 days = 8 months max
-                if token_age_hours > 0 and token_age_hours > (MAX_TOKEN_AGE_DAYS * 24):
-                    token_age_days = token_age_hours / 24
-                    logger.info(
-                        f"⛔ Skipped {symbol}: Too old {token_age_days:.0f} days (max {MAX_TOKEN_AGE_DAYS}d). "
-                        f"Bluechip/established token - not a new opportunity!"
-                    )
-                    self.rejected_tracker.record_rejection(
-                        token_address=token_address,
-                        rejection_reason=f"bluechip_age_{token_age_days:.0f}d",
-                        token_data=token_data,
-                        symbol=symbol,
-                        rejection_stage='bluechip_age_filter'
-                    )
-                    return
+                # 🔥 GEMINI AFTERNOON FIX 1: BLUECHIP AGE FILTER REMOVED!
+                # PFF pumped 7,063% but was rejected as "too old"
+                # Problem: Age filter ran BEFORE MATURE BREAKOUT logic
+                # Solution: Let MATURE BREAKOUT system handle old tokens
+                # Old tokens with LP burned + $30k liq + volume spike = SAFE moonshots!
+                # (Original filter: MAX_TOKEN_AGE_DAYS = 240 days - REMOVED!)
 
                 # Filter #2: MAX LIQUIDITY (Skip established tokens like Fartcoin $13M liq!)
                 MAX_LIQUIDITY = 1_000_000  # $1M max liquidity (Gemini: lowered from $2M)
@@ -2862,13 +2852,17 @@ class MLBot2Foundation:
                                 )
 
                         # 🔥 GEMINI NIGHT: MATURE TOKEN TRIGGER! 💎💎💎
-                        # PGAZ 7,118%, MOONOIL 4,014% - volume spike WITHOUT momentum!
-                        # Mature tokens (>60min) break out on VOLUME ALONE!
+                        # PGAZ 7,118%, MOONOIL 4,014% - volume spike WITHOUT high momentum!
+                        # 🔥 GEMINI AFTERNOON FIX 2: Add 0.5% min momentum (AOL 7,557% fix!)
+                        # Problem: AOL had +0.5% momentum when discovered, rejected as "stalled"
+                        # Solution: Require TINY momentum (0.5%+) to prove token not dead
+                        # Mature tokens (>60min) break out on VOLUME + tiny movement!
                         is_mature_breakout = entry_data.get('_mature_breakout_candidate', False)
                         trigger_mature = False
                         if is_mature_breakout:
-                            # MATURE: Only volume spike needed (300% vs initial!)
+                            # MATURE: Volume spike + minimal momentum (not dead/dumping!)
                             trigger_mature = (
+                                price_change_1m >= 0.5 and  # 🔥 FIX 2: Tiny momentum proves alive!
                                 volume_spike_pct > 300 and  # HUGE volume spike = breakout!
                                 buy_ratio > 0.65  # Strong buyer dominance
                             )
