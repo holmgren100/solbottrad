@@ -352,12 +352,12 @@ class RiskAssessor:
 
     def _assess_momentum_risk(self, market_data: Dict) -> float:
         """
-        Assess momentum risk (PHASE 3 - from 455-trade research).
+        Assess momentum risk with DIP-BUYING support (7-DAY GEMINI FIX).
 
-        Based on research from commit eb1ffbe showing 71.7% win rate:
-        - Tokens need 10-50% price gain in 1h (climbing)
-        - Tokens need 3%+ price gain in 5min (recent momentum)
-        - Tokens need 60%+ buy pressure (demand strong)
+        MWHALE -5.7% momentum → +11,162% gain was BLOCKED!
+        Solution: Allow dips (-15% to +100%) on SAFE tokens (LP burned + high liq)
+
+        Safe tokens CAN'T rug via dips (LP burned) → dips = whale accumulation!
 
         Args:
             market_data: Market data including price changes and transactions
@@ -375,29 +375,60 @@ class RiskAssessor:
         total_txns = buys_1h + sells_1h
         buy_pressure = (buys_1h / total_txns * 100) if total_txns > 0 else 50.0
 
-        # MOMENTUM FILTER RULES (from 455-trade research)
+        # 🔥 7-DAY GEMINI FIX: Check if token is SAFE for dip-buying
+        lp_burned = market_data.get('lp_burned_percent', 0)
+        liquidity = market_data.get('liquidity_usd', 0)
+        is_safe_token = (lp_burned >= 100 and liquidity >= 30000)
 
-        # 1. Check 1h price movement (should be climbing but not exhausted)
-        if price_change_1h < 10:
-            # Not climbing enough - HIGH RISK
-            h1_risk = 0.9
-        elif price_change_1h > 50:
-            # Exhausted rally - MODERATE RISK
-            h1_risk = 0.6
-        else:
-            # Good 1h momentum (10-50%) - LOW RISK
-            h1_risk = 0.2
+        # MOMENTUM FILTER RULES (context-aware based on safety)
 
-        # 2. Check 5min price movement (should have recent momentum)
-        if price_change_5m < 3:
-            # No recent momentum - HIGH RISK
-            m5_risk = 0.8
-        elif price_change_5m > 20:
-            # Too fast, likely to retrace - MODERATE RISK
-            m5_risk = 0.5
+        if is_safe_token:
+            # 🔥 SAFE TOKENS: Allow dip-buying! (-15% to +100%)
+            # LP burned = can't rug → dips are accumulation opportunities!
+
+            # 1. Check 1h price movement (permissive range)
+            if -15 <= price_change_1h <= 100:
+                # DIPS or CLIMBING = OPPORTUNITY on safe tokens!
+                h1_risk = 0.3  # LOW RISK - dip or climb both OK!
+            elif price_change_1h < -15:
+                # Too deep crash - even safe tokens avoid this
+                h1_risk = 0.7
+            else:
+                # >100% exhausted
+                h1_risk = 0.6
+
+            # 2. Check 5min price movement (very permissive)
+            if -15 <= price_change_5m <= 100:
+                # Any movement in safe range = OK!
+                m5_risk = 0.3  # LOW RISK
+            else:
+                m5_risk = 0.6
+
         else:
-            # Good 5min momentum (3-20%) - LOW RISK
-            m5_risk = 0.2
+            # 🚨 RISKY TOKENS: Keep strict momentum requirements
+            # (Original logic from 455-trade research)
+
+            # 1. Check 1h price movement (should be climbing but not exhausted)
+            if price_change_1h < 10:
+                # Not climbing enough - HIGH RISK
+                h1_risk = 0.9
+            elif price_change_1h > 50:
+                # Exhausted rally - MODERATE RISK
+                h1_risk = 0.6
+            else:
+                # Good 1h momentum (10-50%) - LOW RISK
+                h1_risk = 0.2
+
+            # 2. Check 5min price movement (should have recent momentum)
+            if price_change_5m < 3:
+                # No recent momentum - HIGH RISK
+                m5_risk = 0.8
+            elif price_change_5m > 20:
+                # Too fast, likely to retrace - MODERATE RISK
+                m5_risk = 0.5
+            else:
+                # Good 5min momentum (3-20%) - LOW RISK
+                m5_risk = 0.2
 
         # 3. Check buy pressure (need strong demand)
         if buy_pressure < 60:

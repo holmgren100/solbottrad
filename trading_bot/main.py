@@ -1748,15 +1748,22 @@ class MLBot2Foundation:
                     # High ratio on SAFE tokens = extreme demand, NOT rug risk!
                     lp_burned_pct = token_data.get('lp_burned_percent', 0.0)
 
-                    # CONTEXT-DEPENDENT RATIO:
-                    if lp_burned_pct >= 100.0 and liquidity_usd > 50000:
-                        max_ratio = 10.0  # GEMINI NIGHT: Safe tokens can handle 10X! 🔥
+                    # CONTEXT-DEPENDENT RATIO (7-DAY GEMINI ANALYSIS FIX):
+                    # SHDW 18,620% had ratio 25.73 - BLOCKED by old max 10.0!
+                    # Solution: Tiered ratio caps based on safety signals
+                    token_age_hours = token_data.get('token_age_hours', 0)
+
+                    if lp_burned_pct >= 100.0 and liquidity_usd > 50000 and token_age_hours > 1:
+                        max_ratio = 40.0  # 🔥 TIER 1: Super-safe → catch SHDW 25.73!
+                        is_safe_token = True
+                    elif lp_burned_pct >= 100.0 and liquidity_usd > 30000:
+                        max_ratio = 20.0  # 💎 TIER 2: Safe tokens → moderate high ratio
                         is_safe_token = True
                     elif liquidity_usd > 50000:
-                        max_ratio = 4.0  # High liq, no burn = moderate risk
+                        max_ratio = 6.0   # ⚠️ TIER 3: High liq without burn
                         is_safe_token = False
                     else:
-                        max_ratio = 3.0  # Low liq = strict threshold
+                        max_ratio = 3.0   # 🚨 TIER 4: Risky tokens stay strict
                         is_safe_token = False
 
                     if vol_liq_ratio > max_ratio:
@@ -1786,10 +1793,17 @@ class MLBot2Foundation:
                         if not entry_filter_reason:
                             entry_filter_reason = f'moonshot_high_ratio_{vol_liq_ratio:.2f}'
 
-                    # 🚨 WASH TRADING DETECTION: Adaptive threshold based on safety!
-                    # GEMINI NIGHT: Safe tokens (LP burned + high liq) can have higher ratios!
-                    # Real organic growth: vol 1-3X liq. Wash trading: vol 5-15X+ liq
-                    wash_threshold = 15 if is_safe_token else 5  # Safe: 15X, Risky: 5X
+                    # 🚨 WASH TRADING DETECTION: Tiered threshold (7-DAY GEMINI FIX)
+                    # PFF 7,063% (262 days old) was safe but may have hit wash filter
+                    # Solution: More permissive for established + safe tokens
+                    if lp_burned_pct >= 100 and token_age_hours > 24:
+                        wash_threshold = 40  # 🏆 Established tokens (>1 day) → very permissive
+                    elif lp_burned_pct >= 100 and token_age_hours > 1:
+                        wash_threshold = 25  # 💎 Safe + mature (>1h) → permissive
+                    elif lp_burned_pct >= 100 and liquidity_usd > 50000:
+                        wash_threshold = 15  # ⚡ Safe tokens → moderate
+                    else:
+                        wash_threshold = 5   # 🚨 Risky tokens → strict
                     if volume_1h > liquidity_usd * wash_threshold:
                         logger.info(
                             f"⛔ {symbol}: WASH TRADING DETECTED! Vol ${volume_1h:,.0f} is {volume_1h/liquidity_usd:.1f}X "
@@ -1804,6 +1818,27 @@ class MLBot2Foundation:
                             rejection_stage='wash_trading_filter'
                         )
                         return
+
+                # 🚀 VOLUME SPIKE DETECTION (7-DAY GEMINI ANALYSIS)
+                # Extreme volume spikes = breakout signal (SHDW, MWHALE pattern)
+                # 5X+ average hourly volume = something big is happening!
+                volume_24h = token_data.get('volume_24h', 0)
+                if volume_24h > 0 and volume_1h > 0:
+                    avg_hourly_volume = volume_24h / 24
+                    volume_spike_ratio = volume_1h / avg_hourly_volume
+
+                    if volume_spike_ratio >= 5.0:
+                        logger.info(
+                            f"🚀 {symbol}: VOLUME SPIKE DETECTED! "
+                            f"{volume_spike_ratio:.1f}X average hourly volume. "
+                            f"1h: ${volume_1h:,.0f}, 24h avg: ${avg_hourly_volume:,.0f}/h. "
+                            f"(GEMINI: Early breakout indicator!)"
+                        )
+                        # Mark as high-priority entry for CSV tracking
+                        if not entry_filter_reason:
+                            entry_filter_reason = f'volume_spike_{volume_spike_ratio:.1f}x'
+                        elif 'volume_spike' not in entry_filter_reason:
+                            entry_filter_reason += f'+volume_spike_{volume_spike_ratio:.1f}x'
 
                 # NO AGE LIMIT! ⚡
                 # Instead: Check if token has REAL activity (not dead/bluechip)
