@@ -4,8 +4,12 @@
 echo "🔧 Setting up Bot Control API..."
 
 # Install dependencies
-echo "📦 Installing Flask..."
-pip3 install flask flask-httpauth pandas psutil
+echo "📦 Installing Flask and dependencies..."
+/usr/bin/python3 -m pip install flask flask-httpauth pandas psutil
+
+echo "✅ Dependencies installed"
+echo "📋 Verifying imports..."
+/usr/bin/python3 -c "import flask; import flask_httpauth; import pandas; import psutil; print('✅ All imports OK')"
 
 # Create systemd service
 cat > /etc/systemd/system/bot-api.service << 'EOF'
@@ -18,9 +22,13 @@ Type=simple
 User=root
 WorkingDirectory=/home/user/solbottrad
 Environment="API_PORT=8765"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONUNBUFFERED=1"
 ExecStart=/usr/bin/python3 /home/user/solbottrad/bot_api.py
 Restart=always
 RestartSec=10
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -66,3 +74,7 @@ echo "📝 Service commands:"
 echo "   systemctl status bot-api"
 echo "   systemctl restart bot-api"
 echo "   journalctl -u bot-api -f"
+echo ""
+echo "🔍 Debug commands if service fails:"
+echo "   journalctl -u bot-api -n 50 --no-pager"
+echo "   /usr/bin/python3 /home/user/solbottrad/bot_api.py  # Test manually"
