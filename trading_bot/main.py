@@ -1737,8 +1737,11 @@ class MLBot2Foundation:
                 # 🚨 PUMP & DUMP FILTER: Vol/Liq ratio check with smart exceptions!
                 # Gemini analysis: SAVE (ratio 167) dumped -79%, ASMONGOLD (ratio 118) dumped -56%
                 # High ratio = unsustainable volume spike, dump incoming!
+                vol_liq_ratio = 0.0  # Default
                 if liquidity_usd > 0:  # Only check if we have liquidity data
                     vol_liq_ratio = volume_1h / liquidity_usd
+                    # Store for CSV tracking
+                    token_data['vol_liq_ratio'] = vol_liq_ratio
 
                     # 📊 Track ratio for velocity calculation (Gemini ML future!)
                     self.ratio_velocity.record_ratio(token_address, vol_liq_ratio)
@@ -1823,9 +1826,12 @@ class MLBot2Foundation:
                 # Extreme volume spikes = breakout signal (SHDW, MWHALE pattern)
                 # 5X+ average hourly volume = something big is happening!
                 volume_24h = token_data.get('volume_24h', 0)
+                volume_spike_ratio = 0.0  # Default
                 if volume_24h > 0 and volume_1h > 0:
                     avg_hourly_volume = volume_24h / 24
                     volume_spike_ratio = volume_1h / avg_hourly_volume
+                    # Store for CSV tracking
+                    token_data['volume_spike_ratio'] = volume_spike_ratio
 
                     if volume_spike_ratio >= 5.0:
                         logger.info(
@@ -2648,6 +2654,9 @@ class MLBot2Foundation:
                 # ⚡ TIMING ANALYSIS FIELDS
                 price_change_5m=token_data.get('price_change_5m', 0.0),
                 price_change_1h=token_data.get('price_change_1h', 0.0),
+                # 🔥 7-DAY GEMINI FILTER METRICS
+                vol_liq_ratio=token_data.get('vol_liq_ratio', 0.0),
+                volume_spike_ratio=token_data.get('volume_spike_ratio', 0.0),
                 # 🔥 ENTRY FILTER TRACKING (Gemini optimizations)
                 entry_filter_reason=entry_filter_reason,
                 liquidity_was_zero=liquidity_was_zero,
