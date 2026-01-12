@@ -1834,10 +1834,42 @@ class MLBot2Foundation:
 
                 # 🎯 SNIPER DELAY: Solana RPC lag fix (TAKEOVER +769%, WHYFISH +7,190% fix!)
                 # Gemini: "2.5s = avg Raydium pool indexing time after first swaps"
-                if liquidity_usd == 0 and volume_1h >= 5000:  # Lower trigger: $5k (was $10k)
+                # 🔥 GEMINI AFTERNOON: STRICTER $0 LIQ REQUIREMENTS! (FairyKing -17.1%, Niggaton 2x fix!)
+                if liquidity_usd == 0 and volume_1h >= 5000:
+                    # REQUIRE: LP burned 100% + HIGH volume for $0 liq tokens!
+                    lp_burned_pct = token_data.get('lp_burned_percent', 0.0)
+
+                    if lp_burned_pct < 100.0:
+                        logger.info(
+                            f"⛔ {symbol}: $0 liq with ${volume_1h:,.0f} vol BUT LP not burned ({lp_burned_pct:.0f}%)! "
+                            f"SNIPER DELAY requires LP 100% burned to prevent rugs! (FairyKing -17.1% fix!)"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"sniper_delay_no_burn_{lp_burned_pct:.0f}%",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='sniper_delay_burn_check'
+                        )
+                        return
+
+                    if volume_1h < 50000:  # Require $50k volume for $0 liq tokens!
+                        logger.info(
+                            f"⛔ {symbol}: $0 liq + LP burned BUT volume too low (${volume_1h:,.0f} <$50k)! "
+                            f"SNIPER DELAY requires $50k+ volume for $0 liq tokens! (Niggaton 2x buy fix!)"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"sniper_delay_low_vol_{volume_1h:,.0f}",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='sniper_delay_volume_check'
+                        )
+                        return
+
                     liquidity_was_zero = True  # Track that liq was $0 initially
                     logger.info(
-                        f"⏳ {symbol}: $0 liq but ${volume_1h:,.0f} vol → "
+                        f"⏳ {symbol}: $0 liq but ${volume_1h:,.0f} vol + LP {lp_burned_pct:.0f}% burned → "
                         f"SNIPER DELAY 2.5s (Raydium pool indexing lag)..."
                     )
 
@@ -2298,18 +2330,54 @@ class MLBot2Foundation:
                     )
 
                 # TIER 1: VERY new launches (<30 min) - lenient
+                # 🔥 GEMINI AFTERNOON: REQUIRE LP BURN for $0 liq! (FairyKing -17.1%, Niggaton 2x fix!)
                 if liquidity_usd == 0 and token_age_hours < 0.5 and volume_1h >= 5000 and txns_1h >= 100:
+                    lp_burned_pct = token_data.get('lp_burned_percent', 0.0)
+
+                    if lp_burned_pct < 100.0:
+                        logger.info(
+                            f"⛔ {symbol}: TIER 1 rejected! $0 liq BUT LP not burned ({lp_burned_pct:.0f}%). "
+                            f"Age {token_age_hours*60:.0f}min, Vol ${volume_1h:,.0f}. "
+                            f"TIER 1 requires LP 100% burned for $0 liq tokens! (FairyKing -17.1% fix!)"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"tier1_no_burn_{lp_burned_pct:.0f}%",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='tier1_burn_check'
+                        )
+                        return
+
                     logger.info(
                         f"✅ {symbol}: $0 liq BUT brand new ({token_age_hours*60:.0f} min old) + activity "
-                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns) - API delay! TIER 1 exception."
+                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns) + LP {lp_burned_pct:.0f}% burned! TIER 1 exception."
                     )
                     # Continue to other checks!
 
                 # TIER 2: New launches (<24h) - stricter criteria 🔥
+                # 🔥 GEMINI AFTERNOON: REQUIRE LP BURN for $0 liq! (FairyKing -17.1%, Niggaton 2x fix!)
                 elif liquidity_usd == 0 and token_age_hours < 24 and volume_1h >= 20000 and txns_1h >= 100 and buy_ratio >= 0.50:
+                    lp_burned_pct = token_data.get('lp_burned_percent', 0.0)
+
+                    if lp_burned_pct < 100.0:
+                        logger.info(
+                            f"⛔ {symbol}: TIER 2 rejected! $0 liq BUT LP not burned ({lp_burned_pct:.0f}%). "
+                            f"Age {token_age_hours:.1f}h, Vol ${volume_1h:,.0f}. "
+                            f"TIER 2 requires LP 100% burned for $0 liq tokens! (FairyKing -17.1% fix!)"
+                        )
+                        self.rejected_tracker.record_rejection(
+                            token_address=token_address,
+                            rejection_reason=f"tier2_no_burn_{lp_burned_pct:.0f}%",
+                            token_data=token_data,
+                            symbol=symbol,
+                            rejection_stage='tier2_burn_check'
+                        )
+                        return
+
                     logger.info(
                         f"✅ {symbol}: $0 liq BUT new launch ({token_age_hours:.1f}h old) + STRONG activity "
-                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns, {buy_ratio:.1%} buy) - API lag! TIER 2 exception."
+                        f"(${volume_1h:,.0f}/1h, {txns_1h} txns, {buy_ratio:.1%} buy) + LP {lp_burned_pct:.0f}% burned! TIER 2 exception."
                     )
                     # Continue to other checks! ⚡
 
