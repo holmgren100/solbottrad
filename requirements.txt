@@ -1,0 +1,20 @@
+# Core dependencies for Solana Trading Bot v2.0
+solana>=0.30.0
+solders>=0.18.0
+pyyaml>=6.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Logging and monitoring
+structlog>=23.1.0
+colorlog>=6.7.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+
+# Type checking and code quality
+mypy>=1.5.0
+black>=23.7.0
+flake8>=6.1.0

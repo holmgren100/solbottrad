@@ -1,0 +1,67 @@
+# Solana Trading Bot v2.0 Configuration
+# Based on strategy with 71.4% win rate (November 2024 version)
+
+# TIER 1: Safety Filters - All must pass
+tier1:
+  # Token price range in SOL
+  min_price: 0.10
+  max_price: 1.0
+
+  # Minimum liquidity in USD
+  min_liquidity: 50000
+
+  # Minimum security score (0-100)
+  min_security_score: 80
+
+  # Contract must be verified (enforced in code)
+
+# TIER 2: Performance Filters - All must pass
+tier2:
+  # Volume/Liquidity ratio optimal range
+  # Too low = not enough activity, too high = potential pump & dump
+  min_volume_liquidity_ratio: 0.3
+  max_volume_liquidity_ratio: 0.8
+
+  # Maximum tokens you can buy with $1
+  # Filters out extremely cheap tokens
+  max_tokens_per_dollar: 10000
+
+  # Maximum top holder concentration %
+  # Prevents whale manipulation risk
+  max_top_holder_percent: 20
+
+# Position Management
+position:
+  # Entry size per trade in SOL
+  entry_size: 0.1
+
+  # Take profit percentage
+  take_profit_percent: 15
+
+  # Stop loss percentage
+  stop_loss_percent: 8
+
+  # Maximum hold time in hours
+  max_hold_hours: 4
+
+# Bot Settings
+bot:
+  # Enable/disable actual trading (vs. paper trading)
+  live_trading: false
+
+  # Scan interval in seconds
+  scan_interval: 60
+
+  # Maximum concurrent positions
+  max_positions: 5
+
+# Logging
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  file_path: logs/bot.log
+  console_output: true
+
+# REMOVED FROM OLD VERSION:
+# - All age-based strategies
+# - Complex scoring systems (0-100 points)
+# - Conflicting decision layers
