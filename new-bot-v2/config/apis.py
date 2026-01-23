@@ -34,7 +34,7 @@ ALCHEMY_METHODS = {
 # BIRDEYE API (FREE TIER)
 # ============================================================================
 # Use: Token discovery (trending), prices, OHLCV, security checks
-# Limit: 100 requests/min (FREE tier)
+# Limit: 15 RPS = 900 requests/min (FREE tier), 30K compute units/month
 # Cost: FREE
 # Docs: https://docs.birdeye.so/
 
@@ -93,6 +93,7 @@ SOLSNIFFER_ENDPOINTS = {
 # Docs: https://dev.jup.ag/docs/api
 # IMPORTANT: Price API V3 (not v4!), lite-api deprecated Jan 31, 2026
 
+JUPITER_API_KEY = os.getenv("JUPITER_API_KEY", "")
 JUPITER_BASE_URL = "https://quote-api.jup.ag/v6"
 JUPITER_PRICE_API_V3 = "https://api.jup.ag/price/v3"
 
@@ -102,6 +103,9 @@ JUPITER_ENDPOINTS = {
     "swap": f"{JUPITER_BASE_URL}/swap",
     "swap_instructions": f"{JUPITER_BASE_URL}/swap-instructions",
     "price": JUPITER_PRICE_API_V3,  # V3, not V4!
+    "search": "https://api.jup.ag/tokens/v2/search",  # Token search (requires API key)
+    "verified": "https://api.jup.ag/tokens/v2/verified",  # Verified tokens (requires API key)
+    "trending": "https://api.jup.ag/tokens/v2/top-trending/5m"  # Trending tokens (requires API key)
 }
 
 # ============================================================================
