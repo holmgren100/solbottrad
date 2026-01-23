@@ -349,10 +349,11 @@ class DexScreenerClient:
             List of token addresses
         """
         try:
-            # DexScreener trending endpoint
-            # Note: This gets latest pairs, not specifically "trending"
-            # For production, may want to filter by volume/liquidity
-            url = f"{self.endpoints['base']}/latest/dex/pairs/solana"
+            # DexScreener latest pairs endpoint
+            url = self.endpoints.get("latest_pairs")
+            if not url:
+                # Fallback to building URL
+                url = f"{self.endpoints.get('base', 'https://api.dexscreener.com/latest')}/dex/pairs/solana"
 
             logger.debug("Fetching trending tokens from DexScreener...")
 
@@ -405,8 +406,11 @@ class DexScreenerClient:
             List of token addresses
         """
         try:
-            # Get new pairs endpoint
-            url = f"{self.endpoints['base']}/latest/dex/pairs/solana"
+            # Get latest pairs endpoint
+            url = self.endpoints.get("latest_pairs")
+            if not url:
+                # Fallback to building URL
+                url = f"{self.endpoints.get('base', 'https://api.dexscreener.com/latest')}/dex/pairs/solana"
 
             logger.debug("Fetching latest tokens from DexScreener...")
 

@@ -63,10 +63,12 @@ DEXSCREENER_BASE_URL = "https://api.dexscreener.com/latest"
 
 # DexScreener Endpoints
 DEXSCREENER_ENDPOINTS = {
+    "base": DEXSCREENER_BASE_URL,  # Base URL for building endpoints
     "token_profiles": f"{DEXSCREENER_BASE_URL}/dex/tokens",  # /tokens/{addresses}
     "pair_by_address": f"{DEXSCREENER_BASE_URL}/dex/pairs/solana",  # /pairs/solana/{address}
     "search": f"{DEXSCREENER_BASE_URL}/dex/search",  # /search/?q={query}
     "token_pairs": f"{DEXSCREENER_BASE_URL}/dex/tokens",  # Get all pairs for token
+    "latest_pairs": f"{DEXSCREENER_BASE_URL}/dex/pairs/solana",  # Latest Solana pairs
 }
 
 # Rate limit handling
