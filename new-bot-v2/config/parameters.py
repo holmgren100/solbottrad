@@ -161,7 +161,8 @@ MAX_POSITION_SIZE_SOL = 1.0         # ADJUSTABLE - max size per position
 # ============================================================================
 
 DISCOVERY_TOKEN_LIMIT = 50           # Scan top 50 trending tokens
-SCAN_INTERVAL_SECONDS = 30           # ADJUSTABLE - scan every 30 seconds
+SCAN_INTERVAL_SECONDS = 120          # ADJUSTABLE - scan every 2 minutes (long cycle to catch all tokens)
+POSITION_UPDATE_INTERVAL = 15        # CRITICAL - update positions every 15 seconds (fast for momentum)
 MIN_LIQUIDITY_USD = 50000            # Minimum liquidity to consider
 MIN_VOLUME_24H_USD = 100000          # Minimum 24h volume to consider
 
@@ -258,4 +259,5 @@ ADJUSTABLE_PARAMETERS = [
     "MAX_DAILY_LOSS_PERCENT",
     "MAX_POSITION_SIZE_SOL",
     "SCAN_INTERVAL_SECONDS",
+    "POSITION_UPDATE_INTERVAL",
 ]

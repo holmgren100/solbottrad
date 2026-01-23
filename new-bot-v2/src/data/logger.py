@@ -107,20 +107,34 @@ class DataLogger:
                 "timestamp",
                 "token_address",
                 "symbol",
+                "name",
                 "rejection_stage",  # "SAFETY", "MOMENTUM", "TREND", "FOMO"
                 "rejection_reason",
                 "momentum_score",
                 "macd_score",
                 "volume_score",
                 "rsi_score",
+                "pullback_score",
                 "macd_histogram",
                 "rsi_value",
                 "volume_velocity",
                 "price",
+                "price_change_5m",
+                "price_change_1h",
                 "liquidity_usd",
+                "volume_5m",
+                "volume_1h",
                 "volume_24h",
+                "buys_5m",
+                "sells_5m",
+                "buy_sell_ratio",
                 "mint_revoked",
                 "lp_burned",
+                "holder_count",
+                "top_10_holders_pct",
+                "market_cap_usd",
+                "data_source",  # Which API provided data
+                "rejection_count",  # Times rejected (for tracking patterns)
             ]
 
             with open(self.rejected_trades_csv, 'w', newline='') as f:
@@ -198,48 +212,49 @@ class DataLogger:
 
     def log_rejected(self, rejection_data: Dict):
         """
-        Log a rejected token to rejected_trades.csv.
+        Log a rejected token to rejected_trades.csv with ENHANCED DATA.
 
         Args:
-            rejection_data: Dict containing:
-                {
-                    "token_address": str,
-                    "symbol": str,
-                    "rejection_stage": str,  # "SAFETY", "MOMENTUM", "TREND", "FOMO"
-                    "rejection_reason": str,
-                    "momentum_score": int,
-                    "macd_score": int,
-                    "volume_score": int,
-                    "rsi_score": int,
-                    "macd_histogram": float,
-                    "rsi_value": float,
-                    "volume_velocity": float,
-                    "price": float,
-                    "liquidity_usd": float,
-                    "volume_24h": float,
-                    "mint_revoked": bool,
-                    "lp_burned": bool,
-                }
+            rejection_data: Dict containing full token data for analysis
         """
         try:
+            # Calculate buy/sell ratio
+            buys = rejection_data.get("buys", rejection_data.get("buys_5m", 0))
+            sells = rejection_data.get("sells", rejection_data.get("sells_5m", 0))
+            buy_sell_ratio = buys / sells if sells > 0 else 0
+
             row = [
                 datetime.now().isoformat(),
-                rejection_data.get("token_address", ""),
+                rejection_data.get("token_address", rejection_data.get("address", "")),
                 rejection_data.get("symbol", ""),
+                rejection_data.get("name", ""),
                 rejection_data.get("rejection_stage", ""),
                 rejection_data.get("rejection_reason", ""),
                 rejection_data.get("momentum_score", 0),
                 rejection_data.get("macd_score", 0),
                 rejection_data.get("volume_score", 0),
                 rejection_data.get("rsi_score", 0),
+                rejection_data.get("pullback_score", 0),
                 rejection_data.get("macd_histogram", 0),
-                rejection_data.get("rsi_value", 0),
+                rejection_data.get("rsi_value", rejection_data.get("rsi", 0)),
                 rejection_data.get("volume_velocity", 0),
                 rejection_data.get("price", 0),
-                rejection_data.get("liquidity_usd", 0),
+                rejection_data.get("price_change_5m", 0),
+                rejection_data.get("price_change_1h", 0),
+                rejection_data.get("liquidity_usd", rejection_data.get("liquidity", 0)),
+                rejection_data.get("volume_5m", 0),
+                rejection_data.get("volume_1h", 0),
                 rejection_data.get("volume_24h", 0),
+                buys,
+                sells,
+                buy_sell_ratio,
                 rejection_data.get("mint_revoked", False),
                 rejection_data.get("lp_burned", False),
+                rejection_data.get("holder_count", 0),
+                rejection_data.get("top_10_holders_pct", 0),
+                rejection_data.get("market_cap_usd", 0),
+                rejection_data.get("data_source", "unknown"),
+                rejection_data.get("rejection_count", 1),
             ]
 
             with open(self.rejected_trades_csv, 'a', newline='') as f:
@@ -248,7 +263,8 @@ class DataLogger:
 
             logger.info(
                 f"❌ Logged rejection: {rejection_data.get('symbol')} "
-                f"({rejection_data.get('rejection_stage')})"
+                f"({rejection_data.get('rejection_stage')}) - "
+                f"{rejection_data.get('rejection_reason')}"
             )
 
         except Exception as e:

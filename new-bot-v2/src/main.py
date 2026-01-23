@@ -43,6 +43,7 @@ from src.monitoring.telegram_notifier import TelegramNotifier
 # Configuration
 from config.parameters import (
     SCAN_INTERVAL_SECONDS,
+    POSITION_UPDATE_INTERVAL,
     HEALTH_CHECK_INTERVAL_SEC,
     MAX_SCAN_RETRIES,
     SCAN_RETRY_DELAY_SEC,
@@ -142,10 +143,11 @@ class MomentumBot:
         logger.info("=" * 60)
 
     async def run(self):
-        """Main bot loop - runs forever."""
+        """Main bot loop - runs forever with separate position and scan loops."""
         logger.info("🚀 Fearless Momentum Runner v2.0 STARTED!")
         logger.info(f"   Mode: {'MOCK (Paper Trading)' if self.mock_mode else 'LIVE'}")
-        logger.info(f"   Scan interval: {SCAN_INTERVAL_SECONDS}s")
+        logger.info(f"   Token scan interval: {SCAN_INTERVAL_SECONDS}s (long cycle)")
+        logger.info(f"   Position update interval: {POSITION_UPDATE_INTERVAL}s (fast!)")
         logger.info(f"   Max positions: {MAX_CONCURRENT_POSITIONS}")
         logger.info("")
 
@@ -156,35 +158,79 @@ class MomentumBot:
             self.telegram.send_startup_notification()
 
         try:
-            while self.running:
+            # Create two separate async tasks
+            position_task = asyncio.create_task(self._position_update_loop())
+            scan_task = asyncio.create_task(self._token_scan_loop())
+            health_task = asyncio.create_task(self._health_check_loop())
+
+            # Wait for any task to complete (shouldn't happen unless error)
+            done, pending = await asyncio.wait(
+                [position_task, scan_task, health_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # Cancel remaining tasks
+            for task in pending:
+                task.cancel()
                 try:
-                    # 1. Scan for new entry opportunities
-                    await self.scan_tokens()
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
-                    # 2. Update existing positions
-                    await self.update_positions()
-
-                    # 3. Health check (every 5 minutes)
-                    await self.periodic_health_check()
-
-                    # 4. Sleep before next cycle
-                    await asyncio.sleep(SCAN_INTERVAL_SECONDS)
-
-                except KeyboardInterrupt:
-                    logger.info("\n⏹️ Shutdown requested by user")
-                    break
-
-                except Exception as e:
-                    logger.error(f"❌ Main loop error: {e}", exc_info=True)
-
-                    if self.telegram:
-                        self.telegram.send_error_alert(str(e), "Main loop")
-
-                    # Wait longer before retrying after error
-                    await asyncio.sleep(60)
+        except KeyboardInterrupt:
+            logger.info("\n⏹️ Shutdown requested by user")
 
         finally:
             await self.shutdown()
+
+    async def _position_update_loop(self):
+        """Fast loop for updating positions (10-15 seconds)."""
+        logger.info(f"📊 Position update loop started - {POSITION_UPDATE_INTERVAL}s interval")
+
+        while self.running:
+            try:
+                await self.update_positions()
+                await asyncio.sleep(POSITION_UPDATE_INTERVAL)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"❌ Position update loop error: {e}", exc_info=True)
+                if self.telegram:
+                    self.telegram.send_error_alert(str(e), "Position update loop")
+                await asyncio.sleep(60)
+
+    async def _token_scan_loop(self):
+        """Slow loop for discovering new tokens (2-5 minutes)."""
+        logger.info(f"🔍 Token scan loop started - {SCAN_INTERVAL_SECONDS}s interval")
+
+        while self.running:
+            try:
+                await self.scan_tokens()
+                await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"❌ Token scan loop error: {e}", exc_info=True)
+                if self.telegram:
+                    self.telegram.send_error_alert(str(e), "Token scan loop")
+                await asyncio.sleep(60)
+
+    async def _health_check_loop(self):
+        """Periodic health check loop (every 5 minutes)."""
+        logger.info(f"❤️ Health check loop started - {HEALTH_CHECK_INTERVAL_SEC}s interval")
+
+        while self.running:
+            try:
+                await self.periodic_health_check()
+                await asyncio.sleep(HEALTH_CHECK_INTERVAL_SEC)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"❌ Health check loop error: {e}", exc_info=True)
+                await asyncio.sleep(300)
 
     async def scan_tokens(self):
         """Scan for new entry opportunities."""

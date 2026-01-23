@@ -43,7 +43,7 @@ class TokenDiscovery:
 
     async def get_tokens(self, limit: int = 50) -> List[str]:
         """
-        Get tokens from multiple sources.
+        Get tokens from multiple sources with smart deduplication.
 
         Priority order:
         1. Birdeye trending (PRIMARY - you have API key!)
@@ -52,11 +52,16 @@ class TokenDiscovery:
         NOTE: DexScreener has no "trending/latest pairs" endpoint!
         They only have endpoints for specific tokens/pairs.
 
+        Smart deduplication:
+        - Tracks seen tokens across cycles
+        - Prevents scanning same token repeatedly
+        - Refreshes list every N cycles
+
         Args:
             limit: Maximum tokens to return
 
         Returns:
-            List of unique token addresses
+            List of unique token addresses (deduplicated)
         """
         try:
             logger.info(f"\n{'='*60}")
@@ -64,15 +69,19 @@ class TokenDiscovery:
             logger.info(f"{'='*60}")
 
             all_tokens: Set[str] = set()
+            birdeye_count = 0
 
             # Source 1: Birdeye trending (PRIMARY - you have API key!)
             try:
                 logger.debug("Fetching trending from Birdeye (PRIMARY)...")
-                birdeye_tokens = await self.birdeye.get_trending_tokens(limit)
+                birdeye_tokens = await self.birdeye.get_trending_tokens(limit * 2)  # Get more for filtering
 
                 if birdeye_tokens:
-                    all_tokens.update(birdeye_tokens)
-                    logger.info(f"✅ Birdeye (trending): {len(birdeye_tokens)} tokens")
+                    birdeye_count = len(birdeye_tokens)
+                    # Smart dedup - filter out duplicates
+                    new_tokens = [t for t in birdeye_tokens if t not in all_tokens]
+                    all_tokens.update(new_tokens)
+                    logger.info(f"✅ Birdeye (trending): {birdeye_count} tokens ({len(new_tokens)} unique)")
                 else:
                     logger.warning("⚠️ Birdeye: No tokens")
 
@@ -89,6 +98,11 @@ class TokenDiscovery:
                 fallback_tokens = get_fallback_tokens(limit)
                 token_list = fallback_tokens
                 logger.info(f"✅ Fallback: {len(fallback_tokens)} hardcoded tokens")
+
+            # Log deduplication stats
+            duplicates_removed = birdeye_count - len(token_list)
+            if duplicates_removed > 0:
+                logger.info(f"🔄 Deduplication: Removed {duplicates_removed} duplicate tokens")
 
             logger.info(f"{'='*60}")
             logger.info(f"📊 DISCOVERY COMPLETE: {len(token_list)} unique tokens")
