@@ -128,7 +128,7 @@ class JupiterClient:
 
     def get_token_price(self, token_address: str) -> Optional[Dict]:
         """
-        Get current price for a token.
+        Get current price for a token using Jupiter Price API V3.
 
         Args:
             token_address: Token mint address
@@ -142,19 +142,20 @@ class JupiterClient:
             or None on failure
         """
         try:
+            # Price API V3 uses ?ids= parameter (can query up to 50 tokens)
             params = {"ids": token_address}
             result = self._make_request(self.endpoints["price"], params)
 
-            if result and "data" in result:
-                token_data = result["data"].get(token_address)
-                if token_data:
-                    price_data = {
-                        "id": token_address,
-                        "price": float(token_data.get("price", 0)),
-                        "timestamp": int(time.time())
-                    }
-                    logger.debug(f"Price for {token_address}: ${price_data['price']}")
-                    return price_data
+            # V3 response format: {token_address: {usdPrice, decimals, blockId, priceChange24h}}
+            if result and token_address in result:
+                token_data = result[token_address]
+                price_data = {
+                    "id": token_address,
+                    "price": float(token_data.get("usdPrice", 0)),  # V3 uses "usdPrice" not "price"
+                    "timestamp": int(time.time())
+                }
+                logger.debug(f"Price for {token_address}: ${price_data['price']}")
+                return price_data
 
             logger.warning(f"No price data for {token_address}")
             return None
@@ -165,26 +166,27 @@ class JupiterClient:
 
     def get_multiple_prices(self, token_addresses: List[str]) -> Dict[str, float]:
         """
-        Get prices for multiple tokens in one request.
+        Get prices for multiple tokens in one request (Jupiter Price API V3).
 
         Args:
-            token_addresses: List of token mint addresses
+            token_addresses: List of token mint addresses (max 50)
 
         Returns:
             Dict mapping token_address -> price (USD)
         """
         try:
-            # Jupiter price API supports comma-separated IDs
+            # Price API V3 supports comma-separated IDs (max 50)
             ids = ",".join(token_addresses)
             params = {"ids": ids}
             result = self._make_request(self.endpoints["price"], params)
 
             prices = {}
-            if result and "data" in result:
+            # V3 response: direct object with token addresses as keys
+            if result:
                 for address in token_addresses:
-                    token_data = result["data"].get(address)
-                    if token_data:
-                        prices[address] = float(token_data.get("price", 0))
+                    if address in result:
+                        token_data = result[address]
+                        prices[address] = float(token_data.get("usdPrice", 0))
 
             logger.debug(f"Got prices for {len(prices)}/{len(token_addresses)} tokens")
             return prices

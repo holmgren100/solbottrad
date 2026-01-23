@@ -87,20 +87,21 @@ SOLSNIFFER_ENDPOINTS = {
 # ============================================================================
 # JUPITER API (SWAP & PRICE ONLY)
 # ============================================================================
-# Use: Swap quotes and prices (token discovery no longer free)
-# Limit: Unlimited for prices/swaps
-# Cost: FREE
-# Docs: https://station.jup.ag/docs/apis/swap-api
+# Use: Swap quotes and prices (token discovery requires paid plan)
+# Limit: Free tier available (higher limits with API key)
+# Cost: FREE (optional Pro plan for higher limits)
+# Docs: https://dev.jup.ag/docs/api
+# IMPORTANT: Price API V3 (not v4!), lite-api deprecated Jan 31, 2026
 
 JUPITER_BASE_URL = "https://quote-api.jup.ag/v6"
-JUPITER_PRICE_API = "https://price.jup.ag/v4"
+JUPITER_PRICE_API_V3 = "https://api.jup.ag/price/v3"
 
 # Jupiter Endpoints (swap & price only)
 JUPITER_ENDPOINTS = {
     "quote": f"{JUPITER_BASE_URL}/quote",
     "swap": f"{JUPITER_BASE_URL}/swap",
     "swap_instructions": f"{JUPITER_BASE_URL}/swap-instructions",
-    "price": f"{JUPITER_PRICE_API}/price",
+    "price": JUPITER_PRICE_API_V3,  # V3, not V4!
 }
 
 # ============================================================================
