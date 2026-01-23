@@ -21,7 +21,7 @@ from config.parameters import (
 logger = logging.getLogger(__name__)
 
 
-class StopManager:
+class StopLossManager:
     """
     Manages stop losses for positions.
 
@@ -32,9 +32,9 @@ class StopManager:
     """
 
     def __init__(self):
-        """Initialize stop manager."""
+        """Initialize stop loss manager."""
         logger.info(
-            f"Stop Manager initialized: "
+            f"Stop Loss Manager initialized: "
             f"hard={HARD_STOP_LOSS_PERCENT}%, "
             f"trailing activates at +{TRAILING_STOP_ACTIVATION}% "
             f"(trails {TRAILING_STOP_PERCENT}%)"

@@ -103,6 +103,7 @@ WEAKNESS_SELL_PRESSURE_POINTS = 20     # Points if sells >> buys
 WEAKNESS_SELL_MULTIPLIER = 3.0         # ADJUSTABLE - sells 3x buys
 
 # Time-Based Exit
+TIME_EXIT_ENABLED = True             # Enable time-based exits
 TIME_EXIT_MIN_MINUTES = 3            # ADJUSTABLE - min time in position
 TIME_EXIT_MIN_MOVEMENT = 5           # ADJUSTABLE - min 5% movement required
 
