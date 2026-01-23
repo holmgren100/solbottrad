@@ -18,7 +18,6 @@ import time
 
 from config.apis import (
     JUPITER_ENDPOINTS,
-    JUPITER_API_KEY,
     API_TIMEOUT_SECONDS,
     API_MAX_RETRIES,
     API_RETRY_DELAY,
@@ -41,15 +40,6 @@ class JupiterClient:
         self.timeout = API_TIMEOUT_SECONDS
         self.max_retries = API_MAX_RETRIES
         self.retry_delay = API_RETRY_DELAY
-        self.api_key = JUPITER_API_KEY
-
-        # Check if API key is configured
-        self.has_api_key = bool(self.api_key)
-        if not self.has_api_key:
-            logger.warning(
-                "Jupiter API key not configured. Token discovery will be disabled. "
-                "Get free API key at https://jup.ag and set JUPITER_API_KEY in .env"
-            )
 
     def _make_request(self, url: str, params: Optional[Dict] = None, use_api_key: bool = False) -> Optional[Dict]:
         """

@@ -2,13 +2,13 @@
 Token Discovery - Multi-Source Token Discovery Strategy
 
 Discovers tokens from multiple sources with fallbacks:
-1. DexScreener (PRIMARY - trending and latest, no API key needed)
-2. Jupiter API V2 (OPTIONAL - trending/verified, requires free API key)
+1. Birdeye (PRIMARY - trending tokens, requires API key)
+2. DexScreener (PRIMARY - trending and latest, no API key needed)
 3. Fallback list (hardcoded popular tokens)
 
 Strategy:
-- DexScreener is primary (always works, no API key)
-- Jupiter V2 is optional enhancement (requires free API key from https://jup.ag)
+- Birdeye provides trending tokens (you have API key!)
+- DexScreener provides trending/latest pairs (always works, no API key)
 - Combine and deduplicate results
 - Return prioritized list
 - Use fallback list if all sources fail
@@ -20,7 +20,7 @@ import logging
 from typing import List, Set
 import asyncio
 
-from src.api.jupiter_client import JupiterClient
+from src.api.birdeye_client import BirdeyeClient
 from src.api.dexscreener_client import DexScreenerClient
 from src.strategies.token_fallback import get_fallback_tokens
 
@@ -36,7 +36,7 @@ class TokenDiscovery:
 
     def __init__(self):
         """Initialize token discovery with all sources."""
-        self.jupiter = JupiterClient()
+        self.birdeye = BirdeyeClient()
         self.dexscreener = DexScreenerClient()
 
         logger.info("Token Discovery initialized - multi-source strategy active")
@@ -46,9 +46,9 @@ class TokenDiscovery:
         Get tokens from multiple sources.
 
         Priority order:
-        1. DexScreener trending (PRIMARY - no API key needed)
-        2. DexScreener latest (PRIMARY - no API key needed)
-        3. Jupiter trending/verified (OPTIONAL - requires API key)
+        1. Birdeye trending (PRIMARY - you have API key!)
+        2. DexScreener trending (PRIMARY - no API key needed)
+        3. DexScreener latest (SECONDARY)
         4. Fallback list (if all fail)
 
         Args:
@@ -64,7 +64,21 @@ class TokenDiscovery:
 
             all_tokens: Set[str] = set()
 
-            # Source 1: DexScreener trending (PRIMARY)
+            # Source 1: Birdeye trending (PRIMARY - you have API key!)
+            try:
+                logger.debug("Fetching trending from Birdeye (PRIMARY)...")
+                birdeye_tokens = await self.birdeye.get_trending_tokens(limit)
+
+                if birdeye_tokens:
+                    all_tokens.update(birdeye_tokens)
+                    logger.info(f"✅ Birdeye (trending): {len(birdeye_tokens)} tokens")
+                else:
+                    logger.warning("⚠️ Birdeye: No tokens")
+
+            except Exception as e:
+                logger.warning(f"⚠️ Birdeye failed: {e}")
+
+            # Source 2: DexScreener trending (PRIMARY)
             try:
                 logger.debug("Fetching trending from DexScreener (PRIMARY)...")
                 dex_trending = await self.dexscreener.get_trending_tokens_async(limit)
@@ -78,9 +92,9 @@ class TokenDiscovery:
             except Exception as e:
                 logger.warning(f"⚠️ DexScreener trending failed: {e}")
 
-            # Source 2: DexScreener latest (PRIMARY)
+            # Source 3: DexScreener latest (SECONDARY)
             try:
-                logger.debug("Fetching latest from DexScreener (PRIMARY)...")
+                logger.debug("Fetching latest from DexScreener (SECONDARY)...")
                 dex_latest = self.dexscreener.get_latest_tokens(limit // 2)  # Get fewer latest
 
                 if dex_latest:
@@ -91,20 +105,6 @@ class TokenDiscovery:
 
             except Exception as e:
                 logger.warning(f"⚠️ DexScreener latest failed: {e}")
-
-            # Source 3: Jupiter trending (OPTIONAL - requires API key)
-            try:
-                logger.debug("Fetching from Jupiter (OPTIONAL)...")
-                jupiter_tokens = await self.jupiter.get_trending_tokens(limit)
-
-                if jupiter_tokens:
-                    all_tokens.update(jupiter_tokens)
-                    logger.info(f"✅ Jupiter (trending): {len(jupiter_tokens)} tokens")
-                else:
-                    logger.debug("ℹ️ Jupiter: No tokens (API key not configured or no data)")
-
-            except Exception as e:
-                logger.debug(f"ℹ️ Jupiter skipped: {e}")
 
             # Convert to list and limit
             token_list = list(all_tokens)[:limit]
@@ -132,15 +132,15 @@ class TokenDiscovery:
         Get tokens from a specific source.
 
         Args:
-            source: 'jupiter', 'dexscreener-trending', or 'dexscreener-latest'
+            source: 'birdeye', 'dexscreener-trending', or 'dexscreener-latest'
             limit: Maximum tokens
 
         Returns:
             List of token addresses
         """
         try:
-            if source == "jupiter":
-                return await self.jupiter.get_trending_tokens(limit)
+            if source == "birdeye":
+                return await self.birdeye.get_trending_tokens(limit)
 
             elif source == "dexscreener-trending":
                 return await self.dexscreener.get_trending_tokens_async(limit)
@@ -204,11 +204,11 @@ if __name__ == "__main__":
 
         # Test 2: Get from specific source
         print("\n" + "="*60)
-        print("TEST: Jupiter Only")
+        print("TEST: Birdeye Only")
         print("="*60)
 
-        jupiter_tokens = await discovery.get_tokens_by_source("jupiter", 20)
-        print(f"\n✅ Jupiter: {len(jupiter_tokens)} tokens")
+        birdeye_tokens = await discovery.get_tokens_by_source("birdeye", 20)
+        print(f"\n✅ Birdeye: {len(birdeye_tokens)} tokens")
 
         # Test 3: DexScreener trending
         print("\n" + "="*60)

@@ -31,32 +31,76 @@ ALCHEMY_METHODS = {
 }
 
 # ============================================================================
-# JUPITER API V2 (FREE TIER - REQUIRES API KEY)
+# BIRDEYE API (FREE TIER)
 # ============================================================================
-# Use: Token discovery, prices, market data, swaps
-# Limit: 60 requests/min (FREE tier)
-# Cost: FREE (get API key at https://jup.ag)
-# Docs: https://dev.jup.ag/docs/token-api/v2
-# IMPORTANT: Token API V1 deprecated Aug 1, 2025. lite-api.jup.ag deprecated Jan 31, 2026!
+# Use: Token discovery (trending), prices, OHLCV, security checks
+# Limit: 100 requests/min (FREE tier)
+# Cost: FREE
+# Docs: https://docs.birdeye.so/
 
-JUPITER_API_KEY = os.getenv("JUPITER_API_KEY", "")  # Optional - get free key from jup.ag
+BIRDEYE_API_KEY = os.getenv("BIRDEYE_API_KEY", "")
+BIRDEYE_BASE_URL = "https://public-api.birdeye.so"
+
+# Birdeye Endpoints
+BIRDEYE_ENDPOINTS = {
+    "token_list": f"{BIRDEYE_BASE_URL}/defi/tokenlist",
+    "trending": f"{BIRDEYE_BASE_URL}/defi/v3/token/trending",  # Top trending tokens
+    "token_security": f"{BIRDEYE_BASE_URL}/defi/token_security",
+    "token_overview": f"{BIRDEYE_BASE_URL}/defi/token_overview",
+    "price": f"{BIRDEYE_BASE_URL}/defi/price",
+    "ohlcv": f"{BIRDEYE_BASE_URL}/defi/ohlcv",
+}
+
+# ============================================================================
+# SOLSCAN API (FREE TIER)
+# ============================================================================
+# Use: Token metadata, holder analysis, top holders
+# Limit: Generous free tier
+# Cost: FREE
+# Docs: https://docs.solscan.io/
+
+SOLSCAN_API_KEY = os.getenv("SOLSCAN_API_KEY", "")
+SOLSCAN_BASE_URL = "https://pro-api.solscan.io/v1.0"
+
+# SolScan Endpoints
+SOLSCAN_ENDPOINTS = {
+    "token_meta": f"{SOLSCAN_BASE_URL}/token/meta",
+    "token_holders": f"{SOLSCAN_BASE_URL}/token/holders",
+    "market": f"{SOLSCAN_BASE_URL}/market/token",
+}
+
+# ============================================================================
+# SOLSNIFFER API
+# ============================================================================
+# Use: Token security checks, rug detection
+# Limit: Free tier available
+# Docs: https://solsniffer.com/
+
+SOLSNIFFER_API_KEY = os.getenv("SOLSNIFFER_API_KEY", "")
+SOLSNIFFER_BASE_URL = "https://api.solsniffer.com"
+
+SOLSNIFFER_ENDPOINTS = {
+    "scan": f"{SOLSNIFFER_BASE_URL}/v1/scan",
+    "quick_scan": f"{SOLSNIFFER_BASE_URL}/v1/quick-scan",
+}
+
+# ============================================================================
+# JUPITER API (SWAP & PRICE ONLY)
+# ============================================================================
+# Use: Swap quotes and prices (token discovery no longer free)
+# Limit: Unlimited for prices/swaps
+# Cost: FREE
+# Docs: https://station.jup.ag/docs/apis/swap-api
+
 JUPITER_BASE_URL = "https://quote-api.jup.ag/v6"
 JUPITER_PRICE_API = "https://price.jup.ag/v4"
-JUPITER_TOKEN_API_V2 = "https://api.jup.ag/tokens/v2"
 
-# Jupiter Endpoints
+# Jupiter Endpoints (swap & price only)
 JUPITER_ENDPOINTS = {
-    # Swap endpoints (no API key required)
     "quote": f"{JUPITER_BASE_URL}/quote",
     "swap": f"{JUPITER_BASE_URL}/swap",
     "swap_instructions": f"{JUPITER_BASE_URL}/swap-instructions",
     "price": f"{JUPITER_PRICE_API}/price",
-
-    # Token API V2 (requires API key)
-    "trending": f"{JUPITER_TOKEN_API_V2}/toptrending/5m",  # Top trending tokens (5m interval)
-    "recent": f"{JUPITER_TOKEN_API_V2}/recent",  # Recently created tokens
-    "verified": f"{JUPITER_TOKEN_API_V2}/tag?query=verified",  # Verified tokens only
-    "search": f"{JUPITER_TOKEN_API_V2}/search",  # Search tokens
 }
 
 # ============================================================================
@@ -140,10 +184,25 @@ def get_api_summary():
             "endpoint": ALCHEMY_ENDPOINT if ALCHEMY_API_KEY else "NOT CONFIGURED",
             "cost": "FREE (300M compute units/month)"
         },
+        "birdeye": {
+            "configured": bool(BIRDEYE_API_KEY),
+            "endpoint": BIRDEYE_BASE_URL if BIRDEYE_API_KEY else "NOT CONFIGURED",
+            "cost": "FREE (100 req/min)"
+        },
+        "solscan": {
+            "configured": bool(SOLSCAN_API_KEY),
+            "endpoint": SOLSCAN_BASE_URL if SOLSCAN_API_KEY else "NOT CONFIGURED",
+            "cost": "FREE (Generous tier)"
+        },
+        "solsniffer": {
+            "configured": bool(SOLSNIFFER_API_KEY),
+            "endpoint": SOLSNIFFER_BASE_URL if SOLSNIFFER_API_KEY else "NOT CONFIGURED",
+            "cost": "FREE (Limited)"
+        },
         "jupiter": {
-            "configured": True,  # No API key required
+            "configured": True,  # No API key required for prices/swaps
             "endpoint": JUPITER_BASE_URL,
-            "cost": "FREE (Unlimited)"
+            "cost": "FREE (Prices & swaps only)"
         },
         "dexscreener": {
             "configured": True,  # No API key required
