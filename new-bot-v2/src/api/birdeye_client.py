@@ -64,6 +64,7 @@ class BirdeyeClient:
             try:
                 headers = {
                     "X-API-KEY": self.api_key,
+                    "x-chain": "solana",  # Required: specify blockchain network
                     "Content-Type": "application/json"
                 }
 

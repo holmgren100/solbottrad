@@ -254,6 +254,35 @@ class DataLogger:
         except Exception as e:
             logger.error(f"Error logging rejection: {e}")
 
+    def log_rejection(self, token_address: str, stage: str, reason: str):
+        """
+        Simplified rejection logging (backward compatibility wrapper).
+
+        Args:
+            token_address: Token address
+            stage: Rejection stage (SAFETY, MOMENTUM, TREND, FOMO)
+            reason: Rejection reason
+        """
+        rejection_data = {
+            "token_address": token_address,
+            "symbol": token_address[:8] + "...",
+            "rejection_stage": stage,
+            "rejection_reason": reason,
+            "momentum_score": 0,
+            "macd_score": 0,
+            "volume_score": 0,
+            "rsi_score": 0,
+            "macd_histogram": 0,
+            "rsi_value": 0,
+            "volume_velocity": 0,
+            "price": 0,
+            "liquidity_usd": 0,
+            "volume_24h": 0,
+            "mint_revoked": False,
+            "lp_burned": False,
+        }
+        self.log_rejected(rejection_data)
+
     def get_trade_count(self) -> int:
         """Get total number of trades logged."""
         try:
