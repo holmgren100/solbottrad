@@ -166,6 +166,27 @@ MIN_LIQUIDITY_USD = 50000            # Minimum liquidity to consider
 MIN_VOLUME_24H_USD = 100000          # Minimum 24h volume to consider
 
 # ============================================================================
+# MAIN LOOP & HEALTH
+# ============================================================================
+
+HEALTH_CHECK_INTERVAL_SEC = 300      # Health check every 5 minutes
+MAX_SCAN_RETRIES = 3                 # Retry on scan failure
+SCAN_RETRY_DELAY_SEC = 10            # Wait between retries
+DEFAULT_POSITION_SIZE_SOL = 0.1      # Default trade size
+
+# ============================================================================
+# NOTIFICATIONS
+# ============================================================================
+
+TELEGRAM_ENABLED = True              # Enable Telegram notifications
+NOTIFY_ON_ENTRY = True               # Notify on entry signals
+NOTIFY_ON_EXIT = True                # Notify on exit signals
+NOTIFY_ON_BREAKEVEN = True           # Notify on breakeven triggers
+NOTIFY_ON_PYRAMID = True             # Notify on pyramid adds
+NOTIFY_ON_PARTIAL = True             # Notify on partial profits
+NOTIFY_ON_ERROR = True               # Notify on errors
+
+# ============================================================================
 # PARAMETER SUMMARY
 # ============================================================================
 
