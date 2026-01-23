@@ -20,7 +20,7 @@ from src.api.alchemy_client import AlchemyClient
 from src.api.jupiter_client import JupiterClient
 from src.api.dexscreener_client import DexScreenerClient
 from config.parameters import (
-    MAX_OPEN_POSITIONS,
+    MAX_CONCURRENT_POSITIONS,
     ML_TRADES_CSV,
     REJECTED_TRADES_CSV
 )
@@ -103,10 +103,10 @@ class HealthCheck:
 
             # 3. Check position count
             details["position_count"] = position_count
-            details["max_positions"] = MAX_OPEN_POSITIONS
+            details["max_positions"] = MAX_CONCURRENT_POSITIONS
 
-            if position_count >= MAX_OPEN_POSITIONS:
-                warnings.append(f"At max positions ({position_count}/{MAX_OPEN_POSITIONS})")
+            if position_count >= MAX_CONCURRENT_POSITIONS:
+                warnings.append(f"At max positions ({position_count}/{MAX_CONCURRENT_POSITIONS})")
 
             # 4. Check data files
             file_status = self._check_data_files()
@@ -302,7 +302,7 @@ class HealthCheck:
 
         return (
             f"{emoji} {health['status'].upper()} | "
-            f"Positions: {position_count}/{MAX_OPEN_POSITIONS} | "
+            f"Positions: {position_count}/{MAX_CONCURRENT_POSITIONS} | "
             f"Check #{health['check_count']}"
         )
 
