@@ -1,0 +1,24 @@
+# Fearless Momentum Runner v2.0 - Python Dependencies
+
+# Core
+requests>=2.31.0
+python-dotenv>=1.0.0
+numpy>=1.24.0
+
+# Solana
+solana>=0.30.0
+solders>=0.18.0
+
+# Data & Logging
+pyyaml>=6.0
+structlog>=23.1.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+
+# Code Quality
+black>=23.7.0
+flake8>=6.1.0
+mypy>=1.5.0
