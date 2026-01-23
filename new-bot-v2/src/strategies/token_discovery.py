@@ -21,6 +21,7 @@ import asyncio
 
 from src.api.jupiter_client import JupiterClient
 from src.api.dexscreener_client import DexScreenerClient
+from src.strategies.token_fallback import get_fallback_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -108,13 +109,16 @@ class TokenDiscovery:
             # Convert to list and limit
             token_list = list(all_tokens)[:limit]
 
+            # If no tokens from any source, use fallback list
+            if not token_list:
+                logger.warning("❌ NO TOKENS FROM ANY SOURCE - USING FALLBACK LIST!")
+                fallback_tokens = get_fallback_tokens(limit)
+                token_list = fallback_tokens
+                logger.info(f"✅ Fallback: {len(fallback_tokens)} hardcoded tokens")
+
             logger.info(f"{'='*60}")
             logger.info(f"📊 DISCOVERY COMPLETE: {len(token_list)} unique tokens")
             logger.info(f"{'='*60}\n")
-
-            if not token_list:
-                logger.error("❌ NO TOKENS FROM ANY SOURCE!")
-                return []
 
             return token_list
 
