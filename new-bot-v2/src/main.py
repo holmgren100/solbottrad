@@ -21,6 +21,7 @@ from src.api.dexscreener_client import DexScreenerClient
 from src.strategies.momentum_entry import MomentumEntry
 from src.strategies.trend_confirmation import TrendConfirmation
 from src.strategies.anti_fomo import AntiFOMO
+from src.strategies.token_discovery import TokenDiscovery
 from src.filters.safety_check import SafetyCheck
 from src.data.logger import DataLogger
 
@@ -107,6 +108,7 @@ class MomentumBot:
         logger.info("Loading Phase 1: Entry Logic...")
         self.jupiter_client = JupiterClient()
         self.dexscreener_client = DexScreenerClient()
+        self.token_discovery = TokenDiscovery()
         self.momentum_entry = MomentumEntry()
         self.trend_confirmation = TrendConfirmation()
         self.anti_fomo = AntiFOMO()
@@ -239,17 +241,21 @@ class MomentumBot:
             logger.error(f"Error in scan_tokens: {e}", exc_info=True)
 
     async def _get_trending_tokens(self) -> List[str]:
-        """Get trending tokens from Jupiter."""
+        """Get trending tokens from multiple sources."""
         try:
-            # For now, use a curated list or get from Jupiter API
-            # In production, Jupiter has a trending tokens endpoint
+            logger.debug("Getting trending tokens from multi-source discovery...")
 
-            logger.debug("Getting trending tokens from Jupiter...")
+            # Use TokenDiscovery to get tokens from all sources
+            token_addresses = await self.token_discovery.get_tokens(
+                limit=DISCOVERY_TOKEN_LIMIT
+            )
 
-            # TODO: Implement Jupiter trending tokens API
-            # For now, return empty list (Phase 4 mock mode)
+            if token_addresses:
+                logger.info(f"✅ Multi-source discovery: {len(token_addresses)} tokens")
+            else:
+                logger.warning("⚠️ No tokens from any source!")
 
-            return []
+            return token_addresses
 
         except Exception as e:
             logger.error(f"Error getting trending tokens: {e}")

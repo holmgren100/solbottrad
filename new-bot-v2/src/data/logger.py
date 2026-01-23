@@ -54,12 +54,16 @@ class DataLogger:
                 "timestamp",
                 "token_address",
                 "symbol",
+                "action",  # "ENTRY" or "EXIT"
                 "entry_price",
                 "exit_price",
+                "size_sol",
                 "profit_pct",
                 "profit_sol",
+                "peak_profit_pct",
                 "hold_time_minutes",
                 "exit_reason",
+                "exit_type",  # "hard_stop", "trailing_stop", "weakness", "time", etc.
                 # Entry signals
                 "momentum_score",
                 "macd_score",
@@ -78,6 +82,16 @@ class DataLogger:
                 # Safety checks
                 "mint_revoked",
                 "lp_burned",
+                # Position management
+                "breakeven_triggered",
+                "pyramid_1_triggered",
+                "pyramid_2_triggered",
+                "partial_1_taken",
+                "partial_2_taken",
+                "partials_count",
+                # Exit analysis
+                "weakness_score_at_exit",
+                "win",  # True if profit > 0
             ]
 
             with open(self.ml_trades_csv, 'w', newline='') as f:
@@ -117,47 +131,32 @@ class DataLogger:
 
     def log_trade(self, trade_data: Dict):
         """
-        Log a successful trade to ml_trades.csv.
+        Log a trade action (entry or exit) to ml_trades.csv.
+
+        Enhanced to include position management data.
 
         Args:
-            trade_data: Dict containing:
-                {
-                    "token_address": str,
-                    "symbol": str,
-                    "entry_price": float,
-                    "exit_price": float,
-                    "profit_pct": float,
-                    "profit_sol": float,
-                    "hold_time_minutes": int,
-                    "exit_reason": str,
-                    "momentum_score": int,
-                    "macd_score": int,
-                    "volume_score": int,
-                    "rsi_score": int,
-                    "pullback_score": int,
-                    "macd_histogram": float,
-                    "rsi_value": float,
-                    "volume_velocity": float,
-                    "liquidity_usd": float,
-                    "volume_24h": float,
-                    "price_change_5m": float,
-                    "buys_5m": int,
-                    "sells_5m": int,
-                    "mint_revoked": bool,
-                    "lp_burned": bool,
-                }
+            trade_data: Dict containing all trade data including
+                        entry signals, market data, position management, etc.
         """
         try:
+            action = trade_data.get("action", "EXIT")
+            profit_pct = trade_data.get("profit_pct", trade_data.get("pnl_percent", 0))
+
             row = [
                 datetime.now().isoformat(),
                 trade_data.get("token_address", ""),
                 trade_data.get("symbol", ""),
+                action,
                 trade_data.get("entry_price", 0),
-                trade_data.get("exit_price", 0),
-                trade_data.get("profit_pct", 0),
-                trade_data.get("profit_sol", 0),
+                trade_data.get("exit_price", trade_data.get("price", 0)),
+                trade_data.get("size_sol", 0),
+                profit_pct,
+                trade_data.get("profit_sol", trade_data.get("pnl_sol", 0)),
+                trade_data.get("peak_profit_pct", 0),
                 trade_data.get("hold_time_minutes", 0),
-                trade_data.get("exit_reason", ""),
+                trade_data.get("exit_reason", trade_data.get("reason", "")),
+                trade_data.get("exit_type", ""),
                 trade_data.get("momentum_score", 0),
                 trade_data.get("macd_score", 0),
                 trade_data.get("volume_score", 0),
@@ -173,6 +172,16 @@ class DataLogger:
                 trade_data.get("sells_5m", 0),
                 trade_data.get("mint_revoked", False),
                 trade_data.get("lp_burned", False),
+                # Position management
+                trade_data.get("breakeven_triggered", False),
+                trade_data.get("pyramid_1_triggered", False),
+                trade_data.get("pyramid_2_triggered", False),
+                trade_data.get("partial_1_taken", False),
+                trade_data.get("partial_2_taken", False),
+                trade_data.get("partials_count", 0),
+                # Exit analysis
+                trade_data.get("weakness_score_at_exit", 0),
+                profit_pct > 0,  # win = True if profit > 0
             ]
 
             with open(self.ml_trades_csv, 'a', newline='') as f:
@@ -270,6 +279,132 @@ class DataLogger:
         except Exception as e:
             logger.error(f"Error getting rejection count: {e}")
             return 0
+
+    def get_today_trades(self) -> list:
+        """
+        Get all trades from today for daily summary.
+
+        Returns:
+            List of trade dicts
+        """
+        try:
+            if not os.path.exists(self.ml_trades_csv):
+                return []
+
+            today = datetime.now().date()
+            today_trades = []
+
+            with open(self.ml_trades_csv, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Parse timestamp
+                    timestamp = row.get("timestamp", "")
+                    if timestamp:
+                        trade_date = datetime.fromisoformat(timestamp).date()
+                        if trade_date == today and row.get("action") == "EXIT":
+                            today_trades.append(row)
+
+            return today_trades
+
+        except Exception as e:
+            logger.error(f"Error getting today's trades: {e}")
+            return []
+
+    def calculate_stats(self, trades: list) -> Dict:
+        """
+        Calculate statistics from trade list.
+
+        Args:
+            trades: List of trade dicts
+
+        Returns:
+            Dict with stats (total_trades, wins, losses, win_rate, etc.)
+        """
+        try:
+            if not trades:
+                return {
+                    "total_trades": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "win_rate": 0,
+                    "total_pnl": 0,
+                    "total_pnl_sol": 0,
+                    "best_trade": 0,
+                    "worst_trade": 0,
+                    "avg_duration": 0,
+                    "big_winners": 0,
+                    "breakeven_count": 0,
+                    "pyramid_count": 0
+                }
+
+            total_trades = len(trades)
+            wins = 0
+            losses = 0
+            total_pnl = 0
+            total_pnl_sol = 0
+            best_trade = -100
+            worst_trade = 100
+            total_duration = 0
+            big_winners = 0
+            breakeven_count = 0
+            pyramid_count = 0
+
+            for trade in trades:
+                # PnL
+                pnl = float(trade.get("profit_pct", 0))
+                pnl_sol = float(trade.get("profit_sol", 0))
+
+                total_pnl += pnl
+                total_pnl_sol += pnl_sol
+
+                if pnl > 0:
+                    wins += 1
+                else:
+                    losses += 1
+
+                if pnl > best_trade:
+                    best_trade = pnl
+
+                if pnl < worst_trade:
+                    worst_trade = pnl
+
+                # Big winners (500%+)
+                if pnl >= 500:
+                    big_winners += 1
+
+                # Duration
+                duration = int(trade.get("hold_time_minutes", 0))
+                total_duration += duration
+
+                # Position management
+                if trade.get("breakeven_triggered", "False") == "True":
+                    breakeven_count += 1
+
+                if (trade.get("pyramid_1_triggered", "False") == "True" or
+                    trade.get("pyramid_2_triggered", "False") == "True"):
+                    pyramid_count += 1
+
+            win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+            avg_duration = total_duration // total_trades if total_trades > 0 else 0
+
+            return {
+                "total_trades": total_trades,
+                "wins": wins,
+                "losses": losses,
+                "win_rate": win_rate,
+                "total_pnl": total_pnl,
+                "total_pnl_sol": total_pnl_sol,
+                "best_trade": best_trade,
+                "worst_trade": worst_trade,
+                "avg_duration": avg_duration,
+                "big_winners": big_winners,
+                "breakeven_count": breakeven_count,
+                "pyramid_count": pyramid_count
+            }
+
+        except Exception as e:
+            logger.error(f"Error calculating stats: {e}")
+            return {}
 
 
 # Example usage

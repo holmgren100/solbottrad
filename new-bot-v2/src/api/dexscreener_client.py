@@ -336,6 +336,134 @@ class DexScreenerClient:
             logger.error(f"Error getting buy/sell pressure: {e}")
             return None
 
+    def get_trending_tokens(self, limit: int = 50) -> List[str]:
+        """
+        Get trending Solana tokens from DexScreener.
+
+        Returns latest boosted/trending tokens on Solana.
+
+        Args:
+            limit: Maximum tokens to return
+
+        Returns:
+            List of token addresses
+        """
+        try:
+            # DexScreener trending endpoint
+            # Note: This gets latest pairs, not specifically "trending"
+            # For production, may want to filter by volume/liquidity
+            url = f"{self.endpoints['base']}/latest/dex/pairs/solana"
+
+            logger.debug("Fetching trending tokens from DexScreener...")
+
+            result = self._make_request(url)
+
+            if not result or "pairs" not in result:
+                logger.warning("No trending data from DexScreener")
+                return []
+
+            pairs = result["pairs"]
+
+            if not pairs:
+                logger.warning("No pairs in DexScreener response")
+                return []
+
+            # Extract token addresses from pairs
+            token_addresses = []
+
+            for pair in pairs[:limit]:
+                # Get base token (usually the new/traded token)
+                base_token = pair.get("baseToken", {})
+                token_address = base_token.get("address")
+
+                if token_address:
+                    # Skip SOL pairs (we want the other token)
+                    if token_address != "So11111111111111111111111111111111111111112":
+                        token_addresses.append(token_address)
+
+            # Remove duplicates
+            token_addresses = list(set(token_addresses))
+
+            logger.info(f"✅ DexScreener: {len(token_addresses)} trending tokens")
+
+            return token_addresses[:limit]
+
+        except Exception as e:
+            logger.error(f"Error getting trending tokens: {e}")
+            return []
+
+    def get_latest_tokens(self, limit: int = 50) -> List[str]:
+        """
+        Get newest Solana tokens from DexScreener.
+
+        Returns newly created pairs on Solana.
+
+        Args:
+            limit: Maximum tokens to return
+
+        Returns:
+            List of token addresses
+        """
+        try:
+            # Get new pairs endpoint
+            url = f"{self.endpoints['base']}/latest/dex/pairs/solana"
+
+            logger.debug("Fetching latest tokens from DexScreener...")
+
+            result = self._make_request(url)
+
+            if not result or "pairs" not in result:
+                logger.warning("No latest data from DexScreener")
+                return []
+
+            pairs = result["pairs"]
+
+            # Extract and sort by creation time
+            token_pairs = []
+
+            for pair in pairs:
+                base_token = pair.get("baseToken", {})
+                token_address = base_token.get("address")
+
+                # Get pair creation time
+                pair_created_at = pair.get("pairCreatedAt", 0)
+
+                if token_address and token_address != "So11111111111111111111111111111111111111112":
+                    token_pairs.append({
+                        "address": token_address,
+                        "created_at": pair_created_at
+                    })
+
+            # Sort by creation time (newest first)
+            token_pairs.sort(key=lambda x: x["created_at"], reverse=True)
+
+            # Extract addresses
+            token_addresses = [t["address"] for t in token_pairs[:limit]]
+
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_addresses = []
+            for addr in token_addresses:
+                if addr not in seen:
+                    seen.add(addr)
+                    unique_addresses.append(addr)
+
+            logger.info(f"✅ DexScreener (latest): {len(unique_addresses)} new tokens")
+
+            return unique_addresses
+
+        except Exception as e:
+            logger.error(f"Error getting latest tokens: {e}")
+            return []
+
+    async def get_trending_tokens_async(self, limit: int = 50) -> List[str]:
+        """
+        Async wrapper for get_trending_tokens.
+
+        For compatibility with main bot loop.
+        """
+        return self.get_trending_tokens(limit)
+
 
 # Example usage
 if __name__ == "__main__":

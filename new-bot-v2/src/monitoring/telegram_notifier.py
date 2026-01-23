@@ -368,6 +368,71 @@ Fearless Momentum Runner has been stopped.
             logger.error(f"Error sending shutdown notification: {e}")
             return False
 
+    def send_daily_summary(self, stats: dict) -> bool:
+        """
+        Send daily trading summary.
+
+        Args:
+            stats: Dict with daily statistics from DataLogger
+
+        Returns:
+            True if sent
+        """
+        try:
+            if stats.get("total_trades", 0) == 0:
+                return False  # Don't send if no trades
+
+            total_trades = stats["total_trades"]
+            wins = stats["wins"]
+            losses = stats["losses"]
+            win_rate = stats["win_rate"]
+            total_pnl = stats["total_pnl"]
+            total_pnl_sol = stats["total_pnl_sol"]
+            best_trade = stats["best_trade"]
+            worst_trade = stats["worst_trade"]
+            avg_duration = stats["avg_duration"]
+            big_winners = stats["big_winners"]
+            breakeven_count = stats["breakeven_count"]
+            pyramid_count = stats["pyramid_count"]
+
+            # Emoji based on performance
+            if win_rate >= 60:
+                emoji = "🎉"
+            elif win_rate >= 50:
+                emoji = "✅"
+            elif win_rate >= 40:
+                emoji = "📊"
+            else:
+                emoji = "📉"
+
+            message = f"""
+{emoji} <b>DAILY SUMMARY - {datetime.now().strftime('%Y-%m-%d')}</b>
+
+🎯 <b>Performance:</b>
+• Total Trades: {total_trades}
+• Wins: {wins} | Losses: {losses}
+• Win Rate: {win_rate:.1f}%
+• Total P&L: {total_pnl:+.1f}% ({total_pnl_sol:+.3f} SOL)
+
+📈 <b>Best/Worst:</b>
+• Best Trade: {best_trade:+.1f}%
+• Worst Trade: {worst_trade:+.1f}%
+• Avg Duration: {avg_duration} min
+
+💎 <b>Highlights:</b>
+• Runners Caught (500%+): {big_winners}
+• Breakeven Triggered: {breakeven_count}
+• Pyramids Added: {pyramid_count}
+
+⏱️ <i>Generated: {datetime.now().strftime('%H:%M:%S')}</i>
+"""
+
+            return self.send_message(message.strip())
+
+        except Exception as e:
+            logger.error(f"Error sending daily summary: {e}")
+            return False
+
 
 # Example usage
 if __name__ == "__main__":

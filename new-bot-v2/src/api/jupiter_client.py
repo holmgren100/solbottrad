@@ -41,6 +41,13 @@ class JupiterClient:
         self.max_retries = API_MAX_RETRIES
         self.retry_delay = API_RETRY_DELAY
 
+        # Token discovery categories (rotate through these)
+        self.categories = [
+            'strict',  # Verified tokens
+            'all'      # All tokens
+        ]
+        self.current_category_index = 0
+
     def _make_request(self, url: str, params: Optional[Dict] = None) -> Optional[Dict]:
         """
         Make HTTP request to Jupiter with retries.
@@ -368,6 +375,84 @@ class JupiterClient:
         except Exception as e:
             logger.error(f"Error getting token info batch: {e}")
             return {}
+
+    def get_all_tokens(self, limit: int = 100) -> List[str]:
+        """
+        Get list of all tokens from Jupiter.
+
+        Uses rotating category for variety:
+        - strict: Verified tokens only
+        - all: All tokens (includes new/unverified)
+
+        Args:
+            limit: Maximum tokens to return
+
+        Returns:
+            List of token addresses
+        """
+        try:
+            # Get token list from Jupiter
+            # URL: https://token.jup.ag/strict or https://token.jup.ag/all
+            category = self._get_next_category()
+            url = f"https://token.jup.ag/{category}"
+
+            logger.debug(f"Fetching tokens from Jupiter ({category} list)...")
+
+            response = requests.get(url, timeout=self.timeout)
+
+            if response.status_code != 200:
+                logger.warning(f"Jupiter token list failed: {response.status_code}")
+                return []
+
+            tokens_data = response.json()
+
+            if not tokens_data:
+                logger.warning("No tokens in Jupiter list")
+                return []
+
+            # Extract token addresses
+            token_addresses = []
+
+            for token in tokens_data[:limit]:
+                if isinstance(token, dict):
+                    address = token.get("address")
+                    if address:
+                        token_addresses.append(address)
+
+            logger.info(f"✅ Jupiter ({category}): {len(token_addresses)} tokens")
+
+            return token_addresses
+
+        except Exception as e:
+            logger.error(f"Error getting Jupiter token list: {e}")
+            return []
+
+    def _get_next_category(self) -> str:
+        """
+        Get next category in rotation.
+
+        Returns:
+            Category name ('strict' or 'all')
+        """
+        category = self.categories[self.current_category_index]
+        self.current_category_index = (self.current_category_index + 1) % len(self.categories)
+        return category
+
+    async def get_trending_tokens(self, limit: int = 50) -> List[str]:
+        """
+        Get trending tokens from Jupiter.
+
+        This is an async wrapper for compatibility with main bot loop.
+
+        Args:
+            limit: Maximum tokens to return
+
+        Returns:
+            List of token addresses
+        """
+        # For now, get all tokens (Jupiter doesn't have a "trending" endpoint)
+        # In future, can combine with volume/price change data
+        return self.get_all_tokens(limit=limit)
 
 
 # Example usage
