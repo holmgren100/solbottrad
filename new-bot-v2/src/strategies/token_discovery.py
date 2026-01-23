@@ -47,9 +47,10 @@ class TokenDiscovery:
 
         Priority order:
         1. Birdeye trending (PRIMARY - you have API key!)
-        2. DexScreener trending (PRIMARY - no API key needed)
-        3. DexScreener latest (SECONDARY)
-        4. Fallback list (if all fail)
+        2. Fallback list (if Birdeye fails)
+
+        NOTE: DexScreener has no "trending/latest pairs" endpoint!
+        They only have endpoints for specific tokens/pairs.
 
         Args:
             limit: Maximum tokens to return
@@ -78,40 +79,13 @@ class TokenDiscovery:
             except Exception as e:
                 logger.warning(f"⚠️ Birdeye failed: {e}")
 
-            # Source 2: DexScreener trending (PRIMARY)
-            try:
-                logger.debug("Fetching trending from DexScreener (PRIMARY)...")
-                dex_trending = await self.dexscreener.get_trending_tokens_async(limit)
-
-                if dex_trending:
-                    all_tokens.update(dex_trending)
-                    logger.info(f"✅ DexScreener (trending): {len(dex_trending)} tokens")
-                else:
-                    logger.warning("⚠️ DexScreener trending: No tokens")
-
-            except Exception as e:
-                logger.warning(f"⚠️ DexScreener trending failed: {e}")
-
-            # Source 3: DexScreener latest (SECONDARY)
-            try:
-                logger.debug("Fetching latest from DexScreener (SECONDARY)...")
-                dex_latest = self.dexscreener.get_latest_tokens(limit // 2)  # Get fewer latest
-
-                if dex_latest:
-                    all_tokens.update(dex_latest)
-                    logger.info(f"✅ DexScreener (latest): {len(dex_latest)} tokens")
-                else:
-                    logger.warning("⚠️ DexScreener latest: No tokens")
-
-            except Exception as e:
-                logger.warning(f"⚠️ DexScreener latest failed: {e}")
-
             # Convert to list and limit
             token_list = list(all_tokens)[:limit]
 
-            # If no tokens from any source, use fallback list
+            # If no tokens from Birdeye, use fallback list
             if not token_list:
-                logger.warning("❌ NO TOKENS FROM ANY SOURCE - USING FALLBACK LIST!")
+                logger.warning("❌ NO TOKENS FROM BIRDEYE - USING FALLBACK LIST!")
+                logger.info("ℹ️  DexScreener has no 'trending/latest' endpoint - only specific token queries")
                 fallback_tokens = get_fallback_tokens(limit)
                 token_list = fallback_tokens
                 logger.info(f"✅ Fallback: {len(fallback_tokens)} hardcoded tokens")
