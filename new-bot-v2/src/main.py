@@ -325,9 +325,16 @@ class MomentumBot:
                     f"❌ {token_address[:8]} failed safety: "
                     f"LP={safety['lp_burned']}, Mint={safety['mint_revoked']}"
                 )
-                self.data_logger.log_rejection(
-                    token_address, "SAFETY_FAIL", "LP or Mint not safe"
-                )
+                # Log rejection with minimal data (don't have full data yet)
+                self.data_logger.log_rejected({
+                    "token_address": token_address,
+                    "symbol": token_address[:8] + "...",
+                    "rejection_stage": "SAFETY",
+                    "rejection_reason": f"LP={safety['lp_burned']}, Mint={safety['mint_revoked']}",
+                    "mint_revoked": safety.get("mint_revoked", False),
+                    "lp_burned": safety.get("lp_burned", False),
+                    "data_source": "alchemy"
+                })
                 return False
 
             # Step 2: Gather complete token data
@@ -342,18 +349,22 @@ class MomentumBot:
                 logger.debug(
                     f"❌ {token_data['symbol']} - low liquidity ${token_data['liquidity']:,.0f}"
                 )
-                self.data_logger.log_rejection(
-                    token_address, "LOW_LIQUIDITY", f"${token_data['liquidity']:,.0f}"
-                )
+                # Log with FULL token data
+                token_data["rejection_stage"] = "LOW_LIQUIDITY"
+                token_data["rejection_reason"] = f"Liquidity ${token_data['liquidity']:,.0f} < ${MIN_LIQUIDITY_USD:,.0f}"
+                token_data["data_source"] = "dexscreener"
+                self.data_logger.log_rejected(token_data)
                 return False
 
             if token_data["volume_24h"] < MIN_VOLUME_24H_USD:
                 logger.debug(
                     f"❌ {token_data['symbol']} - low volume ${token_data['volume_24h']:,.0f}"
                 )
-                self.data_logger.log_rejection(
-                    token_address, "LOW_VOLUME", f"${token_data['volume_24h']:,.0f}"
-                )
+                # Log with FULL token data
+                token_data["rejection_stage"] = "LOW_VOLUME"
+                token_data["rejection_reason"] = f"Volume ${token_data['volume_24h']:,.0f} < ${MIN_VOLUME_24H_USD:,.0f}"
+                token_data["data_source"] = "dexscreener"
+                self.data_logger.log_rejected(token_data)
                 return False
 
             # Step 3: Check momentum pattern (80+ score)
@@ -363,9 +374,16 @@ class MomentumBot:
                 logger.debug(
                     f"❌ {token_data['symbol']} - momentum score {momentum_result['score']}/100"
                 )
-                self.data_logger.log_rejection(
-                    token_address, "MOMENTUM_FAIL", f"Score {momentum_result['score']}/100"
-                )
+                # Log with FULL token data + momentum scores
+                token_data["rejection_stage"] = "MOMENTUM"
+                token_data["rejection_reason"] = f"Score {momentum_result['score']}/100 (need 80+)"
+                token_data["momentum_score"] = momentum_result["score"]
+                token_data["macd_score"] = momentum_result.get("macd_score", 0)
+                token_data["volume_score"] = momentum_result.get("volume_score", 0)
+                token_data["rsi_score"] = momentum_result.get("rsi_score", 0)
+                token_data["pullback_score"] = momentum_result.get("pullback_score", 0)
+                token_data["data_source"] = "dexscreener+indicators"
+                self.data_logger.log_rejected(token_data)
                 return False
 
             # Step 4: Check trend confirmation
@@ -373,9 +391,11 @@ class MomentumBot:
 
             if not trend_result["confirmed"]:
                 logger.debug(f"❌ {token_data['symbol']} - trend not confirmed")
-                self.data_logger.log_rejection(
-                    token_address, "TREND_FAIL", trend_result["reason"]
-                )
+                # Log with FULL token data
+                token_data["rejection_stage"] = "TREND"
+                token_data["rejection_reason"] = trend_result["reason"]
+                token_data["data_source"] = "dexscreener+trend"
+                self.data_logger.log_rejected(token_data)
                 return False
 
             # Step 5: Check anti-FOMO
@@ -383,9 +403,11 @@ class MomentumBot:
 
             if fomo_result["wait"]:
                 logger.debug(f"❌ {token_data['symbol']} - FOMO detected: {fomo_result['reason']}")
-                self.data_logger.log_rejection(
-                    token_address, "FOMO_BLOCK", fomo_result["reason"]
-                )
+                # Log with FULL token data
+                token_data["rejection_stage"] = "FOMO"
+                token_data["rejection_reason"] = fomo_result["reason"]
+                token_data["data_source"] = "dexscreener+fomo_filter"
+                self.data_logger.log_rejected(token_data)
                 return False
 
             # ALL CHECKS PASSED - ENTER POSITION!
