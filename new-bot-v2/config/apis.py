@@ -31,24 +31,32 @@ ALCHEMY_METHODS = {
 }
 
 # ============================================================================
-# JUPITER API (FREE)
+# JUPITER API V2 (FREE TIER - REQUIRES API KEY)
 # ============================================================================
 # Use: Token discovery, prices, market data, swaps
-# Limit: Unlimited (FREE!)
-# Cost: FREE
-# Docs: https://station.jup.ag/docs/apis/swap-api
+# Limit: 60 requests/min (FREE tier)
+# Cost: FREE (get API key at https://jup.ag)
+# Docs: https://dev.jup.ag/docs/token-api/v2
+# IMPORTANT: Token API V1 deprecated Aug 1, 2025. lite-api.jup.ag deprecated Jan 31, 2026!
 
+JUPITER_API_KEY = os.getenv("JUPITER_API_KEY", "")  # Optional - get free key from jup.ag
 JUPITER_BASE_URL = "https://quote-api.jup.ag/v6"
 JUPITER_PRICE_API = "https://price.jup.ag/v4"
+JUPITER_TOKEN_API_V2 = "https://api.jup.ag/tokens/v2"
 
 # Jupiter Endpoints
 JUPITER_ENDPOINTS = {
+    # Swap endpoints (no API key required)
     "quote": f"{JUPITER_BASE_URL}/quote",
     "swap": f"{JUPITER_BASE_URL}/swap",
     "swap_instructions": f"{JUPITER_BASE_URL}/swap-instructions",
     "price": f"{JUPITER_PRICE_API}/price",
-    "tokens": "https://token.jup.ag/all",  # All tokens list
-    "strict_tokens": "https://token.jup.ag/strict",  # Verified tokens only
+
+    # Token API V2 (requires API key)
+    "trending": f"{JUPITER_TOKEN_API_V2}/toptrending/5m",  # Top trending tokens (5m interval)
+    "recent": f"{JUPITER_TOKEN_API_V2}/recent",  # Recently created tokens
+    "verified": f"{JUPITER_TOKEN_API_V2}/tag?query=verified",  # Verified tokens only
+    "search": f"{JUPITER_TOKEN_API_V2}/search",  # Search tokens
 }
 
 # ============================================================================

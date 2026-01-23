@@ -2,17 +2,18 @@
 Token Discovery - Multi-Source Token Discovery Strategy
 
 Discovers tokens from multiple sources with fallbacks:
-1. Jupiter (verified and all tokens)
-2. DexScreener (trending and latest)
-3. Birdeye (future - Solana-specific)
+1. DexScreener (PRIMARY - trending and latest, no API key needed)
+2. Jupiter API V2 (OPTIONAL - trending/verified, requires free API key)
+3. Fallback list (hardcoded popular tokens)
 
 Strategy:
-- Try all sources in parallel
+- DexScreener is primary (always works, no API key)
+- Jupiter V2 is optional enhancement (requires free API key from https://jup.ag)
 - Combine and deduplicate results
-- Filter by minimum criteria
 - Return prioritized list
+- Use fallback list if all sources fail
 
-This ensures we always find tokens even if one source fails!
+This ensures we always find tokens even if APIs fail!
 """
 
 import logging
@@ -44,12 +45,11 @@ class TokenDiscovery:
         """
         Get tokens from multiple sources.
 
-        Strategy:
-        1. Get tokens from Jupiter (verified list)
-        2. Get trending from DexScreener
-        3. Get latest from DexScreener
-        4. Combine and deduplicate
-        5. Return up to limit
+        Priority order:
+        1. DexScreener trending (PRIMARY - no API key needed)
+        2. DexScreener latest (PRIMARY - no API key needed)
+        3. Jupiter trending/verified (OPTIONAL - requires API key)
+        4. Fallback list (if all fail)
 
         Args:
             limit: Maximum tokens to return
@@ -64,23 +64,9 @@ class TokenDiscovery:
 
             all_tokens: Set[str] = set()
 
-            # Source 1: Jupiter token list
+            # Source 1: DexScreener trending (PRIMARY)
             try:
-                logger.debug("Fetching from Jupiter...")
-                jupiter_tokens = await self.jupiter.get_trending_tokens(limit)
-
-                if jupiter_tokens:
-                    all_tokens.update(jupiter_tokens)
-                    logger.info(f"✅ Jupiter: {len(jupiter_tokens)} tokens")
-                else:
-                    logger.warning("⚠️ Jupiter: No tokens returned")
-
-            except Exception as e:
-                logger.warning(f"⚠️ Jupiter failed: {e}")
-
-            # Source 2: DexScreener trending
-            try:
-                logger.debug("Fetching trending from DexScreener...")
+                logger.debug("Fetching trending from DexScreener (PRIMARY)...")
                 dex_trending = await self.dexscreener.get_trending_tokens_async(limit)
 
                 if dex_trending:
@@ -92,9 +78,9 @@ class TokenDiscovery:
             except Exception as e:
                 logger.warning(f"⚠️ DexScreener trending failed: {e}")
 
-            # Source 3: DexScreener latest
+            # Source 2: DexScreener latest (PRIMARY)
             try:
-                logger.debug("Fetching latest from DexScreener...")
+                logger.debug("Fetching latest from DexScreener (PRIMARY)...")
                 dex_latest = self.dexscreener.get_latest_tokens(limit // 2)  # Get fewer latest
 
                 if dex_latest:
@@ -105,6 +91,20 @@ class TokenDiscovery:
 
             except Exception as e:
                 logger.warning(f"⚠️ DexScreener latest failed: {e}")
+
+            # Source 3: Jupiter trending (OPTIONAL - requires API key)
+            try:
+                logger.debug("Fetching from Jupiter (OPTIONAL)...")
+                jupiter_tokens = await self.jupiter.get_trending_tokens(limit)
+
+                if jupiter_tokens:
+                    all_tokens.update(jupiter_tokens)
+                    logger.info(f"✅ Jupiter (trending): {len(jupiter_tokens)} tokens")
+                else:
+                    logger.debug("ℹ️ Jupiter: No tokens (API key not configured or no data)")
+
+            except Exception as e:
+                logger.debug(f"ℹ️ Jupiter skipped: {e}")
 
             # Convert to list and limit
             token_list = list(all_tokens)[:limit]
@@ -124,7 +124,8 @@ class TokenDiscovery:
 
         except Exception as e:
             logger.error(f"Error in token discovery: {e}", exc_info=True)
-            return []
+            # Return fallback on error
+            return get_fallback_tokens(limit)
 
     async def get_tokens_by_source(self, source: str, limit: int = 50) -> List[str]:
         """

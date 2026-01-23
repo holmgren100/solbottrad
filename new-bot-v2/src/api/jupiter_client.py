@@ -18,6 +18,7 @@ import time
 
 from config.apis import (
     JUPITER_ENDPOINTS,
+    JUPITER_API_KEY,
     API_TIMEOUT_SECONDS,
     API_MAX_RETRIES,
     API_RETRY_DELAY,
@@ -40,31 +41,40 @@ class JupiterClient:
         self.timeout = API_TIMEOUT_SECONDS
         self.max_retries = API_MAX_RETRIES
         self.retry_delay = API_RETRY_DELAY
+        self.api_key = JUPITER_API_KEY
 
-        # Token discovery categories (rotate through these)
-        self.categories = [
-            'strict',  # Verified tokens
-            'all'      # All tokens
-        ]
-        self.current_category_index = 0
+        # Check if API key is configured
+        self.has_api_key = bool(self.api_key)
+        if not self.has_api_key:
+            logger.warning(
+                "Jupiter API key not configured. Token discovery will be disabled. "
+                "Get free API key at https://jup.ag and set JUPITER_API_KEY in .env"
+            )
 
-    def _make_request(self, url: str, params: Optional[Dict] = None) -> Optional[Dict]:
+    def _make_request(self, url: str, params: Optional[Dict] = None, use_api_key: bool = False) -> Optional[Dict]:
         """
         Make HTTP request to Jupiter with retries.
 
         Args:
             url: API endpoint URL
             params: Query parameters
+            use_api_key: Whether to include API key header (for Token API V2)
 
         Returns:
             Response data or None on failure
         """
         for attempt in range(self.max_retries):
             try:
+                headers = DEFAULT_HEADERS.copy()
+
+                # Add API key if needed (Token API V2)
+                if use_api_key and self.has_api_key:
+                    headers['x-api-key'] = self.api_key
+
                 response = requests.get(
                     url,
                     params=params,
-                    headers=DEFAULT_HEADERS,
+                    headers=headers,
                     timeout=self.timeout
                 )
 
@@ -291,53 +301,43 @@ class JupiterClient:
             logger.error(f"Error getting swap transaction: {e}")
             return None
 
-    def get_all_tokens(self, strict_only: bool = False) -> Optional[List[Dict]]:
+
+    def find_token_by_symbol(self, symbol: str) -> Optional[str]:
         """
-        Get list of all tokens available on Jupiter.
+        Find token address by symbol using search endpoint.
 
-        Args:
-            strict_only: If True, only return verified tokens
-
-        Returns:
-            List of token info dicts or None on failure
-        """
-        try:
-            url = self.endpoints["strict_tokens"] if strict_only else self.endpoints["tokens"]
-            result = self._make_request(url)
-
-            if result and isinstance(result, list):
-                logger.info(f"Loaded {len(result)} tokens from Jupiter")
-                return result
-
-            logger.warning("Failed to load token list")
-            return None
-
-        except Exception as e:
-            logger.error(f"Error getting token list: {e}")
-            return None
-
-    def find_token_by_symbol(self, symbol: str) -> Optional[Dict]:
-        """
-        Find token by symbol.
+        REQUIRES API KEY! Set JUPITER_API_KEY in .env (free at https://jup.ag)
 
         Args:
             symbol: Token symbol (e.g., "BONK")
 
         Returns:
-            Token info dict or None if not found
+            Token mint address or None if not found
         """
-        try:
-            tokens = self.get_all_tokens(strict_only=True)
+        if not self.has_api_key:
+            logger.debug("Jupiter API key not configured - cannot search by symbol")
+            return None
 
-            if not tokens:
+        try:
+            # Use Token API V2 search endpoint
+            url = self.endpoints["search"]
+            params = {"query": symbol}
+
+            result = self._make_request(url, params=params, use_api_key=True)
+
+            if not result:
+                logger.warning(f"Token not found: {symbol}")
                 return None
 
-            # Search for matching symbol (case-insensitive)
-            symbol_upper = symbol.upper()
-            for token in tokens:
-                if token.get("symbol", "").upper() == symbol_upper:
-                    logger.debug(f"Found token: {token}")
-                    return token
+            # Extract first matching token
+            tokens_data = result.get("data", result)
+
+            if isinstance(tokens_data, list) and len(tokens_data) > 0:
+                token = tokens_data[0]
+                mint = token.get("mint") or token.get("address")
+                if mint:
+                    logger.debug(f"Found token {symbol}: {mint}")
+                    return mint
 
             logger.warning(f"Token not found: {symbol}")
             return None
@@ -378,81 +378,101 @@ class JupiterClient:
 
     def get_all_tokens(self, limit: int = 100) -> List[str]:
         """
-        Get list of all tokens from Jupiter.
+        Get verified tokens from Jupiter Token API V2.
 
-        Uses rotating category for variety:
-        - strict: Verified tokens only
-        - all: All tokens (includes new/unverified)
+        REQUIRES API KEY! Set JUPITER_API_KEY in .env (free at https://jup.ag)
 
         Args:
             limit: Maximum tokens to return
 
         Returns:
-            List of token addresses
+            List of token addresses (empty if no API key)
         """
+        if not self.has_api_key:
+            logger.debug("Jupiter API key not configured - skipping")
+            return []
+
         try:
-            # Get token list from Jupiter
-            # URL: https://token.jup.ag/strict or https://token.jup.ag/all
-            category = self._get_next_category()
-            url = f"https://token.jup.ag/{category}"
+            # Use Token API V2: /tag?query=verified
+            url = self.endpoints["verified"]
+            logger.debug("Fetching verified tokens from Jupiter API V2...")
 
-            logger.debug(f"Fetching tokens from Jupiter ({category} list)...")
+            result = self._make_request(url, use_api_key=True)
 
-            response = requests.get(url, timeout=self.timeout)
-
-            if response.status_code != 200:
-                logger.warning(f"Jupiter token list failed: {response.status_code}")
+            if not result:
+                logger.warning("No response from Jupiter Token API V2")
                 return []
 
-            tokens_data = response.json()
-
-            if not tokens_data:
-                logger.warning("No tokens in Jupiter list")
-                return []
-
-            # Extract token addresses
+            # Extract mint addresses from response
             token_addresses = []
 
-            for token in tokens_data[:limit]:
-                if isinstance(token, dict):
-                    address = token.get("address")
-                    if address:
-                        token_addresses.append(address)
+            # Response format: { "data": [{"mint": "..."}, ...] }
+            tokens_data = result.get("data", result)  # Handle different response formats
 
-            logger.info(f"✅ Jupiter ({category}): {len(token_addresses)} tokens")
+            if isinstance(tokens_data, list):
+                for token in tokens_data[:limit]:
+                    if isinstance(token, dict):
+                        # Try different field names
+                        mint = token.get("mint") or token.get("address")
+                        if mint:
+                            token_addresses.append(mint)
 
+            logger.info(f"✅ Jupiter (verified): {len(token_addresses)} tokens")
             return token_addresses
 
         except Exception as e:
             logger.error(f"Error getting Jupiter token list: {e}")
             return []
 
-    def _get_next_category(self) -> str:
-        """
-        Get next category in rotation.
-
-        Returns:
-            Category name ('strict' or 'all')
-        """
-        category = self.categories[self.current_category_index]
-        self.current_category_index = (self.current_category_index + 1) % len(self.categories)
-        return category
-
     async def get_trending_tokens(self, limit: int = 50) -> List[str]:
         """
-        Get trending tokens from Jupiter.
+        Get trending tokens from Jupiter Token API V2.
 
-        This is an async wrapper for compatibility with main bot loop.
+        Uses toptrending endpoint with 5-minute interval.
+        REQUIRES API KEY! Set JUPITER_API_KEY in .env (free at https://jup.ag)
 
         Args:
             limit: Maximum tokens to return
 
         Returns:
-            List of token addresses
+            List of token addresses (empty if no API key)
         """
-        # For now, get all tokens (Jupiter doesn't have a "trending" endpoint)
-        # In future, can combine with volume/price change data
-        return self.get_all_tokens(limit=limit)
+        if not self.has_api_key:
+            logger.debug("Jupiter API key not configured - skipping")
+            return []
+
+        try:
+            # Use Token API V2: /toptrending/5m
+            url = self.endpoints["trending"]
+            params = {"limit": limit} if limit != 50 else None  # 50 is default
+
+            logger.debug("Fetching trending tokens from Jupiter API V2...")
+
+            result = self._make_request(url, params=params, use_api_key=True)
+
+            if not result:
+                logger.warning("No response from Jupiter trending API")
+                return []
+
+            # Extract mint addresses
+            token_addresses = []
+
+            # Response format may vary - handle both list and dict
+            tokens_data = result.get("data", result)
+
+            if isinstance(tokens_data, list):
+                for token in tokens_data[:limit]:
+                    if isinstance(token, dict):
+                        mint = token.get("mint") or token.get("address")
+                        if mint:
+                            token_addresses.append(mint)
+
+            logger.info(f"✅ Jupiter (trending): {len(token_addresses)} tokens")
+            return token_addresses
+
+        except Exception as e:
+            logger.error(f"Error getting trending tokens: {e}")
+            return []
 
 
 # Example usage
