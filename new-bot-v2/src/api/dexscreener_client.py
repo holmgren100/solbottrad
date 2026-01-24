@@ -132,9 +132,21 @@ class DexScreenerClient:
             # Get the main/most liquid pair (usually first one)
             main_pair = result["pairs"][0]
 
+            # Extract base token info (the token we're querying)
+            base_token = main_pair.get("baseToken", {})
+            quote_token = main_pair.get("quoteToken", {})
+
+            # Determine which token is ours (not SOL/USDC)
+            if base_token.get("address", "").lower() == token_address.lower():
+                our_token = base_token
+            else:
+                our_token = quote_token
+
             # Extract data
             token_data = {
                 "address": token_address,
+                "symbol": our_token.get("symbol", "UNKNOWN"),
+                "name": our_token.get("name", "UNKNOWN"),
                 "price": float(main_pair.get("priceUsd", 0)),
                 "volume_5m": float(main_pair.get("volume", {}).get("m5", 0)),
                 "volume_1h": float(main_pair.get("volume", {}).get("h1", 0)),
@@ -142,11 +154,14 @@ class DexScreenerClient:
                 "liquidity": float(main_pair.get("liquidity", {}).get("usd", 0)),
                 "buys": int(main_pair.get("txns", {}).get("m5", {}).get("buys", 0)),
                 "sells": int(main_pair.get("txns", {}).get("m5", {}).get("sells", 0)),
+                "buys_1h": int(main_pair.get("txns", {}).get("h1", {}).get("buys", 0)),
+                "sells_1h": int(main_pair.get("txns", {}).get("h1", {}).get("sells", 0)),
                 "price_change_5m": float(main_pair.get("priceChange", {}).get("m5", 0)),
                 "price_change_1h": float(main_pair.get("priceChange", {}).get("h1", 0)),
                 "price_change_24h": float(main_pair.get("priceChange", {}).get("h24", 0)),
                 "pair_address": main_pair.get("pairAddress", ""),
                 "dex": main_pair.get("dexId", ""),
+                "market_cap_usd": float(main_pair.get("fdv", 0)),  # FDV = Fully Diluted Valuation
                 "pairs": result["pairs"]  # All pairs for reference
             }
 

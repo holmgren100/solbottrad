@@ -15,6 +15,7 @@ from typing import Dict, List, Optional
 from src.api.alchemy_client import AlchemyClient
 from src.api.jupiter_client import JupiterClient
 from src.api.dexscreener_client import DexScreenerClient
+from src.api.birdeye_client import BirdeyeClient
 from src.indicators.macd import MACDCalculator
 from src.indicators.rsi import RSICalculator
 from src.indicators.volume import VolumeAnalyzer
@@ -34,6 +35,7 @@ class TokenDataGatherer:
         self.alchemy_client = AlchemyClient()
         self.jupiter_client = JupiterClient()
         self.dexscreener_client = DexScreenerClient()
+        self.birdeye_client = BirdeyeClient()
 
         self.macd_calculator = MACDCalculator()
         self.rsi_calculator = RSICalculator()
@@ -90,13 +92,26 @@ class TokenDataGatherer:
             data["volume_5m"] = dex_data.get("volume_5m", 0)
             data["volume_1h"] = dex_data.get("volume_1h", 0)
             data["volume_24h"] = dex_data.get("volume_24h", 0)
+            data["price_change_5m"] = dex_data.get("price_change_5m", 0)
+            data["price_change_1h"] = dex_data.get("price_change_1h", 0)
+            data["buys_5m"] = dex_data.get("buys", 0)
+            data["sells_5m"] = dex_data.get("sells", 0)
+            data["market_cap_usd"] = dex_data.get("market_cap_usd", 0)
 
-            # Get candles for technical analysis
-            candles = dex_data.get("candles", [])
-            if candles:
+            # Get candles for technical analysis from Birdeye (more reliable than DexScreener)
+            logger.debug(f"Fetching OHLCV candles from Birdeye for {token_address[:8]}...")
+            candles = self.birdeye_client.get_token_ohlcv(token_address, timeframe="15m", limit=50)
+
+            if candles and len(candles) > 0:
                 data["candles"] = candles
                 data["prices"] = [c.get("close", 0) for c in candles]
                 data["volumes"] = [c.get("volume", 0) for c in candles]
+                logger.debug(f"Got {len(candles)} candles from Birdeye")
+            else:
+                logger.warning(f"No candles from Birdeye - indicators will fail")
+                data["candles"] = []
+                data["prices"] = []
+                data["volumes"] = []
 
             # 2. Get safety checks from Alchemy
             try:

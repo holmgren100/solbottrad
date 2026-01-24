@@ -175,6 +175,73 @@ class BirdeyeClient:
             logger.error(f"Error getting token price from Birdeye: {e}")
             return None
 
+    def get_token_ohlcv(
+        self,
+        token_address: str,
+        timeframe: str = "15m",
+        limit: int = 50
+    ) -> Optional[List[Dict]]:
+        """
+        Get OHLCV candle data for a token from Birdeye.
+
+        Args:
+            token_address: Token mint address
+            timeframe: Candle timeframe ("1m", "3m", "5m", "15m", "30m", "1H", "2H", "4H", "6H", "8H", "12H", "1D")
+            limit: Number of candles to return (max 1000)
+
+        Returns:
+            List of candles:
+            [
+                {
+                    "timestamp": int,
+                    "open": float,
+                    "high": float,
+                    "low": float,
+                    "close": float,
+                    "volume": float
+                },
+                ...
+            ]
+            or None on failure
+        """
+        if not self.api_key:
+            return None
+
+        try:
+            params = {
+                "address": token_address,
+                "type": timeframe,
+                "time_from": int(time.time()) - (limit * 900),  # Approximate (15m candles)
+                "time_to": int(time.time())
+            }
+
+            result = self._make_request(self.endpoints["ohlcv"], params=params)
+
+            if not result or "data" not in result:
+                logger.debug(f"No OHLCV data from Birdeye for {token_address}")
+                return None
+
+            # Parse Birdeye OHLCV format
+            ohlcv_data = result["data"].get("items", [])
+
+            candles = []
+            for item in ohlcv_data:
+                candles.append({
+                    "timestamp": item.get("unixTime", 0),
+                    "open": float(item.get("o", 0)),
+                    "high": float(item.get("h", 0)),
+                    "low": float(item.get("l", 0)),
+                    "close": float(item.get("c", 0)),
+                    "volume": float(item.get("v", 0))
+                })
+
+            logger.debug(f"Got {len(candles)} candles from Birdeye for {token_address}")
+            return candles
+
+        except Exception as e:
+            logger.error(f"Error getting OHLCV from Birdeye: {e}")
+            return None
+
     def get_token_security(self, token_address: str) -> Optional[Dict]:
         """
         Get security info for a token.
