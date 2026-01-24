@@ -18,7 +18,7 @@ from typing import Dict, List, Optional
 # Phase 1: Entry Logic
 from src.api.jupiter_client import JupiterClient
 from src.api.dexscreener_client import DexScreenerClient
-from src.strategies.momentum_entry import MomentumEntry
+from src.strategies.momentum_entry_simple import SimpleMomentumEntry
 from src.strategies.trend_confirmation import TrendConfirmation
 from src.strategies.anti_fomo import AntiFOMO
 from src.strategies.token_discovery import TokenDiscovery
@@ -110,7 +110,7 @@ class MomentumBot:
         self.jupiter_client = JupiterClient()
         self.dexscreener_client = DexScreenerClient()
         self.token_discovery = TokenDiscovery()
-        self.momentum_entry = MomentumEntry()
+        self.momentum_entry = SimpleMomentumEntry()
         self.trend_confirmation = TrendConfirmation()
         self.anti_fomo = AntiFOMO()
         self.safety_check = SafetyCheck()
