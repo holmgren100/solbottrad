@@ -1,0 +1,19 @@
+=== DATA FOR GEMINI ANALYSIS ===
+Generated: Mon Jan 12 06:14:48 UTC 2026
+Log file: /home/user/solbottrad/bot_new.log
+
+=== BOT STATUS ===
+⚠️  Bot appears STOPPED (log >5 min old)
+❌ Network issues detected (9 errors)
+   Bot cannot reach trading APIs - no trades possible
+
+=== TRADES DATA (Last 100) ===
+⚠️  No trades yet - ml_trades.csv not found
+   This means the bot hasn't completed any trades yet
+
+
+=== REJECTED TOKENS (Last 50) ===
+No rejected data yet
+
+
+=== CURRENT BOT STATUS FROM LOGS ===

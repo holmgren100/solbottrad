@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 Solana Trading Bot Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header .subtitle {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-card h3 {
+            color: #666;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-card .delta {
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .positive {
+            color: #10b981;
+        }
+
+        .negative {
+            color: #ef4444;
+        }
+
+        .section {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .section h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .positions-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        .positions-table th {
+            background: #f3f4f6;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #666;
+        }
+
+        .positions-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .positions-table tr:hover {
+            background: #f9fafb;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .badge-buy {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-sell {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .activity-item {
+            padding: 15px;
+            background: #f9fafb;
+            border-left: 4px solid #667eea;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .activity-item .time {
+            color: #666;
+            font-size: 0.85em;
+        }
+
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 1em;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .footer {
+            text-align: center;
+            color: white;
+            margin-top: 30px;
+            padding: 20px;
+        }
+
+        .no-data {
+            text-align: center;
+            color: #666;
+            padding: 40px;
+            font-style: italic;
+        }
+
+        .update-time {
+            text-align: center;
+            color: white;
+            margin: 20px 0;
+            font-size: 0.9em;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            background: #d1fae5;
+            color: #065f46;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Solana Trading Bot</h1>
+            <p class="subtitle">Real-time Portfolio Dashboard</p>
+            <div style="margin-top: 15px;">
+                <span class="status-badge" id="statusBadge">● Live</span>
+            </div>
+        </div>
+
+        <div class="update-time">
+            <span id="lastUpdate">Last updated: Loading...</span> |
+            <button class="refresh-btn" onclick="loadData()">🔄 Refresh Data</button>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>💰 Portfolio Value</h3>
+                <div class="value" id="portfolioValue">$0.00</div>
+                <div class="delta" id="portfolioDelta">Loading...</div>
+            </div>
+            <div class="stat-card">
+                <h3>💵 Cash Available</h3>
+                <div class="value" id="cashValue">$0.00</div>
+            </div>
+            <div class="stat-card">
+                <h3>📊 Invested</h3>
+                <div class="value" id="investedValue">$0.00</div>
+            </div>
+            <div class="stat-card">
+                <h3>📈 Open Positions</h3>
+                <div class="value" id="positionsCount">0</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📈 Open Positions</h2>
+            <div id="positionsContent">
+                <p class="no-data">Loading positions...</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📜 Recent Activity</h2>
+            <div id="activityContent">
+                <p class="no-data">Loading activity...</p>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>💡 <strong>Tip:</strong> Use Telegram commands for real-time control!</p>
+            <p style="margin-top: 10px; font-size: 0.9em;">
+                /status - Portfolio | /pause - Pause trading | /stop_loss 15 - Adjust settings
+            </p>
+        </div>
+    </div>
+
+    <script>
+        async function loadData() {
+            try {
+                // Update timestamp
+                const now = new Date();
+                document.getElementById('lastUpdate').textContent =
+                    `Last updated: ${now.toLocaleTimeString()}`;
+
+                // Fetch portfolio data from Flask API
+                const response = await fetch('/api/portfolio');
+                const data = await response.json();
+
+                // Update stats
+                document.getElementById('portfolioValue').textContent =
+                    `$${data.portfolio_value.toFixed(2)}`;
+
+                const deltaClass = data.total_pnl >= 0 ? 'positive' : 'negative';
+                const deltaSign = data.total_pnl >= 0 ? '+' : '';
+                document.getElementById('portfolioDelta').innerHTML =
+                    `<span class="${deltaClass}">${deltaSign}$${data.total_pnl.toFixed(2)} (${deltaSign}${data.total_return_pct.toFixed(2)}%)</span>`;
+
+                document.getElementById('cashValue').textContent =
+                    `$${data.cash.toFixed(2)}`;
+
+                document.getElementById('investedValue').textContent =
+                    `$${data.invested.toFixed(2)}`;
+
+                document.getElementById('positionsCount').textContent = data.positions_count;
+
+                // Update positions table
+                const positionsDiv = document.getElementById('positionsContent');
+                if (data.positions && data.positions.length > 0) {
+                    let tableHTML = `
+                        <table class="positions-table">
+                            <thead>
+                                <tr>
+                                    <th>Token</th>
+                                    <th>Entry Price</th>
+                                    <th>Current Price</th>
+                                    <th>Size</th>
+                                    <th>P&L</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    `;
+
+                    data.positions.forEach(pos => {
+                        const pnlClass = pos.pnl_pct > 0 ? 'positive' : pos.pnl_pct < 0 ? 'negative' : '';
+                        const pnlSign = pos.pnl_pct > 0 ? '+' : '';
+                        tableHTML += `
+                            <tr>
+                                <td><strong>${pos.token}</strong></td>
+                                <td>$${pos.entry_price.toFixed(8)}</td>
+                                <td>$${pos.current_price.toFixed(8)}</td>
+                                <td>$${pos.size.toFixed(2)}</td>
+                                <td class="${pnlClass}">${pnlSign}${pos.pnl_pct.toFixed(2)}%</td>
+                            </tr>
+                        `;
+                    });
+
+                    tableHTML += `
+                            </tbody>
+                        </table>
+                    `;
+                    positionsDiv.innerHTML = tableHTML;
+                } else {
+                    positionsDiv.innerHTML = '<p class="no-data">No open positions. Bot will open positions when opportunities are found.</p>';
+                }
+
+                // Update recent activity
+                const activityDiv = document.getElementById('activityContent');
+                if (data.recent_trades && data.recent_trades.length > 0) {
+                    let activityHTML = '';
+                    data.recent_trades.forEach(trade => {
+                        const badgeClass = trade.action === 'BUY' ? 'badge-buy' : 'badge-sell';
+                        activityHTML += `
+                            <div class="activity-item">
+                                <div>
+                                    <span class="badge ${badgeClass}">${trade.action}</span>
+                                    <strong style="margin-left: 10px;">${trade.token}</strong>
+                                    <span style="margin-left: 10px; color: #666;">${trade.price}</span>
+                                </div>
+                                <div class="time">${trade.timestamp}</div>
+                            </div>
+                        `;
+                    });
+                    activityDiv.innerHTML = activityHTML;
+                } else {
+                    activityDiv.innerHTML = '<p class="no-data">No trading activity yet.</p>';
+                }
+
+                // Update status badge
+                document.getElementById('statusBadge').textContent = '● Live';
+                document.getElementById('statusBadge').style.background = '#d1fae5';
+                document.getElementById('statusBadge').style.color = '#065f46';
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.getElementById('statusBadge').textContent = '● Offline';
+                document.getElementById('statusBadge').style.background = '#fee2e2';
+                document.getElementById('statusBadge').style.color = '#991b1b';
+            }
+        }
+
+        // Auto-refresh every 10 seconds
+        setInterval(loadData, 10000);
+
+        // Load on page load
+        loadData();
+    </script>
+</body>
+</html>

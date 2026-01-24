@@ -1,0 +1,37 @@
+=== RECENT ERRORS/WARNINGS ===
+Log file: /home/user/solbottrad/bot_new.log
+
+[2026-01-06 12:06:01] [ERROR] [trading_bot.api_clients] Error fetching trending tokens from Jupiter: Cannot connect to host lite-api.jup.ag:443 ssl:default [Temporary failure in name resolution]
+[2026-01-06 12:06:01] [ERROR] [trading_bot.api_clients] Error fetching latest tokens: Cannot connect to host api.dexscreener.com:443 ssl:default [Temporary failure in name resolution]
+[2026-01-06 12:06:01] [ERROR] [trading_bot.api_clients] CoinGecko error: Cannot connect to host api.coingecko.com:443 ssl:default [Temporary failure in name resolution]
+[2026-01-06 12:06:01] [WARNING] [trading_bot.scanner] ❌ No tokens found from any source
+[2026-01-06 12:08:01] [ERROR] [trading_bot.api_clients] Error fetching trending tokens from Jupiter: Cannot connect to host lite-api.jup.ag:443 ssl:default [Temporary failure in name resolution]
+[2026-01-06 12:08:01] [ERROR] [trading_bot.api_clients] Error fetching latest tokens: Cannot connect to host api.dexscreener.com:443 ssl:default [Temporary failure in name resolution]
+[2026-01-06 12:08:01] [ERROR] [trading_bot.api_clients] CoinGecko error: Cannot connect to host api.coingecko.com:443 ssl:default [Temporary failure in name resolution]
+[2026-01-06 12:08:01] [WARNING] [trading_bot.scanner] ❌ No tokens found from any source
+[2026-01-06 12:10:01] [ERROR] [trading_bot.api_clients] Error fetching trending tokens from Jupiter: Cannot connect to host lite-api.jup.ag:443 ssl:default [Temporary failure in name resolution]
+[2026-01-06 12:10:01] [ERROR] [trading_bot.api_clients] Error fetching latest tokens: Cannot connect to host api.dexscreener.com:443 ssl:default [Temporary failure in name resolution]
+[2026-01-06 12:10:01] [ERROR] [trading_bot.api_clients] CoinGecko error: Cannot connect to host api.coingecko.com:443 ssl:default [Temporary failure in name resolution]
+[2026-01-06 12:10:01] [WARNING] [trading_bot.scanner] ❌ No tokens found from any source
+
+=== RECENT TRADES ===
+No trading activity yet
+
+=== LATEST STATS ===
+
+=== NUCLEAR STOPS ===
+None yet
+
+=== STEP-UP TIERS ===
+None yet
+
+=== MOONSHOT EXCEPTIONS (APPROVED) ===
+None yet (waiting for token with LP burned 100%)
+
+=== MOONSHOT REJECTIONS (LP 0%) ===
+
+=== INCUBATOR ADDED ===
+None yet (criteria may be too strict)
+
+=== INCUBATOR TRIGGERS ===
+None yet (no tokens in incubator to trigger)
