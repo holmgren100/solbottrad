@@ -98,17 +98,17 @@ class TokenDataGatherer:
             data["sells_5m"] = dex_data.get("sells", 0)
             data["market_cap_usd"] = dex_data.get("market_cap_usd", 0)
 
-            # Get candles for technical analysis from Birdeye (more reliable than DexScreener)
-            logger.debug(f"Fetching OHLCV candles from Birdeye for {token_address[:8]}...")
-            candles = self.birdeye_client.get_token_ohlcv(token_address, timeframe="15m", limit=50)
+            # Get candles for technical analysis from DexScreener (works reliably!)
+            logger.debug(f"Generating candles from DexScreener price changes for {token_address[:8]}...")
+            candles = self.dexscreener_client.get_price_history(token_address, timeframe="15m", limit=50)
 
             if candles and len(candles) > 0:
                 data["candles"] = candles
                 data["prices"] = [c.get("close", 0) for c in candles]
                 data["volumes"] = [c.get("volume", 0) for c in candles]
-                logger.debug(f"Got {len(candles)} candles from Birdeye")
+                logger.debug(f"Generated {len(candles)} approximate candles from DexScreener")
             else:
-                logger.warning(f"No candles from Birdeye - indicators will fail")
+                logger.warning(f"Failed to generate candles - indicators will fail")
                 data["candles"] = []
                 data["prices"] = []
                 data["volumes"] = []

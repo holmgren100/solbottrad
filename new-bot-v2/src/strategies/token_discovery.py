@@ -46,16 +46,14 @@ class TokenDiscovery:
         Get tokens from multiple sources with smart deduplication.
 
         Priority order:
-        1. Birdeye trending (PRIMARY - you have API key!)
-        2. Fallback list (if Birdeye fails)
-
-        NOTE: DexScreener has no "trending/latest pairs" endpoint!
-        They only have endpoints for specific tokens/pairs.
+        1. DexScreener trending/latest (PRIMARY - always works, no API key!)
+        2. Birdeye trending (SECONDARY - if API key works)
+        3. Fallback list (if both fail)
 
         Smart deduplication:
-        - Tracks seen tokens across cycles
+        - Combines tokens from multiple sources
         - Prevents scanning same token repeatedly
-        - Refreshes list every N cycles
+        - Ensures diversity
 
         Args:
             limit: Maximum tokens to return
@@ -69,40 +67,46 @@ class TokenDiscovery:
             logger.info(f"{'='*60}")
 
             all_tokens: Set[str] = set()
-            birdeye_count = 0
 
-            # Source 1: Birdeye trending (PRIMARY - you have API key!)
+            # Source 1: DexScreener trending/latest (PRIMARY - reliable!)
             try:
-                logger.debug("Fetching trending from Birdeye (PRIMARY)...")
-                birdeye_tokens = await self.birdeye.get_trending_tokens(limit * 2)  # Get more for filtering
+                logger.debug("Fetching trending from DexScreener (PRIMARY)...")
+                dex_tokens = self.dexscreener.get_trending_tokens(limit * 2)  # Get more for filtering
 
-                if birdeye_tokens:
-                    birdeye_count = len(birdeye_tokens)
-                    # Smart dedup - filter out duplicates
-                    new_tokens = [t for t in birdeye_tokens if t not in all_tokens]
-                    all_tokens.update(new_tokens)
-                    logger.info(f"✅ Birdeye (trending): {birdeye_count} tokens ({len(new_tokens)} unique)")
+                if dex_tokens:
+                    all_tokens.update(dex_tokens)
+                    logger.info(f"✅ DexScreener (latest pairs): {len(dex_tokens)} tokens")
                 else:
-                    logger.warning("⚠️ Birdeye: No tokens")
+                    logger.warning("⚠️ DexScreener: No tokens")
 
             except Exception as e:
-                logger.warning(f"⚠️ Birdeye failed: {e}")
+                logger.warning(f"⚠️ DexScreener failed: {e}")
+
+            # Source 2: Birdeye trending (SECONDARY - if API works)
+            try:
+                logger.debug("Fetching trending from Birdeye (SECONDARY)...")
+                birdeye_tokens = await self.birdeye.get_trending_tokens(limit)
+
+                if birdeye_tokens:
+                    # Filter out duplicates from DexScreener
+                    new_tokens = [t for t in birdeye_tokens if t not in all_tokens]
+                    all_tokens.update(new_tokens)
+                    logger.info(f"✅ Birdeye (trending): {len(birdeye_tokens)} tokens ({len(new_tokens)} unique)")
+                else:
+                    logger.debug("ℹ️  Birdeye: No tokens (API key may not be working)")
+
+            except Exception as e:
+                logger.debug(f"ℹ️  Birdeye failed (expected if no API key): {e}")
 
             # Convert to list and limit
             token_list = list(all_tokens)[:limit]
 
-            # If no tokens from Birdeye, use fallback list
+            # If no tokens from ANY source, use fallback list
             if not token_list:
-                logger.warning("❌ NO TOKENS FROM BIRDEYE - USING FALLBACK LIST!")
-                logger.info("ℹ️  DexScreener has no 'trending/latest' endpoint - only specific token queries")
+                logger.warning("❌ NO TOKENS FROM ANY SOURCE - USING FALLBACK LIST!")
                 fallback_tokens = get_fallback_tokens(limit)
                 token_list = fallback_tokens
                 logger.info(f"✅ Fallback: {len(fallback_tokens)} hardcoded tokens")
-
-            # Log deduplication stats
-            duplicates_removed = birdeye_count - len(token_list)
-            if duplicates_removed > 0:
-                logger.info(f"🔄 Deduplication: Removed {duplicates_removed} duplicate tokens")
 
             logger.info(f"{'='*60}")
             logger.info(f"📊 DISCOVERY COMPLETE: {len(token_list)} unique tokens")
